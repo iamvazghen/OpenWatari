@@ -7,7 +7,8 @@ ISO-8601; the brain's timezone is the owner's configured timezone. Degrades to a
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from jarvis.brain.google import api_get, api_post, configured
 from jarvis.brain.tools.base import not_configured, tool_error
@@ -18,9 +19,22 @@ _NEEDS = "your Google login — run bench/google_login.py once (JARVIS_GOOGLE_* 
 
 
 def _fmt_when(ev: dict) -> str:
+    """A speakable time. The old version sliced the raw ISO string to 16 chars, which cut the clock in
+    half — '2026-07-31T14:00:00' was read aloud as '2026-07-31 at 14'."""
     start = ev.get("start", {})
     when = start.get("dateTime") or start.get("date") or ""
-    return when.replace("T", " at ")[:16] if when else "sometime"
+    if not when:
+        return "sometime"
+    try:
+        dt = datetime.fromisoformat(when)
+    except ValueError:
+        return when
+    if not start.get("dateTime"):          # all-day event: no clock to speak
+        return f"on {dt.strftime('%a %d %B')}"
+    today = datetime.now(dt.tzinfo).date() if dt.tzinfo else datetime.now().date()
+    delta = (dt.date() - today).days
+    day = {0: "today", 1: "tomorrow"}.get(delta) or f"on {dt.strftime('%a %d %B')}"
+    return f"{day} at {dt.strftime('%H:%M')}"
 
 
 async def list_events(args: dict) -> str:
@@ -34,13 +48,36 @@ async def list_events(args: dict) -> str:
         max_n = int(args.get("max") or 10)
     except (TypeError, ValueError):
         max_n = 10
-    now = datetime.now(timezone.utc)
+    # A specific day ("what's on tomorrow?", "am I free Friday?") needs its OWN window, in the owner's
+    # timezone. Without it the only expressible query was "the next N days from right now", so asking
+    # about tomorrow answered about today (verified live 2026-07-30) — the answer even said "today".
+    date_arg = (args.get("date") or "").strip()
+    day_label = ""
+    if date_arg:
+        try:
+            tz = ZoneInfo(settings.user_tz)
+            day = datetime.fromisoformat(date_arg).date()
+            start_dt = datetime.combine(day, time.min, tzinfo=tz)
+            end_dt = start_dt + timedelta(days=1)
+            today = datetime.now(tz).date()
+            day_label = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(
+                (day - today).days, day.strftime("%A %d %B"))
+        except ValueError:
+            return (f"I couldn't read '{date_arg}' as a date, sir — give me one like "
+                    f"{datetime.now(ZoneInfo(settings.user_tz)).date().isoformat()}.")
+    else:
+        start_dt = datetime.now(timezone.utc)
+        try:                       # a short "what's imminent" window, used by the prep signal
+            minutes = int(args.get("minutes") or 0)
+        except (TypeError, ValueError):
+            minutes = 0
+        end_dt = start_dt + (timedelta(minutes=minutes) if minutes > 0 else timedelta(days=days))
     try:
         data = await api_get(
             _CAL,
             params={
-                "timeMin": now.isoformat(),
-                "timeMax": (now + timedelta(days=days)).isoformat(),
+                "timeMin": start_dt.isoformat(),
+                "timeMax": end_dt.isoformat(),
                 "singleEvents": "true",
                 "orderBy": "startTime",
                 "maxResults": max_n,
@@ -48,12 +85,21 @@ async def list_events(args: dict) -> str:
         )
         events = data.get("items") or []
         if not events:
-            window = "today" if days <= 1 else f"the next {days} days"
+            window = day_label or ("today" if days <= 1 else f"the next {days} days")
             return f"Nothing on your calendar for {window}, sir."
         parts = [f"{ev.get('summary', '(busy)')} {_fmt_when(ev)}" for ev in events[:max_n]]
         return f"You have {len(parts)} event(s), sir: " + "; ".join(parts)
     except Exception as e:  # noqa: BLE001
         return tool_error("calendar read", e)
+
+
+def _rfc3339(value: str) -> str:
+    """Local ISO datetime -> the seconds-bearing form Google's API demands. Unparseable input is
+    passed through untouched so the API's own error still surfaces rather than a mangled value."""
+    try:
+        return datetime.fromisoformat(value.strip()).replace(microsecond=0).isoformat()
+    except (ValueError, AttributeError):
+        return value
 
 
 async def create_event(args: dict) -> str:
@@ -70,14 +116,30 @@ async def create_event(args: dict) -> str:
             end = (datetime.fromisoformat(start) + timedelta(hours=1)).isoformat()
         except ValueError:
             end = start
+    # Google rejects a dateTime without seconds with a bare "400 Bad Request" — and '2026-06-12T15:00'
+    # is exactly the shape an LLM produces (our own schema example showed it), so ordinary requests
+    # like "put gym in my calendar at three" failed every time. Normalise instead of relying on the
+    # model to get RFC3339 right.
+    start, end = _rfc3339(start), _rfc3339(end)
     try:
         body = {
             "summary": summary,
             "start": {"dateTime": start, "timeZone": settings.user_tz},
             "end": {"dateTime": end, "timeZone": settings.user_tz},
         }
-        await api_post(_CAL, body)
-        return f"Added '{summary}' to your calendar, sir, starting {start.replace('T', ' at ')}."
+        url = _CAL
+        if args.get("meet"):
+            # A Google Meet link rides the same calendar write — no separate Zoom/Meet integration
+            # needed for "schedule a call with X". conferenceDataVersion=1 activates creation.
+            import uuid
+            body["conferenceData"] = {"createRequest": {"requestId": uuid.uuid4().hex}}
+            url = _CAL + "?conferenceDataVersion=1"
+        created = await api_post(url, body)
+        note = f"Added '{summary}' to your calendar, sir, {_fmt_when({'start': {'dateTime': start}})}."
+        link = (created or {}).get("hangoutLink")
+        if link:
+            note += f" Meet link ready: {link}"
+        return note
     except Exception as e:  # noqa: BLE001
         return tool_error("calendar create", e)
 
@@ -124,12 +186,16 @@ SCHEMAS = [
         "function": {
             "name": "list_events",
             "description": (
-                "List upcoming Google Calendar events. Use for 'what's on today / this week / "
-                "what's my next meeting'. days=1 is today; max caps the count."
+                "List Google Calendar events. For ONE named day ('tomorrow', 'Friday', 'the 3rd') "
+                "pass date=YYYY-MM-DD — compute it from today yourself; do NOT use days for that, "
+                "which only looks forward from now and would answer about today. Use days for a "
+                "window: 'what's on this week' (days=7), 'my next meeting' (days=1)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "date": {"type": "string",
+                             "description": "A single day to read, ISO YYYY-MM-DD (owner's timezone)."},
                     "days": {"type": "integer", "description": "Look-ahead window in days (default 1)."},
                     "max": {"type": "integer", "description": "Max events to read (default 10)."},
                 },
@@ -143,7 +209,8 @@ SCHEMAS = [
             "name": "create_event",
             "description": (
                 "Create a Google Calendar event. Confirm the title and time with the owner first. "
-                "start/end are ISO-8601 local times (e.g. '2026-06-12T15:00'); end defaults to +1h."
+                "start/end are ISO-8601 local times (e.g. '2026-06-12T15:00'); end defaults to +1h. "
+                "Set meet=true to attach a Google Meet video link ('schedule a call with X')."
             ),
             "parameters": {
                 "type": "object",
@@ -151,6 +218,7 @@ SCHEMAS = [
                     "summary": {"type": "string", "description": "Event title."},
                     "start": {"type": "string", "description": "ISO-8601 start, e.g. 2026-06-12T15:00."},
                     "end": {"type": "string", "description": "ISO-8601 end (optional; defaults +1h)."},
+                    "meet": {"type": "boolean", "description": "Attach a Google Meet link."},
                 },
                 "required": ["summary", "start"],
             },

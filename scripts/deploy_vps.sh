@@ -23,10 +23,12 @@ echo "==> running the full verification suite (deploy gate)"
 # collects none of the main()-only ones). Subprocess exit codes + PASS/FAIL/SKIP classification.
 .venv/Scripts/python.exe bench/run_all_tests.py || { echo "TESTS FAILED — not deploying."; exit 1; }
 
-echo "==> syncing src/jarvis + skills + clients -> $VPS:$REMOTE (excludes pycache; never touches .env/secrets)"
-# scp the source tree + skill playbooks + web clients (iphone/hud served by the brain's HTTP sidecar).
-# .env, voiceprint, sessions live only on the target.
-tar --exclude='__pycache__' -czf - src/jarvis skills clients | ssh "$VPS" "tar -xzf - -C '$REMOTE'"
+echo "==> syncing src/jarvis + skills + clients + personality -> $VPS:$REMOTE (excludes pycache; never touches .env/secrets)"
+# scp the source tree + skill playbooks + web clients (iphone/hud served by the brain's HTTP sidecar)
+# + the persona files. personality/ was missing here, so every persona edit stayed on the laptop and
+# the VPS brain answered with a months-stale prompt — invisible while the edge ran its own local
+# brain, and wrong the moment it routes to the VPS. .env, voiceprint, sessions live only on the target.
+tar --exclude='__pycache__' -czf - src/jarvis skills clients personality | ssh "$VPS" "tar -xzf - -C '$REMOTE'"
 
 echo "==> restarting the brain + health check"
 ssh "$VPS" "systemctl --user restart jarvis-brain && sleep 5 && systemctl --user is-active jarvis-brain && curl -s localhost:8766/healthz"

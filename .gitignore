@@ -4,7 +4,9 @@
 !.env.example
 *.session
 *.session-journal
-voiceprint.json
+# Speaker biometrics. The glob matters: voiceprint.json was ignored but voiceprint.json.bak
+# was not, so a re-enrolment backup of the owner's voice embeddings sat untracked-but-committable.
+voiceprint.json*
 runtime_prefs.json
 jarvis_session.json
 jarvis_tasks.sqlite
@@ -79,3 +81,6 @@ scripts/deploy_vps.env
 
 # wake-word training scratch (195MB model, 17GB data, synthetic clips) — never commit
 .wakeword-training/
+
+# graphify code-graph output (rebuilt on commit; not versioned)
+/graphify-out/

@@ -44,24 +44,49 @@ class AudioLivenessProbe(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+# ponytail: cache the OUTPUT-device NAMES, not the answer, so every caller/needle shares one
+# enumeration. PortAudio init+terminate is expensive AND, on this laptop's Intel Smart Sound driver,
+# not safe to hammer: the watchdog polls this on every tick (and the bench drives it at 20 Hz), which
+# SEGFAULTED the process natively — uncatchable, so it took the whole edge down and blocked deploys.
+# 2s is far shorter than a human unplugging headphones, so detection latency is unchanged.
+_DEVICE_CACHE_TTL_S = 2.0
+_device_cache: tuple[float, tuple[str, ...]] | None = None
+
+
+def _output_device_names(force: bool = False) -> tuple[str, ...]:
+    """Lower-cased names of every enumerable OUTPUT device, cached for _DEVICE_CACHE_TTL_S."""
+    global _device_cache
+    now = time.monotonic()
+    if not force and _device_cache is not None and now - _device_cache[0] < _DEVICE_CACHE_TTL_S:
+        return _device_cache[1]
+    from jarvis.edge.audio_devices import run_audio_call
+
+    def _enumerate() -> tuple[str, ...]:
+        import pyaudio
+
+        pa = pyaudio.PyAudio()
+        try:
+            return tuple(
+                (pa.get_device_info_by_index(i).get("name") or "").lower()
+                for i in range(pa.get_device_count())
+                if pa.get_device_info_by_index(i).get("maxOutputChannels", 0) > 0
+            )
+        finally:
+            pa.terminate()
+
+    names = run_audio_call(_enumerate)   # dedicated COM-initialised thread (see audio_devices)
+    _device_cache = (now, names)
+    return names
+
+
 def output_device_present(name: str | None) -> bool:
     """Is the bound output device still enumerable? A vanished device = the headphones disconnected.
     Fail-open (return True) on any error so a flaky enumeration never false-trips a restart."""
     if not name:
         return True
     try:
-        import pyaudio
-
-        pa = pyaudio.PyAudio()
-        try:
-            needle = name.split("(")[0].strip().lower() or name.lower()
-            for i in range(pa.get_device_count()):
-                info = pa.get_device_info_by_index(i)
-                if info.get("maxOutputChannels", 0) > 0 and needle in (info.get("name") or "").lower():
-                    return True
-            return False
-        finally:
-            pa.terminate()
+        needle = name.split("(")[0].strip().lower() or name.lower()
+        return any(needle in dev for dev in _output_device_names())
     except Exception:  # noqa: BLE001 — can't check → don't false-trip
         return True
 
@@ -79,17 +104,32 @@ async def watch_audio_liveness(
     cloud_desired: bool = False,     # settings ask for cloud STT/TTS -> allow upgrading back to it
     on_private: bool = False,        # are we currently playing to a private endpoint (AirPods)?
     auto_route: bool = True,         # auto-follow headphones connect/disconnect
+    suspend_limit_s: float = 300.0,  # wall-clock jump this large = the machine slept -> rebuild
 ) -> None:
-    """Set ``dead`` when the mic stops delivering, the output device disappears, OR the cloud voice
-    route is failing (fail over to local) / has recovered (upgrade back to cloud)."""
+    """Set ``dead`` when the mic stops delivering, the output device disappears, the machine came back
+    from sleep, OR the cloud voice route is failing (fail over to local) / has recovered."""
     from jarvis.edge import voice_health
 
     await asyncio.sleep(grace_s)
     i = 0
     out_misses = 0
     last_count = -1
+    last_wall = time.time()
     while not dead.is_set():
         gap = time.monotonic() - probe.last_input
+        # Sleep/resume: after modern standby every audio stream and cloud WebSocket this process holds
+        # is stale, but nothing raises — the loop just resumes and Watari is silently deaf (observed
+        # 2026-07-30, edge up 19h across a full-day sleep). Windows emits no reliable per-machine resume
+        # event here (Power-Troubleshooter never fires on S0; Kernel-Power 507 fires ~8x/day for brief
+        # maintenance wakes), so detect it in-process: a wall-clock jump far beyond one poll interval
+        # can only be suspension. Short maintenance wakes stay under the limit and are ignored.
+        wall_jump = time.time() - last_wall
+        last_wall = time.time()
+        if wall_jump > suspend_limit_s:
+            logger.warning(f"audio watchdog: wall clock jumped {wall_jump / 60:.0f}min — machine resumed "
+                           "from sleep, rebuilding the edge (streams + cloud sockets are stale)")
+            dead.set()
+            return
         # Cloud voice auto-failover: if cloud (Deepgram/ElevenLabs) is the ACTIVE route and it's
         # failing (repeated escalated WebSocket errors the REST probe can't see), cool down + restart
         # -> the edge comes back up on LOCAL Whisper/Piper so Watari keeps hearing and speaking.
@@ -127,11 +167,15 @@ async def watch_audio_liveness(
         if i % device_check_every == 0:
             # Follow AirPods connect/disconnect: re-resolve the route when headphones appear (switch to
             # them) or the bound output vanishes (fall back to speakers). Require TWO consecutive hits so
-            # a momentary Bluetooth blip doesn't restart. Threaded — PyAudio enumeration blocks seconds on
-            # BT init, and on the event loop that stalls the whole audio pipeline (sporadic frames/churn).
-            from jarvis.edge.audio_devices import route_should_change
+            # a momentary Bluetooth blip doesn't restart. Off the event loop — PyAudio enumeration blocks
+            # seconds on BT init, and on the loop that stalls the whole audio pipeline — but on the
+            # DEDICATED COM-initialised PortAudio thread: a bare asyncio.to_thread() enumerates from an
+            # arbitrary pool thread with no COM and segfaults the process natively (see audio_devices).
+            from jarvis.edge.audio_devices import route_should_change, run_audio_call
 
-            reason = await asyncio.to_thread(route_should_change, out_device_name, on_private, auto_route)
+            reason = await asyncio.to_thread(
+                run_audio_call, route_should_change, out_device_name, on_private, auto_route
+            )
             out_misses = out_misses + 1 if reason else 0
             if out_misses >= 2:
                 logger.info(f"audio watchdog: {reason} — re-routing (restarting edge)")
@@ -163,6 +207,23 @@ if __name__ == "__main__":
         except asyncio.TimeoutError:
             pass
         assert not d2.is_set(), "watchdog must NOT trip on a live mic"
+
+        # A resume from sleep (big wall-clock jump) trips a rebuild; a normal poll gap does not.
+        import jarvis.edge.audio_watchdog as _m
+        p3, d3 = AudioLivenessProbe(), asyncio.Event()
+        real_time, calls = _m.time.time, {"n": 0}
+
+        def _jumping():          # 2nd reading is 20 min later = the machine slept
+            calls["n"] += 1
+            return real_time() + (1200 if calls["n"] > 1 else 0)
+
+        _m.time.time = _jumping
+        try:
+            await watch_audio_liveness(p3, d3, out_device_name=None, grace_s=0, poll_s=0.1,
+                                       silence_limit_s=999)
+        finally:
+            _m.time.time = real_time
+        assert d3.is_set(), "watchdog should trip after a sleep/resume wall-clock jump"
         print("audio_watchdog self-check OK")
 
     asyncio.run(_demo())

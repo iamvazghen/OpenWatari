@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -96,6 +97,8 @@ def in_quiet_hours(now: datetime, spec: str | None = None) -> bool:
 # Tools whose effects are outward-facing, costly, or hard to undo — Jarvis confirms before these.
 CONFIRM_TIER = {
     "send_telegram", "send_email", "send_push",
+    # Real-world outward reach (Twilio) — a wrong number or wrong words is unrecallable.
+    "place_call",
     "file_op", "process_op", "run_powershell", "browser",
     "run_protocol", "ha_call",
     "create_event",
@@ -110,7 +113,36 @@ CONFIRM_TIER = {
     "notion_delete_task",
     # Composio app actions: gated only when the slug is a WRITE (see _composio_write below).
     "composio_run_tool",
+    # A macro/skill is a stored sequence that runs tools on the owner's behalf. Gated DYNAMICALLY:
+    # only when its own steps contain a confirm-gated tool (see _sequence_needs_confirm). Without
+    # this, a saved macro was an unguarded path to every destructive tool in the system, since the
+    # steps executed straight out of the registry and run_macro itself asked nothing.
+    "run_macro", "invoke_skill",
 }
+
+
+def _sequence_needs_confirm(tool_name: str, args: dict | None) -> bool:
+    """True when a macro/skill's own steps include a confirm-gated tool.
+
+    Keeps the frictionless case frictionless — "run my morning macro" that only reads the weather
+    and the calendar should not interrogate him — while a macro that sends mail or pushes code reads
+    itself back first. Unknown/unreadable sequences gate, because failing closed is the safe side."""
+    name = (args or {}).get("name") or ""
+    if not name:
+        return True
+    try:
+        if tool_name == "run_macro":
+            from jarvis.brain.tools.macros import _load
+
+            steps = (_load().get(str(name).strip().lower()) or {}).get("steps") or []
+        else:
+            from jarvis.brain.tools.skills import skill_steps
+
+            steps = skill_steps(str(name)) or []
+    except Exception:  # noqa: BLE001 — can't read it -> assume the worst
+        return True
+    return any(confirm_required(str(s.get("tool") or ""), s.get("args") or {})
+               for s in steps if isinstance(s, dict))
 
 # Composio tool slugs encode the verb (GITHUB_CREATE_AN_ISSUE, SLACKBOT_CHAT_POST_MESSAGE). Reads run
 # freely; anything that writes/sends/changes the owner's external apps is confirm-gated. Unknown = gate.
@@ -148,6 +180,8 @@ def confirm_required(tool_name: str, args: dict | None = None) -> bool:
         return (args or {}).get("action") in {"kill", "start"}
     if name == "composio_run_tool":
         return _composio_write(str((args or {}).get("tool_slug", "")))
+    if name in {"run_macro", "invoke_skill"}:
+        return _sequence_needs_confirm(name, args)
     if name == "ha_call":
         # Only security-sensitive actuation confirms (locks/alarms/covers/garage). Turning on a
         # light or a scene should flow without friction — that's the whole point of a voice home.
@@ -373,7 +407,14 @@ class ProactiveEngine:
 
     async def _gather(self) -> list[Signal]:
         out: list[Signal] = []
+        from jarvis.shared import errors as _err
+
         for src in self._sources:
+            # Name the source, not just "a source": these run every 5 minutes and are the engine's
+            # only eyes, so a single one failing silently (which is what the old catch-all did —
+            # it never said WHICH) means a whole capability quietly stops being proactive.
+            label = getattr(src, "__name__", None) or type(src).__name__
+            started = time.monotonic()
             try:
                 res = src()
                 if inspect.isawaitable(res):
@@ -381,8 +422,12 @@ class ProactiveEngine:
                 for s in res or []:
                     if isinstance(s, Signal) and s.message.strip():
                         out.append(s)
+                _err.record_op("signal", label, ok=True,
+                               duration_ms=(time.monotonic() - started) * 1000, slow_ms=15_000)
             except Exception as e:  # noqa: BLE001 — a bad source must never break the tick
-                logger.warning(f"proactive source failed: {type(e).__name__}: {e}")
+                logger.warning(f"proactive source '{label}' failed: {type(e).__name__}: {e}")
+                _err.record_op("signal", label, ok=False, detail=f"{type(e).__name__}: {e}",
+                               duration_ms=(time.monotonic() - started) * 1000)
         return out
 
     # ---- the tick ---------------------------------------------------------------------
@@ -588,6 +633,20 @@ def default_signal_sources() -> list[SignalSource]:
     try:
         from jarvis.brain.proactive_signals import wellbeing_signals
         sources.append(wellbeing_signals)
+    except Exception:  # noqa: BLE001
+        pass
+    # Routine anchors — owner-defined time-windowed reminders (morning stretch before training, etc).
+    # The purposeful-timing replacement for state-triggered nudges landing at random-feeling times.
+    try:
+        from jarvis.brain.proactive_signals import routine_signals
+        sources.append(routine_signals)
+    except Exception:  # noqa: BLE001
+        pass
+    # Morning planning prompt — asks WHEN today's dynamic commitments (training/reading) happen,
+    # so plan_today can time their reminders purposefully instead of guessing a fixed window.
+    try:
+        from jarvis.brain.proactive_signals import routine_planning_signal
+        sources.append(routine_planning_signal)
     except Exception:  # noqa: BLE001
         pass
     # Memory-util — proactively resurface a durable commitment he may have let slip (not just recall it

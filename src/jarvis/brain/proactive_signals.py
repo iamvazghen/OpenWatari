@@ -21,6 +21,19 @@ from loguru import logger
 from jarvis.brain.proactive import Signal
 
 
+def _swallowed(source: str, e: BaseException) -> None:
+    """A signal source hit an error and yielded nothing. That is indistinguishable from 'nothing to
+    say', which is exactly how a companion capability goes dormant unnoticed — so it is journalled
+    as well as logged, while still never breaking the tick."""
+    logger.debug(f"{source}: skipped ({e})")
+    try:
+        from jarvis.shared import errors as _err
+
+        _err.swallowed(source, e)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 _PATTERNS_LOG = Path.home() / ".jarvis" / "patterns.jsonl"
 _VAULT_DIR = Path.home() / ".openclaw" / "obsidian-vault"
 
@@ -33,12 +46,15 @@ def _utc_now() -> datetime:
 async def anticipatory_prep() -> list[Signal]:
     """Surface a brief prep note for any calendar event starting in <30 min."""
     try:
+        from jarvis.brain.tools.base import tool_failed
         from jarvis.brain.tools.calendar import list_events
-        # Look ahead ~30 min.
+        # Look ahead ~30 min. NB: list_events takes date/days/minutes/max — the from/to/limit this
+        # used to pass were silently ignored, so it actually read the whole next DAY and announced
+        # anything in it as "starting soon".
         now = _utc_now()
-        horizon = (now + timedelta(minutes=30)).isoformat()
-        res = await list_events({"from": now.isoformat(), "to": horizon, "limit": 4})
-        if not res or "nothing" in res.lower()[:50]:
+        res = await list_events({"minutes": 30, "max": 4})
+        # A failed/unconfigured calendar read returns prose, not events — never voice it as one.
+        if tool_failed(res) or "nothing" in res.lower()[:50]:
             return []
         # Cheap: take the first event from the output and craft a Signal.
         first_line = res.splitlines()[0] if res else ""
@@ -49,7 +65,7 @@ async def anticipatory_prep() -> list[Signal]:
         return [Signal(key=f"anticipatory-{now.isoformat()}", message=msg,
                        urgency=0.7, kind="calendar-prep")]
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"anticipatory_prep: skipped ({e})")
+        _swallowed("anticipatory_prep", e)
         return []
 
 
@@ -86,7 +102,7 @@ def pattern_suggestion() -> list[Signal]:
                     urgency=0.62, kind="pattern"))
         return out[:1]  # at most one suggestion per tick (don't spam)
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"pattern_suggestion: skipped ({e})")
+        _swallowed("pattern_suggestion", e)
         return []
 
 
@@ -111,16 +127,17 @@ async def weekly_digest(now: datetime | None = None) -> list[Signal]:
             from datetime import timedelta
             tomorrow = (now + timedelta(days=1)).replace(hour=9, minute=0)
             day_end = tomorrow + timedelta(hours=12)
+            from jarvis.brain.tools.base import tool_failed
             res = await list_events({"from": tomorrow.isoformat(),
                                      "to": day_end.isoformat(), "limit": 10})
-            if res and "nothing" not in res.lower()[:30]:
+            if not tool_failed(res) and "nothing" not in res.lower()[:30]:
                 first = res.splitlines()[0][:120]
                 msg += f" Upcoming: {first}."
         except Exception:
             pass
         return [Signal(key="weekly-digest", message=msg, urgency=0.6, kind="weekly-digest")]
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"weekly_digest: skipped ({e})")
+        _swallowed("weekly_digest", e)
         return []
 
 
@@ -152,7 +169,115 @@ def wellbeing_signals(now: datetime | None = None) -> list[Signal]:
                 urgency=0.66, kind="wellbeing")]
         return []
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"wellbeing_signals: skipped ({e})")
+        _swallowed("wellbeing_signals", e)
+        return []
+
+
+_ROUTINES_PATH = Path.home() / ".jarvis" / "routines.json"
+
+# Owner's timing rule (2026-07-28): "everything has to be purposeful — stretching has to be done
+# before I go to train". Two kinds of entry, owner-editable at ~/.jarvis/routines.json:
+#   * windowed: {key, window: "HH:MM-HH:MM" local, message, urgency?, days?: ["Mon",...]} — fires
+#     inside the window, once a day.
+#   * dynamic:  {key, dynamic: true, message, prep_message?, lead_minutes?} — a standing commitment
+#     whose TIME VARIES by day (training can be morning or noon). It never fires on its own; the
+#     morning planning prompt asks when it happens today, and the `plan_today` tool turns the
+#     owner's answer ("I'll train at noon") into today's concrete reminders (prep = the stretch,
+#     lead_minutes before the main event).
+_DEFAULT_ROUTINES: list[dict] = [
+    {
+        "key": "training",
+        "dynamic": True,
+        "message": "Training time, sir.",
+        "prep_message": "Stretch first, sir — training is soon, and ten minutes now beats a pulled hamstring.",
+        "lead_minutes": 40,
+    },
+    {
+        "key": "reading",
+        "dynamic": True,
+        "message": "Reading time, sir — the book or the Bible, as you planned.",
+    },
+]
+
+
+def routine_signals(now: datetime | None = None) -> list[Signal]:
+    """Schedule-anchored routine reminders — fire inside their local-time window, once per day.
+
+    The date in the key gives once-per-day via the engine's repeat suppression; the window itself
+    guarantees the timing is purposeful (a stretch prompt can only ever land in the morning slot,
+    never at night). Rides the engine, so quiet-hours/budget/dismissal-learning still apply."""
+    try:
+        import json
+
+        from zoneinfo import ZoneInfo
+
+        from jarvis.config import settings
+
+        local = now or datetime.now(ZoneInfo(settings.user_tz))
+        try:
+            routines = json.loads(_ROUTINES_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            routines = _DEFAULT_ROUTINES
+            try:  # seed the editable file so the owner can tune windows without touching code
+                _ROUTINES_PATH.parent.mkdir(parents=True, exist_ok=True)
+                _ROUTINES_PATH.write_text(json.dumps(routines, indent=2), encoding="utf-8")
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"routine_signals: seed write failed ({e})")
+        except Exception as e:  # noqa: BLE001 — corrupt file -> defaults, don't go dark
+            logger.debug(f"routine_signals: bad routines.json ({e}) — using defaults")
+            routines = _DEFAULT_ROUTINES
+        wd_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][local.weekday()]
+        out: list[Signal] = []
+        for r in routines:
+            try:
+                if r.get("dynamic"):
+                    continue   # dynamic commitments are scheduled per-day via plan_today, never windowed
+                days = r.get("days")
+                if days and wd_name not in days:
+                    continue
+                start_s, end_s = (r.get("window") or "").split("-")
+                start = datetime.strptime(start_s.strip(), "%H:%M").time()
+                end = datetime.strptime(end_s.strip(), "%H:%M").time()
+                if start <= local.time() <= end:
+                    out.append(Signal(
+                        key=f"routine-{r['key']}-{local.date()}",
+                        message=str(r.get("message") or "").strip(),
+                        urgency=float(r.get("urgency", 0.65)),
+                        kind="routine"))
+            except Exception:  # noqa: BLE001 — one malformed routine never kills the rest
+                continue
+        return out
+    except Exception as e:  # noqa: BLE001
+        _swallowed("routine_signals", e)
+        return []
+
+
+def routine_planning_signal(now: datetime | None = None) -> list[Signal]:
+    """Morning planning prompt: ask WHEN today's dynamic commitments happen, so their reminders can
+    be timed purposefully instead of guessed. Fires 08:00–10:30 local, once per day, and only while
+    at least one dynamic commitment is still unplanned for today."""
+    try:
+        import json
+
+        from zoneinfo import ZoneInfo
+
+        from jarvis.brain.tools.routines import unplanned_commitments
+        from jarvis.config import settings
+
+        local = now or datetime.now(ZoneInfo(settings.user_tz))
+        if not (8 <= local.hour < 10 or (local.hour == 10 and local.minute <= 30)):
+            return []
+        pending = unplanned_commitments(local)
+        if not pending:
+            return []
+        names = " and ".join(p["key"] for p in pending)
+        return [Signal(
+            key=f"routine-plan-{local.date()}",
+            message=(f"Quick planning check, sir — when's {names} today? Give me a time and "
+                     "I'll set the reminders, including your stretch before training."),
+            urgency=0.65, kind="routine-plan")]
+    except Exception as e:  # noqa: BLE001
+        _swallowed("routine_planning_signal", e)
         return []
 
 
@@ -197,7 +322,7 @@ def memory_resurface_signals(now: datetime | None = None) -> list[Signal]:
             message=(f"A while back you mentioned this, sir — still on your mind? “{pick['text']}”"),
             urgency=0.61, kind="resurface")]
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"memory_resurface_signals: skipped ({e})")
+        _swallowed("memory_resurface_signals", e)
         return []
 
 

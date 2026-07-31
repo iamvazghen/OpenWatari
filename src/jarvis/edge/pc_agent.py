@@ -22,10 +22,13 @@ from loguru import logger
 
 from jarvis.brain.tools.system import LOCAL_HANDLERS as _SYS_HANDLERS
 from jarvis.brain.tools.camera import LOCAL_HANDLERS as _CAM_HANDLERS
+from jarvis.brain.tools.browser import LOCAL_HANDLERS as _BROWSER_HANDLERS
 
-# The laptop executor runs BOTH system ops (files/processes/screenshot) and camera ops (presence/
-# enroll/capture) locally — the camera + owner face refs are on this machine, not the VPS brain.
-LOCAL_HANDLERS = {**_SYS_HANDLERS, **_CAM_HANDLERS}
+# The laptop executor runs system ops (files/processes/screenshot), camera ops (presence/enroll/
+# capture) and the interactive BROWSER locally — the camera, the owner's face refs and the browser
+# profile with his logged-in sessions are all on this machine, not on the VPS brain. A browser driven
+# brain-side would be headless on a server he can't see, with an empty cookie jar.
+LOCAL_HANDLERS = {**_SYS_HANDLERS, **_CAM_HANDLERS, **_BROWSER_HANDLERS}
 from jarvis.config import settings
 
 # Bumped when the executor's behaviour changes, so the brain log confirms which code is live after a
@@ -88,12 +91,29 @@ def _verify_effect(op: str, args: dict) -> str | None:
 
 
 async def _run_op(op: str, args: dict) -> tuple[bool, str]:
+    """Execute one forwarded op. Every laptop-side capability — camera, screenshots, file and
+    process control, PowerShell, the interactive browser — funnels through here, so this is where
+    they all get end-to-end tracking: outcome, duration, and the op's arguments (scrubbed)."""
+    import time as _time
+
+    from jarvis.shared import errors as _err
+
+    started = _time.monotonic()
+
+    def _track(ok: bool, detail: str = "") -> None:
+        _err.record_op("pc", op, ok=ok, detail=detail,
+                       duration_ms=(_time.monotonic() - started) * 1000,
+                       slow_ms=20_000,   # a PC op the owner is waiting on shouldn't take 20s
+                       context={"args": str(args)[:200]})
+
     fn = LOCAL_HANDLERS.get(op)
     if fn is None:
+        _track(False, f"unknown PC op '{op}'")
         return False, f"unknown PC op '{op}'"
     hit = _refused(op, args)
     if hit:
         logger.warning(f"pc-agent: REFUSED catastrophic op {op} (matched '{hit}')")
+        _track(False, f"refused: matched destructive pattern '{hit}'")
         return False, "I won't run that on the laptop — it's on the destructive-op refuse list, sir."
     try:
         out = str(await fn(args or {}))
@@ -102,9 +122,14 @@ async def _run_op(op: str, args: dict) -> tuple[bool, str]:
             out = f"{out} ({note})"
             if note.startswith("WARNING"):
                 logger.warning(f"pc-agent: {op} verify mismatch — {note}")
+        # A handler that returns a failure sentence instead of raising still failed the owner —
+        # "no webcam, it's in use, or access is blocked" is an outage, not an answer.
+        failed = _err.looks_failed(out) or (note or "").startswith("WARNING")
+        _track(not failed, out[:200] if failed else "")
         return True, out
     except Exception as e:  # noqa: BLE001
         logger.exception(f"pc-agent: op {op} failed")
+        _track(False, f"{type(e).__name__}: {e}")
         return False, f"That failed on the laptop ({type(e).__name__}), sir."
 
 
@@ -118,17 +143,39 @@ async def _session(url: str, token: str | None) -> None:
                        ping_timeout=75, max_size=8 * 1024 * 1024) as ws:
         await ws.send(json.dumps({"type": "pc_hello", "host": platform.node(), "ver": CODE_VERSION}))
         logger.info(f"pc-agent: connected to {url} as '{platform.node()}' — ready for commands")
-        async for raw in ws:
+
+        # Ship this executor's failures to the brain too. Camera checks, PC control and file ops all
+        # run HERE, so without this the owner could hit a laptop-side failure that the brain's
+        # journal never learns about. Fire-and-forget and fail-quiet: the local journal is the
+        # source of truth, and reporting must never disturb the command channel.
+        from jarvis.shared import errors as _err
+
+        def _ship(entry: dict) -> None:
             try:
-                data = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if data.get("type") != "pc_command":
-                continue
-            op, args, cid = data.get("op"), data.get("args") or {}, data.get("id")
-            logger.info(f"pc-agent: exec {op}({args})")
-            ok, output = await _run_op(op, args)
-            await ws.send(json.dumps({"type": "pc_result", "id": cid, "ok": ok, "output": output}))
+                asyncio.get_running_loop().create_task(
+                    ws.send(json.dumps({"type": "pc_error", "entry": entry}))
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        _err.set_shipper(_ship)
+        try:
+            async for raw in ws:
+                try:
+                    data = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if data.get("type") != "pc_command":
+                    continue
+                op, args, cid = data.get("op"), data.get("args") or {}, data.get("id")
+                # Adopt the brain's turn id when it forwards one, so a laptop-side failure lands
+                # under the same correlation key as the turn that caused it.
+                _err.new_turn(data.get("turn_id") or None)
+                logger.info(f"pc-agent: exec {op}({args})")
+                ok, output = await _run_op(op, args)
+                await ws.send(json.dumps({"type": "pc_result", "id": cid, "ok": ok, "output": output}))
+        finally:
+            _err.set_shipper(None)   # the socket is gone; go back to local-only journalling
 
 
 def _ensure_windows_path() -> None:

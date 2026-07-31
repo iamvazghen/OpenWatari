@@ -49,6 +49,14 @@ class RemoteBrain(FrameProcessor):
         self._task: asyncio.Task | None = None
         self._fallback_agent = None          # lazily-built local JarvisAgent (warm standby)
         self._local_task: asyncio.Task | None = None
+        # Send this laptop's errors up to the brain, so the VPS journal is the union of all three
+        # processes and "what did he actually experience?" is answerable from one place.
+        try:
+            from jarvis.shared import errors as _err
+
+            _err.set_shipper(self._client.ship_error)
+        except Exception:  # noqa: BLE001 — shipping is a bonus; the local journal is the source
+            pass
 
     async def start(self, connect_timeout_s: float = 3.0) -> bool:
         """Begin the supervised link. Returns True once connected within the timeout (so the

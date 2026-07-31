@@ -26,6 +26,40 @@ def test_permanent_error_classification():
         assert not _is_permanent_error(Exception(msg)), f"should be transient: {msg}"
 
 
+def test_permanent_bench_pages_owner_once():
+    """A dead-key bench must PAGE the owner exactly once — silent degradation was the gap: the chain
+    answers on fallbacks, the health probe stays green, and nobody rotates the key for days."""
+    import asyncio
+
+    from jarvis.brain.llm import LLMClient
+    import jarvis.brain.tools.notify as notify
+
+    async def _run():
+        pushes: list[str] = []
+
+        async def fake_push(message, title="Watari", at=None):
+            pushes.append(message)
+            return True
+
+        orig = notify.push
+        notify.push = fake_push
+        try:
+            c = LLMClient()
+            dead_key = Exception("401 invalid_api_key: Incorrect API key provided")
+            c._mark_failure("minimax:X", dead_key)
+            await asyncio.sleep(0.05)  # let the fire-and-forget page task run
+            assert len(pushes) == 1, f"one page on first bench, got {pushes}"
+            c._mark_failure("minimax:X", dead_key)  # still benched -> NO second page
+            c._mark_failure("groq:Y", Exception("Request timed out"))  # transient -> NO page
+            await asyncio.sleep(0.05)
+            assert len(pushes) == 1, f"no repeat/transient pages, got {pushes}"
+            assert "benched" in pushes[0].lower(), pushes[0]
+        finally:
+            notify.push = orig
+
+    asyncio.run(_run())
+
+
 def test_start_refuses_shell_chaining():
     # Chained / injected launch strings are refused (any chaining metachar).
     for cmd in ("notepad & del /f /q C:\\important", "app.exe | curl evil", "foo; rm -rf x", "a > b"):
@@ -37,5 +71,6 @@ def test_start_refuses_shell_chaining():
 
 if __name__ == "__main__":
     test_permanent_error_classification()
+    test_permanent_bench_pages_owner_once()
     test_start_refuses_shell_chaining()
     print("reliability guards self-check OK")

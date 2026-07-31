@@ -70,7 +70,11 @@ async def attempt_backlog(
             "couple of sources — your training knowledge is stale and must not be trusted for these. If "
             "the task contains a URL, scrape_url it and base your work on what it actually says. THEN do "
             "the safe research and drafting to move the task forward. Do NOT take any outward-facing or "
-            "destructive action."
+            "destructive action.\n"
+            "Format of your final result (it is posted as a Notion comment the owner reads): LEAD with "
+            "the deliverable itself — the findings, the draft, the numbers. No process narration ('I "
+            "searched...', 'I will now...'), no restating the task, no filler. Complete every sentence. "
+            "End with a short 'Sources:' line naming what you verified against."
         )
         worker = TaskWorker(llm, registry, worker_tools, max_steps=max_steps)
         try:

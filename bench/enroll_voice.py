@@ -96,6 +96,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Enroll Vazghen's voiceprint.")
     ap.add_argument("--script", type=str, default=None,
                     help="Path to to-read-script.md for a longer, stronger 3-minute enrollment.")
+    ap.add_argument("--append", action="store_true",
+                    help="ADD these clips to the existing profile (e.g. re-enroll with AirPods "
+                         "connected to cover that acoustic condition) instead of replacing it.")
     args = ap.parse_args()
 
     verifier = SpeakerVerifier()
@@ -134,10 +137,34 @@ def main() -> None:
         print("No usable clips captured.")
         sys.exit(1)
 
-    mean = np.mean(np.stack(embeddings), axis=0)
-    path = SpeakerVerifier.save_profile(mean)
-    print(f"\nVoiceprint saved to {path} ({mean.shape[0]}-dim, {len(embeddings)} clips).")
-    print("Now set JARVIS_SPEAKER_ID_ENABLED=true in .env to gate commands to your voice.")
+    # One vector PER CLIP (max-cosine at verify time), not a blurred mean — a mean profile could
+    # not cover the mic's two acoustic modes (Bluetooth audio active vs not) and locked the owner
+    # out at 0.05-0.28 in production (2026-07-29). --append keeps prior conditions' vectors.
+    path = SpeakerVerifier.save_profile(np.stack(embeddings), append=args.append)
+    mode = "appended to" if args.append else "saved to"
+    print(f"\nVoiceprint {mode} {path} ({len(embeddings)} vector(s) from this session).")
+
+    # Verification pass: prove the profile matches the LIVE mic before calling it done. Without
+    # this, a bad enrollment is only discovered when Watari goes deaf to the owner.
+    print("\n--- verification: say naturally, e.g. 'Hey Watari, how are you today?'")
+    for c in (3, 2, 1):
+        print(f"  recording in {c}…", end="\r", flush=True)
+        time.sleep(1)
+    print("  ● recording 6s — speak now")
+    pcm = _record(6)
+    fresh = SpeakerVerifier()          # reload from disk — verifies what was actually saved
+    from jarvis.config import settings as _s
+    _s.speaker_id_enabled = True       # force a real score even if the .env flag is off
+    accept, score = fresh.verify(pcm, SR)
+    print(f"  live score: {score:.2f} (threshold {_s.speaker_threshold})")
+    if score >= max(_s.speaker_threshold + 0.1, 0.45):
+        print("  ✓ strong match — enrollment good. Restart the edge to load it.")
+    elif score >= _s.speaker_threshold:
+        print("  ~ passes, but thin margin. Consider re-running; check mic distance / Bluetooth.")
+    else:
+        print("  ✗ WEAK MATCH — this profile would NOT reliably recognise you. The previous "
+              "profile is in voiceprint.json.bak. Re-run in the conditions you normally speak "
+              "(same mic, AirPods state as usual).")
 
 
 if __name__ == "__main__":

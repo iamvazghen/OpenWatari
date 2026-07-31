@@ -219,12 +219,13 @@ def coaching_signals() -> list:
         if not field:
             return []
         p = COACH.progress(field)
+        said = field.title() if field.isalpha() else field   # spoken aloud: "German", not "german"
         if p.level != "not set":
-            msg = (f"Evening, sir — fancy a quick {field} review? You're at {p.level}"
+            msg = (f"Evening, sir — fancy a quick {said} review? You're at {p.level}"
                    + (f", {p.streak}-day streak" if p.streak > 1 else "")
                    + ". Say 'quiz me' and I'll run a few.")
         else:
-            msg = (f"Evening, sir — want to do a quick {field} check? Tell me roughly your level and "
+            msg = (f"Evening, sir — want to do a quick {said} check? Tell me roughly your level and "
                    "I'll pitch it right.")
         return [Signal(key=f"coaching-{field}-{_today(now)}", message=msg, urgency=0.62,
                        kind="coaching")]

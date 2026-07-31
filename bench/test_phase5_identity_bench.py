@@ -61,6 +61,7 @@ async def main() -> None:
         SpeakerVerifier.save_profile(ref)
         settings.speaker_id_enabled = True
         settings.speaker_threshold = 0.5
+        settings.room_check_on_suspicion = False  # hermetic: never open a real camera in the bench
 
         # Stub embedder returns Vazghen's vector -> match.
         sv_match = SpeakerVerifier(embedder=lambda wav: ref.copy())
@@ -100,6 +101,7 @@ async def main() -> None:
         SpeakerVerifier.save_profile(ref)
         settings.speaker_id_enabled = True
         settings.speaker_threshold = 0.5
+        settings.room_check_on_suspicion = False  # hermetic: never open a real camera in the bench
 
         async def run_gate(embedder) -> list:
             gate = SpeakerGate(verifier=SpeakerVerifier(embedder=embedder))
@@ -125,6 +127,71 @@ async def main() -> None:
               not any(isinstance(f, TranscriptionFrame) for f in pushed_stranger))
         check("audio still passes through (not gated)",
               any(isinstance(f, InputAudioRawFrame) for f in pushed_stranger))
+
+        # Room-check policy: a stranger's voice triggers exactly ONE camera look per cooldown.
+        settings.room_check_on_suspicion = True
+        looks: list = []
+        gate2 = SpeakerGate(verifier=SpeakerVerifier(embedder=lambda wav: other.copy()))
+
+        async def _spy_look(reason):
+            looks.append(reason)
+
+        gate2._room_check = _spy_look  # type: ignore[assignment]
+
+        async def _swallow(frame, direction=FrameDirection.DOWNSTREAM):
+            pass
+
+        gate2.push_frame = _swallow  # type: ignore[assignment]
+        audio = InputAudioRawFrame(audio=b"\x01\x02" * 16000, sample_rate=16000, num_channels=1)
+        await gate2.process_frame(audio, FrameDirection.DOWNSTREAM)
+        for _ in range(3):  # three stranger utterances in quick succession
+            tf = TranscriptionFrame("who are you", "u", time_now_iso8601())
+            await gate2.process_frame(tf, FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)  # let the fire-and-forget task run
+        check("stranger voice triggers a camera look", looks == ["unrecognized voice in the room"],
+              str(looks))
+        check("cooldown: repeated strangers do NOT strobe the camera", len(looks) == 1, str(looks))
+
+        # A BARELY-passing accept (within 0.05 of the threshold) earns a face check too — the
+        # second factor for the owner-floor == impostor-ceiling overlap seen in production.
+        borderline = np.array([0.52, float(np.sqrt(1 - 0.52 ** 2)), 0.0] + [0.0] * 189,
+                              dtype=np.float32)
+        looks3: list = []
+        gate3 = SpeakerGate(verifier=SpeakerVerifier(embedder=lambda wav: borderline.copy()))
+
+        async def _spy3(reason):
+            looks3.append(reason)
+
+        gate3._room_check = _spy3  # type: ignore[assignment]
+        gate3.push_frame = _swallow  # type: ignore[assignment]
+        await gate3.process_frame(audio, FrameDirection.DOWNSTREAM)
+        await gate3.process_frame(TranscriptionFrame("hello", "u", time_now_iso8601()),
+                                  FrameDirection.DOWNSTREAM)
+        await asyncio.sleep(0.05)
+        check("borderline accept triggers a face check", any("borderline" in r for r in looks3),
+              str(looks3))
+        settings.room_check_on_suspicion = False
+
+        # Multi-condition profile: vectors for two acoustic modes, verify() takes the BEST match —
+        # the 2026-07-29 fix for "AirPods connected degrades the array and locks the owner out".
+        cond_a = np.array([1.0, 0.0, 0.0] + [0.0] * 189, dtype=np.float32)
+        cond_b = np.array([0.0, 1.0, 0.0] + [0.0] * 189, dtype=np.float32)
+        SpeakerVerifier.save_profile(np.stack([cond_a, cond_b]))
+        v_multi = SpeakerVerifier(embedder=lambda wav: cond_b.copy())  # speaks in condition B
+        ok_b, score_b = v_multi.verify(b"\x01\x02" * 16000, 16000)
+        check("multi-vector profile: condition-B voice matches via MAX cosine",
+              ok_b and score_b > 0.99, f"{score_b:.2f}")
+        legacy = SpeakerVerifier.save_profile(cond_a)  # 1-vector legacy save still works
+        v_one = SpeakerVerifier(embedder=lambda wav: cond_a.copy())
+        ok_a, _ = v_one.verify(b"\x01\x02" * 16000, 16000)
+        check("single-vector (legacy) profile still verifies", ok_a)
+        # append mode: a second enrollment ADDS coverage instead of clobbering
+        SpeakerVerifier.save_profile(cond_b, append=True)
+        v_both = SpeakerVerifier(embedder=lambda wav: cond_b.copy())
+        ok_ap, _ = v_both.verify(b"\x01\x02" * 16000, 16000)
+        check("append-mode enrollment keeps the old condition AND adds the new", ok_ap)
+        check("previous profile backed up (.bak) before overwrite",
+              (Path(settings.speaker_profile_path).with_suffix(".json.bak")).exists())
 
     settings.speaker_id_enabled = False  # restore
 

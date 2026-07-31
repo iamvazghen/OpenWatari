@@ -32,9 +32,9 @@ from loguru import logger
 
 from jarvis.brain.agent import JarvisAgent
 from jarvis.config import settings
-from jarvis.shared.protocol import Barge, Hello, StreamEvent, StreamKind, Utterance
+from jarvis.shared.protocol import Barge, ErrorReport, Hello, StreamEvent, StreamKind, Utterance
 
-ClientMessage = Union[Hello, Utterance, Barge]
+ClientMessage = Union[Hello, Utterance, Barge, ErrorReport]
 
 # Split a reply into sentence-ish chunks so the client speaks incrementally instead of
 # waiting for the whole paragraph (lower perceived latency).
@@ -64,6 +64,8 @@ def parse_client_message(raw: str | bytes) -> ClientMessage | None:
             return Utterance(**data)
         if kind == "barge":
             return Barge(**data)
+        if kind == "error":
+            return ErrorReport(**data)
     except Exception:  # noqa: BLE001 — a malformed frame must never kill the connection
         return None
     return None
@@ -225,6 +227,23 @@ class BrainServer:
             )
             return
 
+        if isinstance(msg, ErrorReport):
+            # A failure that happened on the owner's laptop (edge or pc_agent). Store it in THIS
+            # host's journal, keeping its original host/process, so one query here sees everything
+            # the owner experienced instead of only the server's half.
+            from jarvis.shared import errors as _err
+
+            e = msg.entry if isinstance(msg.entry, dict) else {}
+            _err.record(
+                level=str(e.get("level", "ERROR")), subsystem=str(e.get("subsystem", "laptop")),
+                message=str(e.get("message", "")), error_type=str(e.get("type", "")),
+                where=str(e.get("where", "")), turn=str(e.get("turn", "")),
+                process=str(e.get("process", "edge")), host=str(e.get("host", "laptop")),
+                context=e.get("context") if isinstance(e.get("context"), dict) else None,
+                ship=False,   # already home; re-shipping would loop
+            )
+            return
+
         if isinstance(msg, Utterance):
             self._active_sid = msg.session_id  # Phase 5.2 handoff: this is now the owner's live device
             self._cancel(msg.session_id)  # a new utterance supersedes the previous turn
@@ -280,6 +299,12 @@ class BrainServer:
 
     async def _run_turn(self, ws, utt: Utterance) -> None:
         sid = utt.session_id
+        # Adopt the edge's correlation id so every brain log line and journal entry for this turn
+        # shares one key with the laptop's. This runs inside the turn's own task, and contextvars
+        # are per-task, so concurrent sessions can't bleed ids into each other.
+        from jarvis.shared import errors as _err
+
+        _err.new_turn(utt.turn_id or None)
         # On the owner's FIRST live-edge turn of the day, build the daily catch-up CONCURRENTLY with
         # the reply (so it adds no latency) and append it once the reply is done. `due` is a cheap
         # file read; the network build only starts when it's actually the first turn today.
@@ -363,6 +388,23 @@ class BrainServer:
                     logger.info(f"pc-control: laptop '{data.get('host')}' ready (executor {data.get('ver', '?')})")
                 elif data.get("type") == "pc_result":
                     PC_LINK.resolve(data.get("id", ""), bool(data.get("ok")), str(data.get("output", "")))
+                elif data.get("type") == "pc_error":
+                    # A failure inside the laptop executor (camera, PC control, file ops). Those run
+                    # on the owner's machine, so without this they would never appear in the brain's
+                    # journal — the half of his experience the server can't see directly.
+                    from jarvis.shared import errors as _err
+
+                    e = data.get("entry") if isinstance(data.get("entry"), dict) else {}
+                    _err.record(
+                        level=str(e.get("level", "ERROR")),
+                        subsystem=str(e.get("subsystem", "pc_agent")),
+                        message=str(e.get("message", "")), error_type=str(e.get("type", "")),
+                        where=str(e.get("where", "")), turn=str(e.get("turn", "")),
+                        process=str(e.get("process", "pc_agent")),
+                        host=str(e.get("host", "laptop")),
+                        context=e.get("context") if isinstance(e.get("context"), dict) else None,
+                        ship=False,
+                    )
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -425,6 +467,29 @@ class BrainServer:
 async def serve(host: str | None = None, port: int | None = None) -> None:
     """Run the brain WebSocket server until cancelled."""
     import websockets
+
+    # Error tracking for the brain: the same structured journal the laptop writes, plus the asyncio
+    # handler that catches the many fire-and-forget tasks here (proactive ticks, backlog workers,
+    # scheduler jobs) whose failures previously went only to stderr.
+    try:
+        from jarvis.shared import errors as _err
+
+        _err.install("brain")
+        _err.install_asyncio_handler(asyncio.get_running_loop())
+    except Exception as e:  # noqa: BLE001 — never block the brain on observability
+        logger.warning(f"error tracking unavailable: {type(e).__name__}: {e}")
+
+    # One brain only. systemd normally guarantees this, but a manual run alongside the service (or a
+    # restart overlapping a slow shutdown) gives two brains both ticking the proactive engine and
+    # double-sending to the owner. Newest wins, same rule as the laptop daemons.
+    try:
+        from jarvis.shared import singleton
+
+        if not singleton.claim("brain"):
+            logger.warning("brain: a newer instance already owns this role — exiting")
+            return
+    except Exception as e:  # noqa: BLE001 — fail open
+        logger.warning(f"singleton guard unavailable: {type(e).__name__}: {e}")
 
     server = BrainServer()
     await server.warmup()

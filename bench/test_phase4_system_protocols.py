@@ -98,14 +98,39 @@ async def main() -> None:
 
     real_popen = P.subprocess.Popen
     P.subprocess.Popen = _FakePopen  # type: ignore[assignment]
+    # goodnight acts on the OWNER'S MACHINE, so with a laptop connected it travels over PC_LINK
+    # instead of launching a script on whatever host the brain happens to be running on (on the VPS
+    # that was a silent no-op). A brain-side protocol still proves the local launch path.
+    from jarvis.brain import pc_link
+
+    forwarded: list = []
+
+    class _FakeLink:
+        active = True
+
+        async def forward(self, op, args):
+            forwarded.append((op, args))
+            return "ok"
+
+    real_link = pc_link.PC_LINK
+    pc_link.PC_LINK = _FakeLink()
     try:
         r = await protocols_tool.run_protocol(
             {"name": "goodnight", "password": settings.protocol_goodnight_password}
         )
-        ok = "argv" in launched and str(launched["argv"][1]).endswith("goodnight.py")
-        check("correct password launches the right script (stubbed)", ok, str(launched.get("argv")))
+        check("correct password sends goodnight to the laptop, not the brain host",
+              len(forwarded) == 1 and "argv" not in launched, f"{forwarded} {launched}")
         check("correct password speaks a confirmation", "sir" in r.lower(), r)
+
+        launched.clear()
+        r2 = await protocols_tool.run_protocol(
+            {"name": "backup", "password": settings.protocol_backup_password}
+        )
+        ok = "argv" in launched and str(launched["argv"][1]).endswith("backup.py")
+        check("a brain-side protocol still launches its script (stubbed)", ok,
+              str(launched.get("argv")))
     finally:
+        pc_link.PC_LINK = real_link
         P.subprocess.Popen = real_popen  # type: ignore[assignment]
 
     print("\n[4] scheduler & reminders (temp SQLite)")

@@ -23,17 +23,21 @@ from jarvis.brain.tools import (
     coding,
     composio,
     contacts,
+    diagnose,
     documents,
+    fitness,
     gmail,
     graphmem,
     localplay,
     macros,
+    maps,
     memory,
     multimodal,
     music,
     notify,
     notion,
     objectives,
+    phone,
     protocols,
     reminders,
     relationship,
@@ -48,13 +52,14 @@ from jarvis.brain.tools import (
     vault,
     voicechat,
     web,
+    wolfram,
 )
 
 _MODULES = [vault, memory, web, telegram, voicechat, music, localplay, system, browser,
             protocols, reminders, notify, gmail, calendar, smarthome, utility, routines,
             coding, skills, notion, tasks, contacts, documents, composio, channels,
             macros, multimodal, undo, graphmem, activity, coaching, camera, objectives,
-            approvals, relationship]  # noqa: E501
+            approvals, relationship, phone, maps, wolfram, fitness, diagnose]  # noqa: E501
 
 Handler = Callable[[dict], Awaitable[str]]
 
@@ -80,6 +85,10 @@ _LAZY_GROUPS: dict[str, list] = {
     "objectives": [objectives],          # multi-day objectives Watari drives (assign/status/…) — Phase 4.1
     "approvals": [approvals],            # approve/reject the outward steps autonomous work deferred — 4.2
     "relationship": [relationship],      # sensitivities / running jokes / how-we-stand — Phase 6.2
+    "phone": [phone],                    # real phone calls via Twilio (parked until account) — 2026-07-28
+    "places": [maps],                    # live travel time + place search (Google Maps)
+    "compute": [wolfram],                # exact math/facts via Wolfram Alpha
+    "vitals": [fitness],                 # sleep/steps/heart from the wearable via Google Fit
 }
 # Substring triggers (lowercased) that activate a group for a turn. Broad on purpose — a miss just
 # means a one-turn delay (the follow-up usually contains the word, and groups stay warm one turn).
@@ -143,6 +152,20 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
     "relationship": ("sensitive subject", "sore subject", "sore spot", "go easy on", "be gentle about",
                      "touchy subject", "running joke", "inside joke", "our joke", "read the room",
                      "how am i doing", "how are we doing", "handle gently", "don't bring up", "dont bring up"),
+    "phone": ("call ", "phone", "ring ", "dial", "call the", "call my"),
+    # Phrasing matters here: "how long would it take me to drive from X to Y" matched NONE of the
+    # original needles ("how long to", "drive to"), so the group never loaded and the model answered a
+    # deterministic routing question with a web search (observed 2026-07-30, 6.3s and a wrong ETA).
+    "places": ("how long to", "how long would", "how long does it take", "how long will it take",
+               "how far", "directions", "traffic", "route to", "eta", "drive to", "drive from",
+               "driving", "by car", "walk to", "cycle to", "travel time", "get there",
+               "get to the", "nearest", "find a restaurant", "find a place", "a good restaurant",
+               "places near", "close by", "on the way", "when should i leave"),
+    "compute": ("calculate", "compute", "convert", "how many", "what's the square", "whats the square",
+                "percent of", "compound", "equation", "solve", "integral", "derivative",
+                "in kilograms", "in pounds", "in euros", "in dollars", "sunset", "sunrise"),
+    "vitals": ("sleep", "slept", "steps", "heart rate", "vitals", "how active", "my workout data",
+               "recovery", "resting heart"),
 }
 
 

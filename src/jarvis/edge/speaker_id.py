@@ -63,13 +63,20 @@ class SpeakerVerifier:
         self._load_profile()
 
     # ---- profile ----------------------------------------------------------------------
+    # The profile is a LIST of vectors (one per enrollment clip/condition), scored by MAX cosine —
+    # same design as the face refs. A single mean vector could not cover the mic array's two
+    # acoustic modes (Bluetooth audio active vs not): live data 2026-07-29 showed the owner at
+    # 0.37-0.52 with AirPods off but 0.05-0.28 with AirPods on, against the SAME mean profile.
     def _load_profile(self) -> None:
         path = _default_profile_path()
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                self._profile = np.asarray(data["embedding"], dtype=np.float32)
-                logger.info(f"speaker profile loaded ({self._profile.shape[0]}-dim) from {path.name}")
+                rows = data.get("embeddings") or ([data["embedding"]] if "embedding" in data else [])
+                self._profile = np.asarray(rows, dtype=np.float32) if rows else None
+                if self._profile is not None:
+                    logger.info(f"speaker profile loaded ({self._profile.shape[0]} vector(s), "
+                                f"{self._profile.shape[1]}-dim) from {path.name}")
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"speaker profile load failed: {e}")
 
@@ -78,11 +85,32 @@ class SpeakerVerifier:
         return self._profile is not None
 
     @staticmethod
-    def save_profile(embedding: np.ndarray) -> Path:
+    def save_profile(embedding: np.ndarray, *, append: bool = False, max_vectors: int = 12) -> Path:
+        """Save the voiceprint. ``embedding`` is one vector (legacy) or a (n,192) stack. With
+        ``append`` the new vectors join the existing ones (newest kept), so a second enrollment
+        under different acoustics (AirPods connected) ADDS coverage instead of replacing it.
+        Always leaves a ``.bak`` of the previous profile — recovery was impossible without it."""
         path = _default_profile_path()
-        emb = np.asarray(embedding, dtype=np.float32)
-        emb = emb / (np.linalg.norm(emb) or 1.0)
-        path.write_text(json.dumps({"embedding": emb.tolist()}), encoding="utf-8")
+        arr = np.atleast_2d(np.asarray(embedding, dtype=np.float32))
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        arr = arr / norms
+        if append and path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                old = data.get("embeddings") or ([data["embedding"]] if "embedding" in data else [])
+                if old:
+                    arr = np.vstack([np.asarray(old, dtype=np.float32), arr])
+            except Exception as e:  # noqa: BLE001 — unreadable old profile -> just replace it
+                logger.warning(f"could not append to old profile ({e}); replacing")
+        arr = arr[-max_vectors:]
+        if path.exists():
+            try:
+                path.with_suffix(".json.bak").write_text(path.read_text(encoding="utf-8"),
+                                                         encoding="utf-8")
+            except Exception:  # noqa: BLE001 — a failed backup never blocks saving
+                pass
+        path.write_text(json.dumps({"embeddings": arr.tolist()}), encoding="utf-8")
         return path
 
     # ---- embedding backend ------------------------------------------------------------
@@ -144,6 +172,7 @@ class SpeakerVerifier:
         emb = self.embed(pcm16, sample_rate)
         if emb is None:
             return True, 1.0  # backend missing -> don't lock the owner out
-        score = cosine(emb, self._profile)
+        # Best match against ANY enrolled vector — each vector covers one acoustic condition.
+        score = max(cosine(emb, row) for row in np.atleast_2d(self._profile))
         accept = should_accept(score, settings.speaker_threshold, self.has_profile, True)
         return accept, score

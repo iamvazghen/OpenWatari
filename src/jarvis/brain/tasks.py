@@ -377,6 +377,13 @@ class TaskQueue:
                               meta={"complexity": _grade(t.elapsed_s)})
             except Exception as e:  # noqa: BLE001 — a failed task must never crash the brain
                 logger.warning(f"background task {t.id} failed: {type(e).__name__}: {e}")
+                # Autonomous work the owner never watched happen. Record the TITLE, not just the id
+                # — six rows saying "task 0c7d735c failed" tell you nothing about what was lost.
+                from jarvis.shared import errors as _err
+
+                _err.record_op("agentic", "background_task", ok=False,
+                               detail=f"{type(e).__name__}: {e}",
+                               context={"task": t.title[:120], "id": t.id})
                 self.complete(t.id, "failed", result=f"{type(e).__name__}: {e}")
             await self._announce(t.id)
             self.drop(t.id)

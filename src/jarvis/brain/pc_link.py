@@ -61,7 +61,12 @@ class PcLink:
         cmd_id = uuid.uuid4().hex
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[cmd_id] = fut
-        await self._ws.send(json.dumps({"type": "pc_command", "id": cmd_id, "op": op, "args": args}))
+        # Carry the turn id across to the laptop so a failure there is filed under the same
+        # correlation key as the turn that triggered it.
+        from jarvis.shared import errors as _err
+
+        await self._ws.send(json.dumps({"type": "pc_command", "id": cmd_id, "op": op, "args": args,
+                                        "turn_id": _err.current_turn()}))
         try:
             _ok, output = await asyncio.wait_for(fut, timeout)
             return output

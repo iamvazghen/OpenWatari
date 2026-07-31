@@ -85,6 +85,41 @@ src = make_anticipation_source(llm=_FakeLLM(), world=fake_world, recent=lambda: 
                                refresh=_noop, clock=lambda: 10_000.0)
 clears(asyncio.run(src()), "anticipation (LLM-reasoned)")
 
+# --- routine anchors: in-window fires once-per-day-keyed, out-of-window is silent ------------
+import json  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+import jarvis.brain.tools.routines as routines_mod  # noqa: E402
+
+ps._ROUTINES_PATH = Path(tempfile.gettempdir()) / "test_routines.json"
+ps._ROUTINES_PATH.write_text(json.dumps([
+    {"key": "morning-stretch", "window": "07:45-09:45", "message": "stretch", "urgency": 0.65},
+    {"key": "training", "dynamic": True, "message": "train", "prep_message": "stretch first",
+     "lead_minutes": 40},
+]), encoding="utf-8")
+routines_mod._DAY_PLAN = Path(tempfile.gettempdir()) / "test_day_plan.json"
+routines_mod._DAY_PLAN.unlink(missing_ok=True)
+_tz = ZoneInfo(settings.user_tz)
+morning = datetime(2026, 7, 15, 8, 30, tzinfo=_tz)
+night = datetime(2026, 7, 15, 23, 30, tzinfo=_tz)
+sigs = ps.routine_signals(morning)
+clears(sigs, "routine (windowed entry, in window)")
+check(sigs and sigs[0].key == f"routine-morning-stretch-{morning.date()}",
+      f"routine key carries the date for once-per-day dedupe (got {sigs[0].key if sigs else None})")
+check(all("training" not in s.key for s in sigs),
+      "dynamic commitments NEVER fire from a window (their time varies by day)")
+check(ps.routine_signals(night) == [],
+      "routine NEVER fires outside its window (the 'stretch at night' complaint)")
+
+# --- morning planning prompt: asks while a dynamic commitment is unplanned, then goes quiet --
+plan_sigs = ps.routine_planning_signal(morning)
+clears(plan_sigs, "routine planning prompt (morning, training unplanned)")
+check(plan_sigs and "training" in plan_sigs[0].message, "planning prompt names the commitment")
+check(ps.routine_planning_signal(night) == [], "planning prompt never fires at night")
+routines_mod._DAY_PLAN.write_text(json.dumps({"date": str(morning.date()), "training": "12:30"}),
+                                  encoding="utf-8")
+check(ps.routine_planning_signal(morning) == [], "planning prompt silent once today is planned")
+
 # --- the invariant, stated directly ---------------------------------------------------------
 check(THRESH <= 0.66, f"threshold {THRESH} is not above the companion sources' ceiling")
 

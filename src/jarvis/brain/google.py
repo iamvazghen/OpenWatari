@@ -27,6 +27,11 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar",
+    # Wearable vitals (Google Fit) — sleep/activity/heart feed the wellbeing + proactive engines.
+    # Requested at the same consent so ONE browser click covers mail + calendar + vitals.
+    "https://www.googleapis.com/auth/fitness.activity.read",
+    "https://www.googleapis.com/auth/fitness.sleep.read",
+    "https://www.googleapis.com/auth/fitness.heart_rate.read",
 ]
 
 _token_cache: dict[str, float | str] = {"value": "", "expires": 0.0}

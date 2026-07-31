@@ -319,8 +319,10 @@ _TRAVEL_MODES = {"drive": "driving", "driving": "driving", "car": "driving",
                  "bike": "cycling", "cycling": "cycling", "cycle": "cycling"}
 
 
-async def travel_time(args: dict) -> str:
-    """Travel time + distance between two places (driving/walking/cycling). Keyless via OSRM."""
+async def osrm_travel_time(args: dict) -> str:
+    """Travel time + distance between two places (driving/walking/cycling). Keyless via OSRM.
+    Not registered directly any more: tools/maps.py exposes the single `travel_time` tool and
+    delegates HERE when no Google Maps key is configured (Google adds live traffic)."""
     dest = (args.get("to") or args.get("destination") or "").strip()
     if not dest:
         return "Where to, sir?"
@@ -420,19 +422,10 @@ SCHEMAS = [
             "from": {"type": "string", "description": "Source unit or 3-letter currency code."},
             "to": {"type": "string", "description": "Target unit or 3-letter currency code."}},
             "required": ["value", "from", "to"]}}},
-    {"type": "function", "function": {
-        "name": "travel_time",
-        "description": "How long to get somewhere and how far — driving (default), walking, or "
-                       "cycling. Use for 'how long to the airport', 'travel time from X to Y'. "
-                       "Origin defaults to your home location if omitted. No key needed. (For public "
-                       "TRANSIT, use composio_find_tools with the Google Maps toolkit.)",
-        "parameters": {"type": "object", "properties": {
-            "to": {"type": "string", "description": "Destination place/city."},
-            "from": {"type": "string", "description": "Origin (default: your home location)."},
-            "mode": {"type": "string", "enum": ["drive", "walk", "bike"],
-                     "description": "Travel mode (default drive)."}},
-            "required": ["to"]}}},
 ]
+
+# Back-compat alias (bench/test_phase12_utility drives the OSRM path by this name).
+travel_time = osrm_travel_time
 
 HANDLERS = {
     "weather": weather,
@@ -443,5 +436,4 @@ HANDLERS = {
     "wiki_lookup": wiki_lookup,
     "define_word": define_word,
     "convert": convert,
-    "travel_time": travel_time,
 }

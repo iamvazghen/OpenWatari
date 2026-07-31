@@ -8,6 +8,10 @@ password into the page. The profile is persistent, so logins stick between sessi
 One ``browser`` tool with an ``action`` so the LLM has a single clear verb:
   open · click · fill · type · press · read · screenshot · new_tab · back · close
 
+Ops are FORWARDED to the laptop (pc_agent) whenever it's connected, so "visible, on his screen, with
+his logins" stays true now that the brain lives on the VPS; they run in-process only when the brain
+itself is on the laptop.
+
 Needs the optional Playwright extra (``uv sync --extra browse`` then ``playwright install
 chromium``). If it's missing the tool says so instead of crashing.
 """
@@ -75,7 +79,7 @@ class _Browser:
 _BROWSER = _Browser()
 
 
-async def browser(args: dict) -> str:
+async def _browser_local(args: dict) -> str:
     timeout_s = 25.0
     try:
         return await asyncio.wait_for(_browser_action(args), timeout=timeout_s)
@@ -84,6 +88,18 @@ async def browser(args: dict) -> str:
             "The browser action timed out after 25 seconds, sir. I stopped trying so I don't get "
             "stuck in a loop. You may need to do that one manually or give me a simpler browser step."
         )
+
+
+async def browser(args: dict) -> str:
+    """Drive the browser on the LAPTOP when one is connected, else on this host.
+
+    The whole point of this tool (vs headless ``browse_web``) is a browser the owner can SEE and whose
+    logins persist in his own profile. Since the brain moved to the VPS, running it brain-side put it
+    on a headless server he can't see, with a different cookie jar — so it now takes the same PC_LINK
+    route as the file/process tools. Falls through to local when the brain runs on the laptop itself."""
+    from jarvis.brain.tools.system import _dispatch
+
+    return await _dispatch("browser", args, _browser_local)
 
 
 async def _browser_action(args: dict) -> str:
@@ -335,3 +351,6 @@ SCHEMAS = [
 ]
 
 HANDLERS = {"browser": browser}
+
+# Executed by the laptop's pc_agent when the brain forwards a browser op (see browser() above).
+LOCAL_HANDLERS = {"browser": _browser_local}

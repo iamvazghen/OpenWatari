@@ -717,8 +717,12 @@ class JarvisAgent:
 
     # ---- tools ------------------------------------------------------------------------
     async def _tool_get_time(self, _args: dict) -> str:
+        # Spoken aloud, so no timezone id in parentheses and no zero-padded hour: the edge reflex
+        # already says "It's 10:33 PM, sir.", while the brain path used to read out the full ISO-ish
+        # stamp with the tz identifier appended — fine in a log, wrong in a sentence.
         now = datetime.now(USER_TZ)
-        return now.strftime("%A, %d %B %Y, %H:%M") + f" ({settings.user_tz})"
+        return (f"{now.strftime('%I:%M %p').lstrip('0')} on "
+                f"{now.strftime('%A, %d %B %Y').replace(' 0', ' ')}")
 
     async def _tool_delegate(self, args: dict) -> str:
         if not self.fleet_authorized:
@@ -1207,9 +1211,14 @@ class JarvisAgent:
         self, name: str, args: dict, on_progress: Callable | None
     ) -> dict[str, Any]:
         """Run a single tool under the slow-job watchdog; degrade (never crash) on error."""
+        from jarvis.shared import errors as _err
+
+        started = time.monotonic()
+        detail = ""
         fn = self._registry.get(name)
         if fn is None:
             result, ok = f"unknown tool {name}", False
+            detail = f"no handler registered for '{name}'"
         else:
             try:
                 result, ok = await self._await_with_progress(fn(args), on_progress, name), True
@@ -1218,6 +1227,21 @@ class JarvisAgent:
                 result = (f"That tool ({name}) hit an error: {type(e).__name__}. "
                           "Tell the owner briefly that it failed and carry on.")
                 ok = False
+                detail = f"{type(e).__name__}: {e}"
+        # EVERY tool passes through here, so this one call gives all 133 (and every future one)
+        # end-to-end tracking. It catches the soft failures that never raise — a tool returning
+        # "isn't configured yet" or "I couldn't complete the…" looks like a normal answer to the
+        # agent loop, which is how a dead integration can stay dead unnoticed. Arguments are kept
+        # (scrubbed and clipped) because "which tool failed" is rarely enough to fix anything.
+        soft = ok and _err.looks_failed(result)
+        _err.record_op(
+            "tool", name,
+            ok=ok and not soft,
+            detail=detail or (str(result)[:200] if soft else ""),
+            duration_ms=(time.monotonic() - started) * 1000,
+            slow_ms=float(settings.tool_slow_warn_seconds) * 1000 * 3,
+            context={"args": str(args)[:200]},
+        )
         logger.info(f"tool {name}({args}) -> {str(result)[:80]}")
         from jarvis.brain.metrics import METRICS
         METRICS.incr("tool_calls")

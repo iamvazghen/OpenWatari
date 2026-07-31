@@ -17,8 +17,8 @@ async def resolve_contact(args: dict) -> str:
         return "Who should I look up, sir?"
     matches = _contacts.BOOK.resolve(name)
     if not matches:
-        return (f"I don't have a contact for '{name}', sir — what's their email or Telegram, "
-                "and I'll use it (say 'save it' to keep them for next time)?")
+        return (f"I don't have a contact for '{name}', sir — what's their email or Telegram? "
+                "Give me it and I'll save them with save_contact so they're there next time.")
     if len(matches) > 1:
         names = "; ".join(c.name for c in matches[:6])
         return f"I have a few matches for '{name}', sir: {names}. Which one?"
@@ -26,7 +26,40 @@ async def resolve_contact(args: dict) -> str:
     return f"{c.name}: {c.targets()}, sir."
 
 
+async def save_contact(args: dict) -> str:
+    name = (args.get("name") or "").strip()
+    if not name:
+        return "Whose details should I save, sir?"
+    c = _contacts.Contact(
+        name=name,
+        email=(args.get("email") or "").strip() or None,
+        telegram=(args.get("telegram") or "").strip() or None,
+        phone=(args.get("phone") or "").strip() or None,
+    )
+    if not (c.email or c.telegram or c.phone):
+        return f"I need at least an email, Telegram handle or phone number for {name}, sir."
+    if c.telegram and not c.telegram.startswith("@"):
+        c.telegram = "@" + c.telegram
+    try:
+        _contacts.BOOK.save(c)
+    except RuntimeError as e:
+        return f"I couldn't save that contact, sir — {e}."
+    return f"Saved, sir: {c.name} — {c.targets()}. I'll remember them next time."
+
+
 SCHEMAS = [
+    {"type": "function", "function": {
+        "name": "save_contact",
+        "description": "Remember a person's email / Telegram / phone so they can be messaged by NAME "
+                       "in future sessions. Call this when the owner gives you someone's details, or "
+                       "says 'save it' / 'remember him' after you asked who they are. Saving again "
+                       "under the same name updates that person rather than duplicating them.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "The person's name, as the owner says it."},
+            "email": {"type": "string", "description": "Their email address, if known."},
+            "telegram": {"type": "string", "description": "Their Telegram handle, e.g. @someone."},
+            "phone": {"type": "string", "description": "Their phone number in +country format."}},
+            "required": ["name"]}}},
     {"type": "function", "function": {
         "name": "resolve_contact",
         "description": "Resolve a person's NAME to their email / Telegram / phone before sending or "
@@ -38,4 +71,4 @@ SCHEMAS = [
             "required": ["name"]}}},
 ]
 
-HANDLERS = {"resolve_contact": resolve_contact}
+HANDLERS = {"resolve_contact": resolve_contact, "save_contact": save_contact}

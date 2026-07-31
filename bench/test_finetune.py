@@ -109,19 +109,37 @@ def main() -> None:
     after = {s["function"]["name"] for s in a._tools_for_turn("hello")}
     check("coding tools decay back out when unused", "read_source" not in after, str(sorted(after))[:80])
 
-    print("\n[5] Item 3 — primary is the benchmarked fast voice model; chain is provider-diverse")
-    # Updated 2026-06-14: bench/pick_model.py measures real time-to-first-SENTENCE under the full
-    # agent load. llama-3.3-70b-versatile won (~1.5s, smart, reliable streaming+tools). The old
-    # llama-3.1-8b-instant was fast-but-dumb ("Joe not Jarvis") — it must NOT be the primary.
-    # A chain entry may carry a provider prefix (e.g. "groq:llama-3.3-70b-versatile" routes the same
-    # 70b winner directly through Groq for ~0.3s TTFT) — strip it before comparing the model name.
-    primary_model = settings.llm_primary_model.split(":", 1)[-1]
-    check("primary is the benchmarked voice winner (llama-3.3-70b-versatile)",
-          primary_model == "llama-3.3-70b-versatile", settings.llm_primary_model)
-    check("the dumb 8b-instant is not the primary", primary_model != "llama-3.1-8b-instant")
+    print("\n[5] Item 3 — MiniMax primary, free tier behind it, Vercel gateway as the last resort")
+    # Policy change 2026-07-28 (owner's call, supersedes the 2026-06-14 latency-only pick):
+    # llama-3.3-70b-versatile is still the FASTEST (0.23s TTFT vs MiniMax 0.77s), but it lives on
+    # Groq's free daily quota — and when that quota and Gemini's rate limit landed together the
+    # WHOLE chain exhausted and Watari went mute mid-turn (40 x "brain turn failed" in 8 days).
+    # A paid, quota-independent primary is worth ~0.5s of TTFT. Ordering is therefore:
+    #   MiniMax (paid, reliable)  ->  free/self-hosted tier  ->  Vercel AI Gateway (paid backstop).
+    # The gateway must stay LAST so it is only ever billed when everything else has already failed.
+    primary_model = settings.llm_primary_model
+    check("primary is the paid, quota-independent MiniMax",
+          primary_model.startswith("minimax:"), primary_model)
+    check("the dumb 8b-instant is not the primary",
+          primary_model.split(":", 1)[-1] != "llama-3.1-8b-instant")
     check("primary is first in the chain", settings.llm_chain[0] == settings.llm_primary_model)
     check("chain is provider-diverse (>=2 distinct providers as fallbacks)",
           len(settings.llm_chain) >= 3, str(settings.llm_chain))
+    # The backstop: present, and the CONTIGUOUS TAIL of the chain (2026-07-28: two cheap fast
+    # non-reasoning gateway models — deepseek-v3.2 then qwen3.5-flash — replace the pricier haiku).
+    # A vercel: entry anywhere before the tail would bill the gateway while free models were healthy.
+    chain = settings.llm_chain
+    vercel_at = [i for i, m in enumerate(chain) if m.startswith("vercel:")]
+    check("Vercel AI Gateway is wired into the chain", bool(vercel_at), str(chain))
+    check("Vercel AI Gateway entries are the ABSOLUTE last resort (contiguous tail)",
+          vercel_at == list(range(len(chain) - len(vercel_at), len(chain))),
+          f"at {vercel_at} of {len(chain)}")
+    check("gateway tail is cheap + non-reasoning (no thinking/r1/claude/gpt tiers)",
+          all(not any(x in chain[i].lower() for x in ("thinking", "r1", "claude", "gpt-5", "opus"))
+              for i in vercel_at), str([chain[i] for i in vercel_at]))
+    check("a free/groq tier sits between the primary and the gateway",
+          any(m.startswith(("groq:", "gemini", "mistral", "ollama:"))
+              for m in chain[1:vercel_at[0]] if vercel_at), str(chain))
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

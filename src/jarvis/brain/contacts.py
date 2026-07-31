@@ -90,6 +90,36 @@ class ContactBook:
                 out.append(c)
         return out
 
+    def save(self, contact: Contact) -> str:
+        """Append (or update) one contact and return what was stored.
+
+        The book was read-only until 2026-07-30, even though resolve_contact told the owner to "say
+        'save it' and I'll keep them for next time" — so every new person had to be re-dictated in the
+        next session. Writing the same forgiving one-line format the parser reads keeps the file
+        hand-editable."""
+        bits = [contact.name]
+        if contact.email:
+            bits.append(f"<{contact.email}>")
+        if contact.telegram:
+            bits.append(f"tg:{contact.telegram}")
+        if contact.phone:
+            bits.append(f"tel:{contact.phone}")
+        line = "- " + " ".join(bits)
+        existing = [c for c in self.all() if c.name.lower() == contact.name.lower()]
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            if existing:  # replace that person's line rather than growing a second entry
+                text = self._path.read_text(encoding="utf-8", errors="ignore")
+                kept = [ln for ln in text.splitlines()
+                        if not ((p := _parse_line(ln)) and p.name.lower() == contact.name.lower())]
+                self._path.write_text("\n".join(kept + [line]) + "\n", encoding="utf-8")
+            else:
+                with self._path.open("a", encoding="utf-8") as f:
+                    f.write(("" if not self._path.stat().st_size else "") + line + "\n")
+        except OSError as e:
+            raise RuntimeError(f"could not write the contact book: {e}") from e
+        return line
+
     def resolve(self, query: str) -> list[Contact]:
         """Contacts whose name matches ``query`` (case-insensitive: exact, then any-word match)."""
         q = (query or "").strip().lower()

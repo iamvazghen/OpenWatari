@@ -157,14 +157,40 @@ class BrainClient:
 
     async def send_utterance(self, text: str, ts_user_stop_ms: int = 0) -> bool:
         """Send a finished transcript. Returns False if the link is down (caller may retry/queue)."""
+        from jarvis.shared import errors as _err
+
+        # Mint the correlation id HERE — this is the moment a turn begins for the whole system, so
+        # everything the edge logs from now on, and everything the brain logs for this turn, shares
+        # one key. Tracing a bad turn across two machines is then a single lookup.
+        turn_id = _err.new_turn()
         return await self._send(
             Utterance(
                 session_id=self.session_id,
                 text=text,
                 ts_user_stop_ms=ts_user_stop_ms,
                 device_id=self.device_id,
+                turn_id=turn_id,
             )
         )
+
+    def ship_error(self, entry: dict) -> None:
+        """Hand one journal entry to the brain (fire-and-forget).
+
+        Synchronous by design: it is called from the loguru sink, which must never block or await.
+        If the link is down the entry is simply dropped — it is already on local disk, and the whole
+        point is that observability can fail without taking a turn with it."""
+        ws = self._ws
+        if ws is None:
+            return
+        try:
+            import asyncio
+
+            from jarvis.shared.protocol import ErrorReport
+
+            msg = ErrorReport(session_id=self.session_id, entry=entry)
+            asyncio.get_running_loop().create_task(self._send(msg))
+        except Exception:  # noqa: BLE001 — never let error reporting raise into the logger
+            pass
 
     async def barge(self) -> bool:
         """Tell the brain to cancel the in-flight turn (user started talking over Jarvis)."""

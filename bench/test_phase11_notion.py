@@ -55,6 +55,14 @@ def main() -> None:
     check("title_of reads the title prop", notion._title_of(page) == "My Page", notion._title_of(page))
     check("title_of falls back to untitled", notion._title_of({"properties": {}}) == "(untitled)")
 
+    print("\n[2b] long text chunks at word boundaries — never a mid-sentence slice")
+    long = ("The quick brown fox jumps over the lazy dog. " * 100).strip()  # ~4.5k chars
+    cs = notion._rt_chunks(long)
+    check("every chunk within Notion's 2000-char element cap", all(len(c) <= 1900 for c in cs))
+    check("no content lost and no mid-word cuts", " ".join(cs) == long)
+    check("short text passes through as one element", notion._rt_chunks("short") == ["short"])
+    check("runaway text bounded to 10 chunks", len(notion._rt_chunks("x" * 100000)) == 10)
+
     print("\n[3] all five tools registered")
     names = set(tool_names())
     expected = {"notion_search", "notion_read_page", "notion_append", "notion_comment",

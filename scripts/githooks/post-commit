@@ -1,0 +1,6 @@
+#!/bin/sh
+# Keep the code graph fresh: AST-only rebuild after each commit. Never blocks the commit.
+# (core.hooksPath=scripts/githooks, so .git/hooks/post-commit is ignored — this lives here.)
+command -v graphify >/dev/null 2>&1 || exit 0
+( cd "$(git rev-parse --show-toplevel)" && graphify update >/dev/null 2>&1 & )
+exit 0

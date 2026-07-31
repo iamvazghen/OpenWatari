@@ -453,11 +453,26 @@ async def _activity_snapshot_local(args: dict) -> str:
     if sys.platform != "win32":
         return "{}"
     try:
-        return await asyncio.to_thread(_activity_snapshot_ctypes)
+        snap = await asyncio.to_thread(_activity_snapshot_ctypes)
     except Exception as e:  # noqa: BLE001 — perception must never raise into the poller
         from loguru import logger
         logger.debug(f"activity_snapshot ctypes skipped ({type(e).__name__}: {e})")
         return "{}"
+    # Merge the speaker-gate's room verdict (camera check fired on an unrecognized/overlapping voice)
+    # so the brain knows who's in the room, not just which window is focused. Fresh = last 10 min.
+    try:
+        import json as _json
+        import time as _time
+        from pathlib import Path as _Path
+        rc = _json.loads((_Path.home() / ".jarvis" / "room_context.json").read_text(encoding="utf-8"))
+        if _time.time() - float(rc.get("ts", 0)) < 600:
+            d = _json.loads(snap or "{}")
+            d["room"] = {"reason": rc.get("reason"), "verdict": rc.get("verdict"),
+                         "age_s": int(_time.time() - float(rc.get("ts", 0)))}
+            snap = _json.dumps(d)
+    except Exception:  # noqa: BLE001 — no/stale/corrupt room context just means no merge
+        pass
+    return snap
 
 
 # ---- Public handlers: forward to the laptop executor if connected, else run locally -------------

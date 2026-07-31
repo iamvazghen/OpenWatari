@@ -78,11 +78,30 @@ def main() -> None:
     check("no contact file -> graceful note, no crash", "don't have a contact" in out_degrade.lower(),
           out_degrade)
 
-    print("\n[4] registered + read-only (send stays the gated step)")
+    print("\n[4] saving people so they survive the session")
+    # Until 2026-07-30 the book was read-only while resolve_contact told the owner to "say 'save it'
+    # and I'll keep them" — so every new person had to be re-dictated next session.
+    from jarvis.brain.tools.contacts import save_contact
+
+    save_book = ContactBook(path=tmp.parent / "saved.md")
+    contacts_mod.BOOK = save_book
+    asyncio.run(save_contact({"name": "Nona", "telegram": "nonak", "email": "nona@example.com"}))
+    check("a saved contact resolves afterwards", len(save_book.resolve("Nona")) == 1)
+    saved = save_book.resolve("Nona")[0]
+    check("a bare handle is stored as @handle", saved.telegram == "@nonak", str(saved.telegram))
+    check("the saved email round-trips", saved.email == "nona@example.com", str(saved.email))
+    asyncio.run(save_contact({"name": "Nona", "phone": "+15550001111"}))
+    check("saving the same name updates instead of duplicating",
+          len(save_book.resolve("Nona")) == 1 and save_book.resolve("Nona")[0].phone == "+15550001111")
+    out_bare = asyncio.run(save_contact({"name": "Bob"}))
+    check("saving with no target at all is refused", "at least" in out_bare.lower(), out_bare)
+
+    print("\n[5] registered + confirm posture (send stays the gated step)")
     from jarvis.brain.proactive import confirm_required
     from jarvis.brain.tools import tool_names
 
     check("resolve_contact is registered", "resolve_contact" in tool_names())
+    check("save_contact is registered", "save_contact" in tool_names())
     check("resolve_contact is NOT confirm-gated (read-only)", not confirm_required("resolve_contact"))
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")

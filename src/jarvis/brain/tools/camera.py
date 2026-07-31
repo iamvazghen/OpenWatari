@@ -26,6 +26,7 @@ from jarvis.brain.tools.system import _dispatch  # forward-to-laptop-if-connecte
 # Owner face refs live locally (never uploaded). One .npy of LBP histograms captured at enrollment.
 _FACE_DIR = Path.home() / ".jarvis" / "faces"
 _OWNER_REFS = _FACE_DIR / "owner.npy"
+_MAX_REFS = 80   # newest refs kept across enrollment sessions (append, don't clobber)
 
 
 def _capture_jpeg(index: int = 0, warmup: int = 20, min_brightness: float = 12.0) -> bytes | None:
@@ -187,12 +188,18 @@ def _owner_refs():
 
 
 def _enroll_from_jpegs(jpegs: list) -> int:
-    """Enrol the owner from frames: store the LBP histogram of every detected face. Returns count."""
+    """Enrol the owner from frames: store the LBP histogram of every detected face. APPENDS to any
+    existing refs (each session adds lighting/angle diversity instead of discarding it), keeping the
+    newest ``_MAX_REFS``. Returns the number of refs now stored."""
     import numpy as np
 
     hists = [_lbp_hist(f) for j in jpegs for f in _gray_faces(j)]
     if not hists:
         return 0
+    old = _owner_refs()
+    if old is not None:
+        hists = list(old) + hists
+    hists = hists[-_MAX_REFS:]
     _FACE_DIR.mkdir(parents=True, exist_ok=True)
     np.save(_OWNER_REFS, np.array(hists))
     return len(hists)

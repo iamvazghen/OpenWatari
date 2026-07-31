@@ -20,8 +20,41 @@ its own and reused by both the edge transport builder and the runtime switch com
 from __future__ import annotations
 
 import json
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _com_init() -> None:
+    """Initialise COM on this worker thread (Windows only, best-effort).
+
+    PortAudio's Windows host APIs (WASAPI/WDM-KS) enumerate through COM, which must be initialised
+    per-thread. asyncio.to_thread() hands the call a fresh pool thread with no COM, and PortAudio
+    then SEGFAULTS the whole process — a native crash Python cannot catch, so it killed the edge
+    outright and made the audio-watchdog bench look 'environmentally flaky'. ctypes keeps this
+    dependency-free (COINIT_APARTMENTTHREADED = 0x2).
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.ole32.CoInitializeEx(None, 0x2)
+    except Exception:  # noqa: BLE001 — already-initialised or unavailable: nothing to do
+        pass
+
+
+# ponytail: ONE dedicated thread for every PortAudio call. Single-threaded because PortAudio
+# enumeration is not safe to run concurrently from several threads either, and COM is initialised
+# once here instead of at every call site.
+_audio_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="portaudio",
+                                 initializer=_com_init)
+
+
+def run_audio_call(fn, *args, **kwargs):
+    """Run a PortAudio-touching callable on the dedicated COM-initialised thread."""
+    return _audio_pool.submit(fn, *args, **kwargs).result()
 
 # Friendly aliases -> substrings to look for in a device's reported name (lowercased).
 # Lets a voice command say "headphones" / "speakers" without knowing the exact OS label.
@@ -142,6 +175,24 @@ _PRIVATE_OUTPUT_CUES = ("airpod", "headphone", "headset", "buds", "earphone", "b
 # endpoints so auto-route only ever picks a genuinely removable headset (AirPods/BT/USB), else OS default.
 _INTERNAL_OUTPUT_CUES = ("realtek", "hd audio", "high definition audio", "sst", "hdmi", "displayport", "nvidia")
 
+# The generic words a private endpoint's NAME is allowed to consist of. A real removable device
+# carries a product identity beyond these ("Headphones (AirPods <owner>)"); the built-in jack on
+# this laptop enumerates as a bare "Headphones ()" — production 2026-07-29: auto-route picked it and
+# Watari answered ~20 turns into an endpoint with nothing attached (the "hey watari and nothing
+# comes" report). No internal-cue matched because the product name is EMPTY, so require identity.
+_GENERIC_NAME_RE = None  # built lazily below (module import stays cheap)
+
+
+def _has_product_identity(name: str) -> bool:
+    """True if the device name contains anything beyond generic headphone words + punctuation."""
+    global _GENERIC_NAME_RE
+    import re
+    if _GENERIC_NAME_RE is None:
+        _GENERIC_NAME_RE = re.compile(
+            r"headphones?|headsets?|earphones?|earbuds|buds|airpods?|bluetooth|bt audio|stereo|hands.?free")
+    core = _GENERIC_NAME_RE.sub("", name.lower())
+    return bool(re.sub(r"[()\s\-_.,]+", "", core))
+
 
 def prefer_private_output(devices: list[AudioDevice] | None = None) -> AudioDevice | None:
     """Return a connected private/headphone OUTPUT device (e.g. AirPods Pro Max) if one exists.
@@ -156,6 +207,7 @@ def prefer_private_output(devices: list[AudioDevice] | None = None) -> AudioDevi
         d for d in outputs
         if any(c in d.name.lower() for c in _PRIVATE_OUTPUT_CUES)
         and not any(c in d.name.lower() for c in _INTERNAL_OUTPUT_CUES)  # skip the built-in headphone jack
+        and _has_product_identity(d.name)  # a bare "Headphones ()" is the empty jack, not a device
     ]
     if not matches:
         return None

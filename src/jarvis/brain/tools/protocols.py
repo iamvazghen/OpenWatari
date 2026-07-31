@@ -6,7 +6,7 @@ verifies it before anything executes. Wrong/missing password → nothing runs.
 
 from __future__ import annotations
 
-from jarvis.brain.protocols import describe_protocols, run_protocol as _run
+from jarvis.brain.protocols import describe_protocols, run_protocol_async as _run
 
 
 async def run_protocol(args: dict) -> str:
@@ -18,7 +18,7 @@ async def run_protocol(args: dict) -> str:
     if not password:
         verb = "drill" if drill else "run"
         return f"Protocol {name} requires the password to {verb} it, sir. What is it?"
-    result = _run(name, password, drill=drill)
+    result = await _run(name, password, drill=drill)
     return result.spoken if (result.ok and result.spoken) else result.message
 
 

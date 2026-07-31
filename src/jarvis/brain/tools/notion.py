@@ -118,6 +118,27 @@ async def notion_read_page(args: dict) -> str:
         return tool_error("Notion read", e)
 
 
+def _rt_chunks(text: str, limit: int = 1900, max_chunks: int = 10) -> list[str]:
+    """Split text at whitespace into <=limit-char pieces (Notion caps one rich_text element at 2000).
+    The old ``text[:1900]`` slice ended long comments MID-SENTENCE and silently threw the rest away —
+    the owner's #1 Notion complaint. max_chunks bounds a runaway worker at ~19k chars."""
+    text = text.strip()
+    out: list[str] = []
+    while text and len(out) < max_chunks:
+        if len(text) <= limit:
+            out.append(text)
+            break
+        cut = text.rfind(" ", 0, limit)
+        cut = cut if cut > limit // 2 else limit   # no usable space -> hard cut, still no data loss
+        out.append(text[:cut])
+        text = text[cut:].lstrip()
+    return out or [""]
+
+
+def _rt(content: str) -> dict:
+    return {"type": "text", "text": {"content": content}}
+
+
 async def notion_append(args: dict) -> str:
     if not _configured():
         return not_configured("Notion", _NEEDS)
@@ -129,8 +150,8 @@ async def notion_append(args: dict) -> str:
         await _post(f"/blocks/{page_id}/children", {
             "children": [{
                 "object": "block", "type": "paragraph",
-                "paragraph": {"rich_text": [{"type": "text", "text": {"content": text[:1900]}}]},
-            }],
+                "paragraph": {"rich_text": [_rt(c)]},
+            } for c in _rt_chunks(text)],
         })
         return "Added that to the Notion page, sir."
     except Exception as e:  # noqa: BLE001
@@ -147,7 +168,7 @@ async def notion_comment(args: dict) -> str:
     try:
         await _post("/comments", {
             "parent": {"page_id": page_id},
-            "rich_text": [{"type": "text", "text": {"content": text[:1900]}}],
+            "rich_text": [_rt(c) for c in _rt_chunks(text)],
         })
         return "Comment posted on the Notion page, sir."
     except Exception as e:  # noqa: BLE001
@@ -170,8 +191,8 @@ async def notion_create_page(args: dict) -> str:
         if content:
             body["children"] = [{
                 "object": "block", "type": "paragraph",
-                "paragraph": {"rich_text": [{"type": "text", "text": {"content": content[:1900]}}]},
-            }]
+                "paragraph": {"rich_text": [_rt(c)]},
+            } for c in _rt_chunks(content)]
         await _post("/pages", body)
         return f"Created the Notion page '{title}', sir."
     except Exception as e:  # noqa: BLE001

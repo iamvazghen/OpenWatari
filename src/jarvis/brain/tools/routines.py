@@ -133,7 +133,105 @@ async def self_health(args: dict) -> str:
         return tool_error("self health", e)
 
 
+# ---- dynamic day planning (2026-07-28) -----------------------------------------------------------
+# The owner's standing commitments (train daily, read) have NO fixed time — "it can be morning, it
+# can be noon". plan_today turns his stated time for TODAY into concrete reminders (incl. a prep
+# reminder — the stretch — lead_minutes before training). day_plan.json records what's planned so
+# the morning planning prompt only asks about what's still open.
+import json as _json
+
+_DAY_PLAN = Path.home() / ".jarvis" / "day_plan.json"
+
+
+def _load_routines() -> list[dict]:
+    from jarvis.brain.proactive_signals import _DEFAULT_ROUTINES, _ROUTINES_PATH
+    try:
+        return _json.loads(_ROUTINES_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — missing/corrupt -> defaults
+        return _DEFAULT_ROUTINES
+
+
+def _load_day_plan(date_str: str) -> dict:
+    try:
+        plan = _json.loads(_DAY_PLAN.read_text(encoding="utf-8"))
+        return plan if plan.get("date") == date_str else {"date": date_str}
+    except Exception:  # noqa: BLE001
+        return {"date": date_str}
+
+
+def unplanned_commitments(local_now: datetime) -> list[dict]:
+    """Dynamic routine entries with no time planned for today yet."""
+    plan = _load_day_plan(str(local_now.date()))
+    return [r for r in _load_routines()
+            if r.get("dynamic") and r.get("key") and r["key"] not in plan]
+
+
+async def plan_today(args: dict) -> str:
+    """Owner said when a commitment happens today -> schedule its reminders now."""
+    commitment = (args.get("commitment") or "").strip().lower()
+    when = (args.get("time") or "").strip()
+    if not (commitment and when):
+        return "Tell me which commitment and what time today, sir — e.g. training at 12:30."
+    entry = next((r for r in _load_routines()
+                  if r.get("dynamic") and (commitment in r.get("key", "") or r.get("key", "") in commitment)),
+                 None) or {"key": commitment, "message": f"{commitment.title()} time, sir."}
+    now = datetime.now(USER_TZ)
+    try:
+        if ":" in when and "T" not in when and "-" not in when:
+            h, m = when.split(":", 1)
+            target = now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+        else:
+            target = datetime.fromisoformat(when)
+            if target.tzinfo is None:
+                target = target.replace(tzinfo=USER_TZ)
+    except (ValueError, TypeError):
+        return f"I couldn't read '{when}' as a time, sir — give me HH:MM."
+    if target <= now:
+        return f"{when} today is already past, sir — did you mean tomorrow, or a later time?"
+    try:
+        from datetime import timedelta
+
+        from jarvis.brain.tools.reminders import set_reminder
+
+        notes = [await set_reminder({"message": entry.get("message") or f"{commitment.title()} time, sir.",
+                                     "at": target.isoformat()})]
+        lead = int(entry.get("lead_minutes", 0) or 0)
+        prep = entry.get("prep_message")
+        if lead and prep:
+            prep_at = target - timedelta(minutes=lead)
+            if prep_at > now:
+                notes.append(await set_reminder({"message": prep, "at": prep_at.isoformat()}))
+        plan = _load_day_plan(str(now.date()))
+        plan[entry.get("key", commitment)] = target.strftime("%H:%M")
+        _DAY_PLAN.parent.mkdir(parents=True, exist_ok=True)
+        _DAY_PLAN.write_text(_json.dumps(plan), encoding="utf-8")
+        extra = f" I'll cue your prep {lead} minutes before." if lead and prep and len(notes) > 1 else ""
+        return f"Planned, sir — {entry.get('key', commitment)} at {target.strftime('%H:%M')}.{extra}"
+    except Exception as e:  # noqa: BLE001
+        return tool_error("day planning", e)
+
+
 SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_today",
+            "description": (
+                "The owner tells you WHEN a standing commitment happens TODAY — 'I'll train at "
+                "noon', 'training at 19:00', 'reading around 21:30'. Schedules today's reminder(s), "
+                "including the stretch prep before training. Frictionless — no confirmation needed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "commitment": {"type": "string",
+                                   "description": "Which commitment: training, reading, ..."},
+                    "time": {"type": "string", "description": "Today's time, HH:MM (owner's timezone)."},
+                },
+                "required": ["commitment", "time"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -187,4 +285,5 @@ SCHEMAS = [
     },
 ]
 
-HANDLERS = {"routine": routine, "set_home_location": set_home_location, "self_health": self_health}
+HANDLERS = {"routine": routine, "set_home_location": set_home_location, "self_health": self_health,
+            "plan_today": plan_today}

@@ -148,10 +148,13 @@ async def define_macro(args: dict) -> str:
     return f"Macro '{name}' saved, sir — {n} step{'s' if n != 1 else ''}."
 
 
-async def run_steps(steps: list, label: str) -> str:
+async def run_steps(steps: list, label: str, *, authorized: bool = False) -> str:
     """Execute an ordered step list (tool / say / skill / wait_seconds), returning a transcript.
     Shared by run_macro (user-defined) and invoke_skill (built-in skill manifests) — one proven
-    executor, so a skill runs exactly like a macro. Each step failure is contained, not fatal."""
+    executor, so a skill runs exactly like a macro. Each step failure is contained, not fatal.
+
+    ``authorized`` says the owner confirmed THIS run; only then may it perform confirm-gated steps.
+    It defaults to False so any future caller is safe by default."""
     steps = steps or []
     transcript: list[str] = [f"{label} ({len(steps)} steps)."]
     for i, step in enumerate(steps, 1):
@@ -174,21 +177,56 @@ async def run_steps(steps: list, label: str) -> str:
         # Default: tool call.
         tool = step.get("tool", "")
         sub_args = step.get("args") or {}
-        try:
-            from jarvis.brain.tools import tool_handlers  # lazy (avoid cycle)
-            fn = tool_handlers().get(tool)
-        except Exception:  # noqa: BLE001
-            fn = None
-        if fn is None:
-            transcript.append(f"[{i}/{len(steps)}] '{tool}': unknown tool.")
-            continue
-        try:
-            res = await fn(sub_args)
-        except Exception as e:  # noqa: BLE001
-            res = tool_error(f"step {i}", e)
+        res = await run_step_tool(tool, sub_args, authorized=authorized, label=f"step {i}")
         head = (res or "").strip().split("\n", 1)[0][:120]
         transcript.append(f"[{i}/{len(steps)}] {tool} -> {head}")
     return "\n".join(transcript)
+
+
+async def run_step_tool(tool: str, sub_args: dict, *, authorized: bool, label: str) -> str:
+    """Run ONE macro/skill step's tool through the same guarantees a normal tool call gets.
+
+    This used to call the handler straight out of the registry, which quietly skipped everything the
+    agent's dispatcher provides: the confirm gate, the audit trail, error tracking and metrics. That
+    made a saved macro a way to reach any destructive tool — ``git_push``, ``browser``,
+    ``send_email`` — with no confirmation at all, even though ``run_macro`` itself was ungated.
+
+    Now a confirm-gated step is REFUSED unless the macro run was itself authorised (which the agent
+    guarantees, because run_macro/invoke_skill are confirm-gated whenever their steps contain a gated
+    tool). Every step is audited and tracked either way."""
+    import time as _time
+
+    from jarvis.brain import audit
+    from jarvis.brain.proactive import confirm_required
+    from jarvis.shared import errors as _err
+
+    try:
+        from jarvis.brain.tools import tool_handlers  # lazy (avoid cycle)
+        fn = tool_handlers().get(tool)
+    except Exception:  # noqa: BLE001
+        fn = None
+    if fn is None:
+        _err.record_op("macro-step", tool or "?", ok=False, detail="unknown tool")
+        return f"'{tool}': unknown tool."
+
+    if confirm_required(tool, sub_args) and not authorized:
+        audit.record(tool, sub_args, "blocked: confirmation required (macro step)", ok=False)
+        _err.record_op("macro-step", tool, ok=False, detail="blocked: needs the owner's confirmation")
+        return (f"'{tool}' needs the owner's confirmation and this run wasn't authorised — skipped. "
+                "Ask him directly, then run it.")
+
+    started = _time.monotonic()
+    try:
+        res = await fn(sub_args)
+        ok = not _err.looks_failed(res)
+    except Exception as e:  # noqa: BLE001
+        res, ok = tool_error(label, e), False
+    _err.record_op("macro-step", tool, ok=ok,
+                   detail="" if ok else str(res)[:200],
+                   duration_ms=(_time.monotonic() - started) * 1000,
+                   context={"args": str(sub_args)[:200]})
+    audit.record(tool, sub_args, str(res), ok=ok)
+    return res
 
 
 async def run_macro(args: dict) -> str:
@@ -202,7 +240,9 @@ async def run_macro(args: dict) -> str:
         return f"I don't have a macro called '{name}', sir. Try list_macros."
     desc = (m.get("description") or "").strip()
     label = f"Running macro '{name}'" + (f" — {desc}" if desc else "")
-    out = await run_steps(m.get("steps") or [], label)
+    # authorized=True is safe here and ONLY here: run_macro is confirm-gated whenever this macro's
+    # own steps contain a gated tool, so reaching this line means the owner already said yes.
+    out = await run_steps(m.get("steps") or [], label, authorized=True)
     return out + f"\nMacro '{name}' finished, sir."
 
 

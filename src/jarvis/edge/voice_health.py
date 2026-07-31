@@ -44,6 +44,13 @@ _permanent = False        # a quota/credit/auth error seen -> fail over on the F
 _PERMANENT_CUES = ("quota", "credit", "insufficient", "unauthorized", "payment", "exceeded",
                    "invalid api key", "invalid_api_key", "forbidden", " 401", " 402", " 403")
 
+# Errors that say nothing about CLOUD health and must not count toward failover. Deepgram closes an
+# idle socket with 1011 "did not receive audio data ... within the timeout window" (net0001) — that is
+# OUR mic being silent (or gated), not Deepgram being down. Counting it demoted a perfectly healthy
+# ElevenLabs key to local Piper overnight (2026-07-30: key had 12.9k/63k chars left). A genuinely dead
+# mic is already caught by the audio watchdog's frame-gap check, which is the right detector for it.
+_NOT_CLOUD_FAULT_CUES = ("did not receive audio data", "net0001")
+
 
 def record_cloud_error(detail: str = "") -> None:
     """A monitored cloud STT/TTS service escalated an error (called from its push_error_frame).
@@ -56,9 +63,13 @@ def record_cloud_error(detail: str = "") -> None:
     Writing the cooldown at the moment of failure makes the next restart come up on LOCAL regardless of
     which teardown path wins the race. Idempotent with the watchdog's note_failover()."""
     global _permanent
+    text = (detail or "").lower()
+    if any(c in text for c in _NOT_CLOUD_FAULT_CUES):
+        logger.info(f"cloud voice error ignored (our silent mic, not a cloud fault): {detail[:100]}")
+        return
     now = time.monotonic()
     _errors.append(now)
-    if any(c in (detail or "").lower() for c in _PERMANENT_CUES):
+    if any(c in text for c in _PERMANENT_CUES):
         _permanent = True
         logger.error(f"cloud voice PERMANENT error (out of credits / bad key) — failing over: {detail[:120]}")
     recent = sum(1 for t in _errors if now - t <= _ERR_WINDOW_S)
@@ -182,4 +193,11 @@ if __name__ == "__main__":
     assert float(_COOLDOWN.read_text()) - time.time() > _COOLDOWN_S, "permanent failure -> LONG cooldown"
     _COOLDOWN.unlink(missing_ok=True)
     assert not in_cooldown(), "no marker -> not in cooldown"
+    # Deepgram's idle-socket close is OUR silent mic, not a cloud fault — it must never fail over.
+    _errors.clear(); _permanent = False
+    for _ in range(_ERR_THRESHOLD + 2):
+        record_cloud_error("received 1011 (internal error) Deepgram did not receive audio data or a "
+                           "text message within the timeout window. See https://dpgr.am/net0001")
+    assert not cloud_failing(), "idle-mic timeouts must not count as cloud failure"
+    assert not in_cooldown(), "idle-mic timeouts must not trip the local cooldown"
     print("voice_health self-check OK")

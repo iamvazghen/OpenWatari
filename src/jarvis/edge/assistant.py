@@ -234,10 +234,17 @@ async def build_brain():
         if await rb.start():
             logger.info(f"brain: REMOTE — unified VPS brain at {settings.brain_ws_url}")
             return rb
-        await rb.stop()
         if mode == "remote":
-            logger.warning("brain: 'remote' requested but the VPS brain is unreachable — "
-                           "running the LOCAL brain for this session")
+            # Don't demote for the whole session on one slow handshake. A cold edge start contends
+            # with model loading, so the first connect regularly misses the 3s gate even though the
+            # link is healthy a second later — and stopping the client here pinned the edge to the
+            # LOCAL brain (weaker chain, separate memory) until the next restart. RemoteBrain already
+            # routes PER TURN and answers on a warm local standby while the link is down, so keeping
+            # the supervised client alive promotes back to the VPS the moment it connects.
+            logger.warning("brain: VPS brain not up yet — keeping the supervised REMOTE link and "
+                           "answering on the local standby until it connects")
+            return rb
+        await rb.stop()
     brain = JarvisBrain()
     await brain.warmup()  # prime the LLM so the first reply isn't a cold ~3s TTFT
     logger.info("brain: LOCAL — in-process agent")
@@ -289,8 +296,17 @@ async def main() -> None:
     finally:
         watch.cancel()
         run_task.cancel()
+        # Bound the teardown. An unbounded `await run_task` is how a 68s mic stall became 21 MINUTES of
+        # deafness on 2026-07-30: the watchdog tripped at 22:32:45, pipecat's runner never finished
+        # unwinding (a dead PyAudio stream / half-closed cloud socket doesn't always end its await),
+        # and the supervisor only got control back at 22:53:57. Recovering with streams that haven't
+        # fully released is recoverable — the watchdog simply trips again in 60s — but staying deaf is
+        # not, so stop waiting and let the rebuild proceed.
         try:
-            await run_task
+            await asyncio.wait_for(run_task, timeout=15.0)
+        except asyncio.TimeoutError:
+            logger.error("edge: pipeline teardown did not finish in 15s — rebuilding anyway rather "
+                         "than staying deaf (stale streams get re-resolved on the way up)")
         except (asyncio.CancelledError, Exception):  # noqa: BLE001 — teardown, releases the devices
             pass
         if pulse:

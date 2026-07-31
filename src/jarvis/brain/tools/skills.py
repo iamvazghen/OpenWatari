@@ -100,7 +100,21 @@ async def invoke_skill(args: dict) -> str:
             return f"I don't have a runnable skill called '{name}', sir. I can run: {avail}."
         name, m = match, _SKILL_MANIFESTS[match]
     from jarvis.brain.tools.macros import run_steps  # lazy (avoid import cycle)
-    return await run_steps(m["steps"], f"Running skill '{name}' — {m['desc']}")
+
+    # authorized=True is safe here and ONLY here: invoke_skill is confirm-gated whenever the skill's
+    # own steps contain a gated tool, so reaching this line already means the owner said yes.
+    return await run_steps(m["steps"], f"Running skill '{name}' — {m['desc']}", authorized=True)
+
+
+def skill_steps(name: str) -> list:
+    """The steps a named skill would run — used by the confirm gate to decide whether invoking it
+    needs the owner's yes. Tolerant of partial names, exactly like invoke_skill's own lookup."""
+    key = (name or "").strip().lower().replace(" ", "-")
+    m = _SKILL_MANIFESTS.get(key)
+    if m is None:
+        match = next((k for k in _SKILL_MANIFESTS if key and key in k), None)
+        m = _SKILL_MANIFESTS.get(match) if match else None
+    return list((m or {}).get("steps") or [])
 
 
 async def read_skill(args: dict) -> str:

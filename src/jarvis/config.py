@@ -304,6 +304,14 @@ class Settings(BaseSettings):
     # "minimax:MiniMax-M3" for max quality. Needs JARVIS_MINIMAX_API_KEY + account credits.
     minimax_api_key: str | None = None
     minimax_base_url: str = "https://api.minimax.io/v1"
+    #   * "vercel:<model>"   -> Vercel AI Gateway (OpenAI-compatible), a PAID aggregator that reaches
+    #                           many providers behind one key. Deliberately positioned as the ABSOLUTE
+    #                           LAST rung of every chain: it only ever answers when MiniMax and every
+    #                           free/self-hosted model ahead of it has already failed, so it is the
+    #                           "never go mute" backstop rather than a routine route. Model names are
+    #                           provider-qualified, e.g. "vercel:anthropic/claude-sonnet-4.5".
+    vercel_ai_gateway_api_key: str | None = None
+    vercel_ai_gateway_base_url: str = "https://ai-gateway.vercel.sh/v1"
     # If no FIRST token arrives within this many seconds, cancel and fail over to the next model —
     # turns a slow/hung primary into a fast recovery instead of a full-timeout stall.
     llm_first_token_timeout_seconds: float = 4.0
@@ -479,6 +487,17 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     google_refresh_token: str | None = None
     google_oauth_redirect: str = "http://127.0.0.1:8585/oauth2callback"  # must match the Google app
+    # Twilio — real phone calls on the owner's behalf (confirm-gated). PARKED until the owner
+    # creates the Twilio account; SMS/WhatsApp removed 2026-07-29 (Telegram covers texting).
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_from_number: str | None = None     # the Twilio number, E.164 (+1415...)
+    owner_phone_number: str | None = None     # the owner's own phone for "call me"
+    # Google Maps — live travel times + place search (read-only).
+    google_maps_api_key: str | None = None
+    owner_home_address: str | None = None     # default origin for "how long to X"
+    # Wolfram Alpha — exact computation instead of guessed numbers.
+    wolfram_app_id: str | None = None
     # Home Assistant — local-first smart home. A long-lived access token from your HA profile, and
     # the base URL of your HA instance (e.g. http://homeassistant.local:8123). Locks/alarms confirm.
     ha_url: str | None = None
@@ -645,6 +664,8 @@ class Settings(BaseSettings):
     # --- Phase 5: speaker biometrics (respond only to the owner's voice) ------------------
     speaker_id_enabled: bool = False      # gate commands by speaker match (off until enrolled)
     speaker_profile_path: str | None = None  # default: <repo>/voiceprint.json
+    room_check_on_suspicion: bool = True  # unrecognized/overlapping voice -> one camera look (3-min
+    #                                       cooldown) to understand who's in the room; never a routine poll
     speaker_threshold: float = 0.30       # ECAPA cosine accept threshold. Live data (2026-07-25): owner
     #                                       on the built-in far-field array scores 0.34-0.45 (AirPods-
     #                                       enrolled profile, so depressed); TV/guests 0.16-0.31. 0.30

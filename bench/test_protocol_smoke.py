@@ -89,15 +89,51 @@ async def main() -> None:
         check("phoenix wrong password refuses", "incorrect" in r.lower(), r)
         check("phoenix wrong password launched NOTHING", "argv" not in launched)
 
-        # Right password launches the right script — for BOTH recovery protocols.
-        for name in ("phoenix", "ragnarok"):
+        # Right password + a connected laptop -> the op travels to the LAPTOP, and NOTHING is launched
+        # on the brain host. Before 2026-07-30 these ran wherever the brain was: on the VPS that meant
+        # `shutdown` without sudo and `taskkill` on Linux — silent no-ops that still said "restarting".
+        from jarvis.brain import pc_link
+
+        forwarded: list = []
+
+        class _FakeLink:
+            active = True
+
+            async def forward(self, op, args):
+                forwarded.append((op, args))
+                return "ok"
+
+        real_link = pc_link.PC_LINK
+        pc_link.PC_LINK = _FakeLink()
+        try:
+            for name, needle in (("phoenix", "WatariEdgeRefresh"), ("ragnarok", "shutdown /r")):
+                launched.clear()
+                forwarded.clear()
+                pw = P._registry()[name]["password"]
+                r = await protocols_tool.run_protocol({"name": name, "password": pw})
+                check(f"{name} is sent to the laptop, not run on the brain host",
+                      len(forwarded) == 1 and "argv" not in launched, f"{forwarded} {launched}")
+                check(f"{name}'s laptop command actually does the job ({needle})",
+                      needle in forwarded[0][1].get("command", ""), str(forwarded))
+
+            # No laptop -> refuse out loud rather than report a success that never happened.
+            pc_link.PC_LINK = type("Off", (), {"active": False})()
             launched.clear()
-            pw = P._registry()[name]["password"]
-            r = await protocols_tool.run_protocol({"name": name, "password": pw})
-            argv = launched.get("argv", [])
-            script_ok = any(f"{name}.py" in str(a) for a in argv)
-            check(f"{name} correct password launches {name}.py", script_ok, str(argv))
-            check(f"{name} passes pid+repo+python args", len(argv) >= 4, str(argv))
+            r = await protocols_tool.run_protocol(
+                {"name": "ragnarok", "password": P._registry()["ragnarok"]["password"]})
+            check("with no laptop connected, ragnarok refuses", "laptop" in r.lower(), r)
+            check("...and still launches nothing locally", "argv" not in launched)
+        finally:
+            pc_link.PC_LINK = real_link
+
+        # Brain-side protocols are untouched: they still launch their own script here.
+        launched.clear()
+        r = await protocols_tool.run_protocol(
+            {"name": "backup", "password": P._registry()["backup"]["password"]})
+        argv = launched.get("argv", [])
+        check("backup (brain-side) still launches backup.py", any("backup.py" in str(a) for a in argv),
+              str(argv))
+        check("backup passes pid+repo+python args", len(argv) >= 4, str(argv))
     finally:
         P.subprocess.Popen = real_popen  # type: ignore[assignment]
 

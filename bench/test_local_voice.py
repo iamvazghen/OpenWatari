@@ -35,6 +35,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def main() -> None:
     import jarvis.edge.tts as tts_mod
     from jarvis.config import TTSProvider, settings
+    from jarvis.edge import voice_health
+
+    # Hermetic: a REAL cooldown marker (from live cloud-voice trouble on this machine) must not
+    # leak in — build_tts would then correctly pick Piper and the provider checks would misfire.
+    real_healthy = voice_health.cloud_tts_healthy
+    real_stt_healthy = voice_health.cloud_stt_healthy
+    voice_health.cloud_tts_healthy = lambda: True
+    voice_health.cloud_stt_healthy = lambda: True
 
     # All three providers exist (the system CAN run fully local, not only cloud).
     check("provider enum offers a local Piper voice", hasattr(TTSProvider, "piper"))
@@ -135,6 +143,9 @@ def main() -> None:
     finally:
         settings.stt_provider = saved_stt
         stt_mod._BUILDERS = real_stt
+
+    voice_health.cloud_tts_healthy = real_healthy
+    voice_health.cloud_stt_healthy = real_stt_healthy
 
     print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
     raise SystemExit(0 if FAIL == 0 else 1)

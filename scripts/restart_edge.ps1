@@ -36,6 +36,10 @@ if (-not $isAdmin) {
 
 Write-Host "== Watari edge restart (elevated) ==" -ForegroundColor Cyan
 
+# Any deliberate restart (phoenix, the daily refresh, a manual run) cancels a prior "goodnight":
+# clear the marker so WatariEdgeGuard resumes guarding the process from here on.
+Remove-Item 'C:\Jarvis\logs\edge_stopped_by_owner' -Force -ErrorAction SilentlyContinue
+
 # 1. Stop the tasks (best effort) so the scheduler doesn't fight the kill.
 foreach ($t in $Tasks) { Stop-ScheduledTask -TaskName $t }
 Start-Sleep -Seconds 2

@@ -445,9 +445,12 @@ SCHEMAS = [
         "function": {
             "name": "send_telegram",
             "description": (
-                "Send a Telegram message, a GIF, or a file. Can send to 'Saved Messages' (use "
-                "to='saved'), a username, or a chat id. Outward-facing — confirm recipient and "
-                "content with the owner first."
+                "THE way to message a real person on the owner's behalf — sends AS the owner from "
+                "his own Telegram account. Use for 'message/text/write to X that Y': resolve X (a "
+                "contact name, @username, or chat id — use the contacts tool for a bare name) and "
+                "send. Also sends GIFs/files, and 'saved' targets his Saved Messages. There is no "
+                "SMS/WhatsApp — Telegram is the messaging channel. Outward-facing: confirm the "
+                "recipient and content with the owner first."
             ),
             "parameters": {
                 "type": "object",

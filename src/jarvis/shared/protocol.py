@@ -35,6 +35,22 @@ class Utterance(BaseModel):
     speaker_verified: bool = False   # set by Phase-5 voice biometrics
     ts_user_stop_ms: int             # for TTFW measurement
     device_id: str = "laptop"        # which of the four devices this turn came from (Phase 6)
+    # Correlation id minted on the edge when the user stops speaking. The brain adopts it for the
+    # whole turn, so one id retrieves both sides' logs for a turn that went wrong. Optional so an
+    # older edge (or the iPhone client) still talks to a newer brain.
+    turn_id: str = ""
+
+
+class ErrorReport(BaseModel):
+    """A journal entry the laptop hands to the brain.
+
+    The edge and pc_agent run on the owner's machine; without this their failures would only ever
+    exist on that machine. Shipping them makes the brain's journal the union of all three processes,
+    so 'what did he actually experience?' is answerable from one place."""
+
+    type: Literal["error"] = "error"
+    session_id: str = ""
+    entry: dict
 
 
 class Barge(BaseModel):
@@ -61,5 +77,5 @@ class StreamEvent(BaseModel):
     final: bool = False       # last chunk of this turn
 
 
-EdgeToBrain = Hello | Utterance | Barge
+EdgeToBrain = Hello | Utterance | Barge | ErrorReport
 BrainToEdge = StreamEvent

@@ -290,6 +290,28 @@ class Scheduler:
             jobstores={"default": SQLAlchemyJobStore(url=_db_url())},
             timezone=USER_TZ,
         )
+        # One listener tracks EVERY scheduled job — reminders, the daily briefing, objectives,
+        # backlog, backups, pattern scans, the weekly review, and anything added later. These run
+        # unattended, so a job that starts erroring (or silently stops firing) is precisely the kind
+        # of failure that otherwise goes unnoticed for weeks. A MISSED job matters as much as a
+        # failed one: a reminder that never fired is indistinguishable, to the owner, from a
+        # reminder that was never set.
+        try:
+            from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
+
+            from jarvis.shared import errors as _err
+
+            def _on_job_event(event) -> None:
+                name = getattr(event, "job_id", "") or "job"
+                exc = getattr(event, "exception", None)
+                if exc is not None:
+                    _err.record_op("job", name, ok=False, detail=f"{type(exc).__name__}: {exc}")
+                else:
+                    _err.record_op("job", name, ok=False, detail="job missed its scheduled run")
+
+            self._sched.add_listener(_on_job_event, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+        except Exception as e:  # noqa: BLE001 — tracking must never stop the scheduler existing
+            logger.warning(f"scheduler error tracking unavailable: {type(e).__name__}: {e}")
         return self._sched
 
     def start(self, on_speak: Callable[[str], None] | None = None) -> None:

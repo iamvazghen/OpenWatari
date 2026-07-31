@@ -61,6 +61,50 @@ async def _run():
     # D) output_device_present fail-open: unknown name → True (never false-trip on a missing name)
     check(output_device_present(None) is True, "output_device_present(None) fails open")
 
+    # E) resume from sleep: a wall-clock jump the poll interval can't explain means the machine was
+    # suspended, so every audio stream and cloud socket we hold is stale. Windows gives no usable
+    # resume event here (S0 standby emits none; Kernel-Power 507 fires ~8x/day for maintenance wakes),
+    # so this in-process check is the detector. Regression guard for a full day spent silently deaf.
+    import jarvis.edge.audio_watchdog as _m
+
+    dead4 = asyncio.Event()
+    live3 = AudioLivenessProbe()
+    real_time, n = _m.time.time, {"c": 0}
+
+    def _slept():
+        n["c"] += 1
+        return real_time() + (1200 if n["c"] > 1 else 0)   # 2nd reading is 20 min later
+
+    _m.time.time = _slept
+    try:
+        await watch_audio_liveness(live3, dead4, None, silence_limit_s=999, grace_s=0, poll_s=0.05,
+                                   auto_route=False)
+    finally:
+        _m.time.time = real_time
+    check(dead4.is_set(), "trips after a sleep/resume wall-clock jump")
+
+    # ...and a jump SHORTER than the limit (a brief maintenance wake) must not restart him.
+    dead5 = asyncio.Event()
+    live4 = AudioLivenessProbe()
+    n2 = {"c": 0}
+
+    def _blinked():
+        n2["c"] += 1
+        return real_time() + (30 if n2["c"] > 1 else 0)
+
+    _m.time.time = _blinked
+    try:
+        await asyncio.wait_for(
+            watch_audio_liveness(live4, dead5, None, silence_limit_s=999, grace_s=0, poll_s=0.05,
+                                 auto_route=False),
+            timeout=0.4,
+        )
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        _m.time.time = real_time
+    check(not dead5.is_set(), "a brief maintenance wake does NOT restart the edge")
+
 
 asyncio.run(_run())
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")

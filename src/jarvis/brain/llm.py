@@ -207,13 +207,16 @@ class LLMClient:
         inference provider, ~2000 tok/s, separate rate-limit pool from Groq); ``minimax:<model>`` hits
         MiniMax directly (api.minimax.io — a paid reasoning model, independent of Groq's quota + the
         freellmapi proxy); ``ollama:<model>`` hits a LOCAL Ollama server (no key, true offline
-        fallback); unprefixed goes to the freellmapi proxy. Each provider's client is built once and
-        cached."""
+        fallback); ``vercel:<model>`` hits the Vercel AI Gateway, the paid LAST-RESORT backstop that
+        only answers once everything ahead of it has failed; unprefixed goes to the freellmapi proxy.
+        Each provider's client is built once and cached."""
         for prefix, base_url, api_key in (
             ("groq:", settings.groq_base_url, settings.groq_api_key or "missing-groq-key"),
             ("cerebras:", settings.cerebras_base_url, settings.cerebras_api_key or "missing-cerebras-key"),
             ("minimax:", settings.minimax_base_url, settings.minimax_api_key or "missing-minimax-key"),
             ("ollama:", settings.ollama_base_url, "ollama"),  # Ollama ignores the key
+            ("vercel:", settings.vercel_ai_gateway_base_url,
+             settings.vercel_ai_gateway_api_key or "missing-vercel-key"),
         ):
             if entry.startswith(prefix):
                 name = prefix[:-1]
@@ -249,16 +252,43 @@ class LLMClient:
         # the full chain if EVERY entry is benched, so this never locks Watari out of answering.
         if not self._cooldown and not permanent:
             return
+        now = asyncio.get_running_loop().time()
+        newly_benched = self._unhealthy_until.get(model, 0.0) <= now
         cooldown = _PERMANENT_COOLDOWN_S if permanent else self._cooldown
-        self._unhealthy_until[model] = asyncio.get_running_loop().time() + cooldown
+        self._unhealthy_until[model] = now + cooldown
         if permanent:
             METRICS.incr("llm_permanent_failures")
             logger.warning(
                 f"LLM '{model}' PERMANENT failure (quota/credits/access) — benching {cooldown / 3600:.1f}h "
                 f"so failover stops flapping onto a dead key: {str(err)[:120]}"
             )
+            # The failover itself is automatic; what was MISSING is telling the owner. A dead paid key
+            # otherwise degrades silently — the chain answers on fallbacks, the health probe stays green
+            # (it probes the chain, not the primary), and nobody rotates the key for days. Page once per
+            # bench (newly_benched gates the every-turn re-bench when the WHOLE chain is exhausted).
+            if newly_benched:
+                self._page_benched(model, err)
         else:
             logger.debug(f"LLM marked '{model}' unhealthy for {cooldown:.1f}s ({type(err).__name__})")
+
+    def _page_benched(self, model: str, err: Exception) -> None:
+        """Fire-and-forget owner page when a model is benched for a PERMANENT (quota/key) failure.
+        Best-effort by design: paging must never delay or break the turn that triggered it."""
+        async def _push() -> None:
+            try:
+                from jarvis.brain.tools.notify import push
+                await push(
+                    f"Heads-up, sir: LLM '{model}' failed permanently (quota or key — "
+                    f"{str(err)[:80]}). I've benched it for 6 hours and I'm answering on the "
+                    "fallback chain. The key likely needs attention.",
+                    title="Watari — LLM benched",
+                )
+            except Exception:  # noqa: BLE001 — paging is best-effort
+                pass
+        try:
+            asyncio.get_running_loop().create_task(_push())
+        except RuntimeError:  # no running loop (sync/test context) — logging already covered it
+            pass
 
     def _mark_success(
         self,
@@ -401,6 +431,14 @@ class LLMClient:
                 self._mark_failure(model, e)
                 logger.warning(f"LLM model '{model}' failed ({type(e).__name__}); trying next")
                 continue
+        # Total loss of the brain's ability to think — every model in the chain refused. The owner
+        # experiences this as Watari going mute or apologising, so it is journalled as its own
+        # operation with the whole chain's errors attached, not just the last one.
+        from jarvis.shared import errors as _err
+
+        _err.record_op("agentic", "llm_chain_exhausted", ok=False,
+                       detail=f"all {failures} model(s) failed; last: {type(last_err).__name__}: {last_err}",
+                       context={"errors": str(errors)[:200]})
         raise RuntimeError(f"all LLM models failed; last error: {last_err}")
 
     async def stream_with_tools(

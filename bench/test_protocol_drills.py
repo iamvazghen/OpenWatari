@@ -70,6 +70,50 @@ async def main():
     check(r_live.ok and len(_launched) == 1,
           "a live (non-drill) run launches the script (drill is what suppresses it)")
 
+    # --- 6) machine-level protocols act on the LAPTOP, not on whatever host the brain runs on ---
+    # Regression guard for the 2026-07-30 finding: with the brain on the VPS these ran server-side and
+    # reported success while doing nothing (shutdown without sudo / taskkill on Linux).
+    from jarvis.brain import pc_link
+    from jarvis.brain.protocols import run_protocol_async
+
+    forwarded = []
+
+    class _FakeLink:
+        active = True
+
+        async def forward(self, op, args):
+            forwarded.append((op, args))
+            return "ok"
+
+    real_link = pc_link.PC_LINK
+    pc_link.PC_LINK = _FakeLink()
+    _launched.clear()
+    try:
+        r = await run_protocol_async("ragnarok", _password_for("ragnarok"))
+        check(r.ok and len(forwarded) == 1 and forwarded[0][0] == "run_powershell",
+              "ragnarok is dispatched to the laptop over PC_LINK")
+        check("shutdown /r" in forwarded[0][1]["command"],
+              "ragnarok's laptop command actually restarts Windows")
+        check(_launched == [], "a laptop-targeted protocol does NOT run a brain-side script")
+
+        forwarded.clear()
+        r = await run_protocol_async("ragnarok", _password_for("ragnarok"), drill=True)
+        check(r.ok and forwarded == [], "drilling a laptop protocol dispatches nothing")
+
+        # Brain-side protocols are unaffected and still launch locally.
+        forwarded.clear(); _launched.clear()
+        r = await run_protocol_async("backup", _password_for("backup"))
+        check(r.ok and len(_launched) == 1 and forwarded == [],
+              "brain-side protocols (backup) still run on the brain")
+
+        # Laptop offline -> refuse loudly instead of claiming success.
+        pc_link.PC_LINK = type("Off", (), {"active": False})()
+        r = await run_protocol_async("ragnarok", _password_for("ragnarok"))
+        check((not r.ok) and "laptop" in r.message.lower(),
+              "with the laptop offline, a machine protocol refuses instead of silently no-op'ing")
+    finally:
+        pc_link.PC_LINK = real_link
+
     print(f"=== {_ok}/{_ok + _fail} checks passed ===")
     import sys
     sys.exit(1 if _fail else 0)

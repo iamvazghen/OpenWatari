@@ -27,6 +27,22 @@ def tool_error(what: str, err: Exception) -> str:
     return f"I couldn't complete the {what} just now ({type(err).__name__}). I'll let the owner know."
 
 
+# ponytail: handlers always return speakable prose and never raise, so a caller that consumes a
+# tool result as DATA (proactive signals, digests) cannot tell "here are your events" from "I
+# couldn't do that" — and will happily read the error aloud. Substring-match the two failure
+# shapes produced above; if a third shape appears, add it here rather than teaching every caller
+# to sniff strings.
+_FAILURE_MARKERS = ("i couldn't complete the", "isn't configured yet")
+
+
+def tool_failed(result: str | None) -> bool:
+    """True when a tool's string return is a failure / not-configured note rather than data."""
+    if not result or not result.strip():
+        return True
+    low = result.lower()
+    return any(m in low for m in _FAILURE_MARKERS)
+
+
 # A real User-Agent: some providers (e.g. Wikipedia) reject the default httpx UA with 403.
 _USER_AGENT = "JarvisAssistant/1.0 (+https://github.com/; personal voice assistant)"
 
