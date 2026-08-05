@@ -1,15 +1,22 @@
 """Phase 13 — coding & self-improvement tools + skills, hermetic.
 
 Verifies the safety rails that make self-improvement trustworthy: file I/O is confined to the repo
-and refuses secrets; only reversible git ops exist (no reset/force-push tool is registered); the
-read git ops work on the real repo; write_source round-trips inside the repo (to a temp file we
-delete); skills load from skills/; and writes/commits/pushes are confirm-gated. Read-only against
-git; no network.
+and refuses secrets; only reversible git ops exist (no reset/force-push tool is registered); real
+file I/O round-trips against the repo; skills load from skills/; and writes/commits/pushes are
+confirm-gated. Read-only against git; no network.
+
+Since 2026-07-31 the tool-level entry points (`read_source`, `write_source`, `git_*`) no longer touch
+this host's repo — they forward to the laptop over PC_LINK, because on the VPS the local tree is a
+deploy artefact whose git points at the real remote. The *real* file I/O therefore lives in the
+executor handlers (`_pc_repo_read` / `_pc_repo_write`), and that is what this file exercises for the
+round-trip. Routing itself, and the refusal when no laptop is linked, are pinned by
+`test_coding_routing.py`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -44,27 +51,34 @@ def main() -> None:
     check("the audit/ dir is blocked", coding._safe_path("audit/2026-06-12.jsonl") is None)
     check(".git internals are blocked", coding._safe_path(".git/config") is None)
 
-    print("\n[2] read_source reads real code; refuses secrets with a spoken note")
-    out = asyncio.run(coding.read_source({"path": "src/jarvis/config.py"}))
-    check("reads config.py", "Settings" in out or "class Settings" in out, out[:60])
+    print("\n[2] the executor reads real code; the tool refuses secrets before they leave the brain")
+    # The executor is where the file actually lives, so that is where the read is proven.
+    got = json.loads(asyncio.run(coding._pc_repo_read({"path": "src/jarvis/config.py"})))
+    check("reads config.py", got["ok"] and "Settings" in got["out"], str(got)[:60])
     secret = asyncio.run(coding.read_source({"path": ".env"}))
     check("refuses to read .env", "outside the project or a protected file" in secret, secret)
+    blocked = json.loads(asyncio.run(coding._pc_repo_read({"path": ".env"})))
+    check("...and the executor refuses it too, independently", blocked["ok"] is False, str(blocked))
 
-    print("\n[3] write_source round-trips inside the repo (temp file, then cleaned)")
+    print("\n[3] write round-trips inside the repo (temp file, then cleaned)")
     rel = "bench/_p13_scratch.tmp"
-    res = asyncio.run(coding.write_source({"path": rel, "content": "scratch 123"}))
+    res = json.loads(asyncio.run(coding._pc_repo_write({"path": rel, "content": "scratch 123"})))
     p = Path(__file__).resolve().parents[1] / rel
-    check("write reports success", "Created" in res or "Updated" in res, res)
+    check("write reports success", res["ok"] is True, str(res))
     check("file exists with content", p.is_file() and p.read_text() == "scratch 123")
     bad = asyncio.run(coding.write_source({"path": "../escape.tmp", "content": "x"}))
     check("write outside repo refused", "won't write there" in bad, bad)
+    worse = json.loads(asyncio.run(coding._pc_repo_write({"path": "../escape.tmp", "content": "x"})))
+    check("...and refused at the executor as well", worse["ok"] is False, str(worse))
     p.unlink(missing_ok=True)
 
-    print("\n[4] git read ops work on the real repo")
-    st = asyncio.run(coding.git_status({}))
-    check("git_status returns text", isinstance(st, str) and st.strip() != "")
-    lg = asyncio.run(coding.git_log({"n": 3}))
-    check("git_log returns commits", isinstance(lg, str) and lg.strip() != "")
+    print("\n[4] git read ops run through the executor against the real repo")
+    out = json.loads(asyncio.run(coding._pc_repo_exec(
+        {"argv": ["git", "status", "--short", "--branch"], "timeout": 30})))
+    check("git_status returns text", out["rc"] == 0 and out["out"].strip() != "", str(out)[:80])
+    out = json.loads(asyncio.run(coding._pc_repo_exec(
+        {"argv": ["git", "log", "-3", "--oneline"], "timeout": 30})))
+    check("git_log returns commits", out["rc"] == 0 and out["out"].strip() != "", str(out)[:80])
 
     print("\n[5] only reversible git tools exist — no destructive ones")
     names = set(tool_names())

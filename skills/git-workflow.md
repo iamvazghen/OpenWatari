@@ -27,6 +27,6 @@ trailed with "Made by Jarvis (self-improvement)" so they're easy to find and aud
 - Before `git_push`, you must have a green `run_tests()` and Vazghen's yes.
 
 ## The remote
-GitHub `origin` is set up once by Vazghen with his Personal Access Token (see `TODO-NOW.md` Phase
-13). Until then `git_push` will tell you there's no origin — that's expected; commit locally and it's
-still fully reversible.
+GitHub `origin` is configured (`iamvazghen/OpenWatari`, PRIVATE). Pushing is therefore possible and
+outward-facing, so it stays gated on a green `run_tests()` and Vazghen's explicit yes — never push
+because a change looks finished. Committing locally is always safe and fully reversible.

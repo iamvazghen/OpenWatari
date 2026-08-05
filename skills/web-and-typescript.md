@@ -4,14 +4,12 @@ Most of you is Python, but two surfaces use other languages. When you self-impro
 same way (branch → edit → commit), and prefer to keep logic in the Python brain — these are thin
 bridges, not brains.
 
-## Mentra glasses bridge — TypeScript (`glasses/`)
-- The glasses are a pure mic/speaker/display device; the brain still does all thinking.
-- The bridge connects the MentraOS SDK's transcription stream to your brain over the same WebSocket
-  protocol the iPhone client uses (`shared/protocol.py`: `Hello`/`Utterance`/`Barge` →
-  `StreamEvent`). Send the glasses' final transcript as an `Utterance`; render the streamed
-  `assistant` chunks on the glasses display and via TTS.
-- Keep TypeScript minimal and typed. Don't reimplement reasoning here — forward to the brain.
-- It's parked until the hardware is bought (see `TODO-NOW.md`), but the brain side is ready.
+## Mentra glasses bridge — NOT PURSUED, and `glasses/` no longer exists
+- Dropped for want of an SDK and an account; the half-finished TypeScript client was deleted. Do not
+  offer to edit `glasses/` or describe a bridge that ships — there is no such directory.
+- The mobile eye is the PHONE CAMERA instead, and it reuses the same `LLMClient.see` surface
+  (`tools/camera.py` → `look_around` / `visual_presence`), so nothing has to change if a wearable
+  ever does land.
 
 ## iPhone / web client — HTML + JS (`clients/iphone/`)
 - A single self-contained `index.html`: Web Speech API for STT (`webkitSpeechRecognition`) with a

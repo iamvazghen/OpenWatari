@@ -1,16 +1,21 @@
 """Switch Jarvis's audio output between speakers and headphones (incl. AirPods).
 
-This is the mechanism the voice command "Jarvis, switch to my headphones" calls (the
-brain registers it as a tool in Phase 2). It saves the preference; the edge worker reads
-it when it (re)starts and opens the matching output device.
+This is the mechanism the voice command "Watari, switch to my headphones" calls: the brain tool
+``switch_audio_output`` (``brain/tools/audioout.py``) forwards to this machine and calls
+``set_output`` below. It saves the preference, and the audio watchdog notices that file changing and
+rebuilds the stream, so the switch is audible within a poll rather than at the next restart.
+
+(Until 2026-08-01 the paragraph above was aspirational — it said "the brain registers it as a tool in
+Phase 2" while this module had zero references anywhere in the repo, so the capability did not exist.
+If you are about to describe a wiring that isn't there yet, write it as a TODO, not as fact.)
 
     uv run python -m jarvis.edge.switch_audio headphones
     uv run python -m jarvis.edge.switch_audio speakers
     uv run python -m jarvis.edge.switch_audio          # show current resolution
 
 Why not hot-swap mid-stream: PyAudio binds the device when the output stream opens, so a
-clean switch re-opens the stream. The brain tool sets the preference and signals the edge
-to re-init its transport (fast, sub-second) rather than mutating a live stream.
+clean switch re-opens the stream. The brain tool sets the preference and the watchdog trips
+the existing rebuild path rather than mutating a live stream.
 """
 
 from __future__ import annotations
@@ -37,7 +42,9 @@ def set_output(target: str) -> str:
             "If it's Bluetooth, make sure it's connected first."
         )
     save_output_preference(target)
-    return f"Output set to {dev.name}. I'll use it the next time I start speaking."
+    # Not "next time I start speaking" any more: the watchdog sees this file change and rebuilds the
+    # stream within a poll (~5s measured), so promising later would understate what actually happens.
+    return f"Output set to {dev.name}."
 
 
 def main() -> None:

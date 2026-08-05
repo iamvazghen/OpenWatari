@@ -843,27 +843,35 @@ SCHEMAS = [
             "required": []}}},
     {"type": "function", "function": {
         "name": "notion_read_page",
-        "description": "Read the text content of a Notion page by id ('read me the project page').",
+        "description": "Read the text content of one Notion page by its id. Use for 'read me the "
+                       "project page', 'what's on that page'. Needs a page id — call notion_search "
+                       "first to find it by name.",
         "parameters": {"type": "object", "properties": {
             "page_id": {"type": "string", "description": "Notion page id (from notion_search)."}},
             "required": ["page_id"]}}},
     {"type": "function", "function": {
         "name": "notion_append",
-        "description": "Append a paragraph of text to a Notion page (a write). Confirm with the owner first.",
+        "description": "Append a paragraph of text to the end of an existing Notion page (a WRITE). "
+                       "Confirm with the owner first. Use for 'add that to the page', 'note it on "
+                       "my Notion page'.",
         "parameters": {"type": "object", "properties": {
             "page_id": {"type": "string", "description": "Notion page id."},
             "text": {"type": "string", "description": "The text to add."}},
             "required": ["page_id", "text"]}}},
     {"type": "function", "function": {
         "name": "notion_comment",
-        "description": "Leave a comment on a Notion page. Confirm with the owner first.",
+        "description": "Post a comment on a Notion page (a WRITE, visible to anyone sharing it). "
+                       "Confirm with the owner first. Use for 'comment on that page', 'leave a note "
+                       "on it'. notion_append edits the page body instead.",
         "parameters": {"type": "object", "properties": {
             "page_id": {"type": "string", "description": "Notion page id."},
             "text": {"type": "string", "description": "The comment text."}},
             "required": ["page_id", "text"]}}},
     {"type": "function", "function": {
         "name": "notion_create_page",
-        "description": "Create a new sub-page under a Notion parent page. Confirm with the owner first.",
+        "description": "Create a NEW sub-page under an existing Notion parent page, optionally with "
+                       "body text. Confirm with the owner first. Use for 'make a Notion page for "
+                       "X'. To add to a page that already exists, use notion_append.",
         "parameters": {"type": "object", "properties": {
             "parent_id": {"type": "string", "description": "Parent page id (must be shared with the integration)."},
             "title": {"type": "string", "description": "New page title."},

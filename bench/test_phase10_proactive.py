@@ -145,6 +145,26 @@ def main() -> None:
     check("recall never needs confirm", not confirm_required("recall"))
     check("run_protocol needs confirm", confirm_required("run_protocol"))
 
+    print("\n[10b] state destruction gated; frictionless capture stays frictionless")
+    for t in ("delete_macro", "delete_task", "forget", "write_vault",
+              "drop_objective", "complete_objective"):
+        check(f"{t} needs confirm", confirm_required(t))
+    # An update that adds information is not a loss, so it must not interrogate him — that path is
+    # the one he uses by voice all day. Overwriting prose or blanking a field is a loss, so it does.
+    check("update: progress NOT gated", not confirm_required("update_task", {"progress": 50}))
+    check("update: appending a note NOT gated",
+          not confirm_required("update_task", {"note": "called them back"}))
+    check("update: moving a deadline NOT gated",
+          not confirm_required("update_task", {"deadline": "friday"}))
+    check("update: overwriting the title IS gated",
+          confirm_required("update_task", {"title": "new name"}))
+    check("update: clearing a field IS gated", confirm_required("update_task", {"deadline": ""}))
+    check("notion: status change NOT gated",
+          not confirm_required("notion_update_task", {"status": "In progress"}))
+    check("notion: clearing the reminder IS gated",
+          confirm_required("notion_update_task", {"reminder": "  "}))
+    check("adding a task is never gated", not confirm_required("add_task"))
+
     print("\n[11] clarify heuristic — bare/ambiguous asks get a question first")
     check("empty -> clarify", needs_clarification("   "))
     check("'do it' -> clarify", needs_clarification("do it"))

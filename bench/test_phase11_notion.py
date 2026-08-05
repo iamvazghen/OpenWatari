@@ -76,6 +76,16 @@ def main() -> None:
     check("notion_read_page NOT gated", not confirm_required("notion_read_page"))
     check("notion_search NOT gated", not confirm_required("notion_search"))
 
+    # The bulk sweep clears every open task at once with no undo, so it confirms — while completing
+    # one task by name stays frictionless, which is the whole point of capture-by-voice.
+    check("notion_complete_task ALL is gated", confirm_required("notion_complete_task", {"all": True}))
+    check("...also by whole-list phrase",
+          confirm_required("notion_complete_task", {"query": "everything"}))
+    check("...but a single task by name is NOT gated",
+          not confirm_required("notion_complete_task", {"query": "call the dentist"}))
+    check("...and a bare call is NOT gated", not confirm_required("notion_complete_task", {}))
+    check("notion_delete_task still gated", confirm_required("notion_delete_task"))
+
     print("\n[5] task briefing buckets: overdue / today / this week / recurring / undated inbox (3.6)")
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo

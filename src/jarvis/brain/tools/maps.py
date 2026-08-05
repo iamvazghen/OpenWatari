@@ -106,7 +106,9 @@ SCHEMAS = [
         "function": {
             "name": "find_place",
             "description": ("Find real places — restaurants, shops, gyms, addresses — with ratings "
-                            "('find a sushi place near Alexanderplatz')."),
+                            "and opening info. Use for 'find a sushi place near Alexanderplatz', "
+                            "'gyms around here'. For how long it takes to get there, use "
+                            "travel_time."),
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string", "description": "What + where."}},

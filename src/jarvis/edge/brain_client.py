@@ -21,12 +21,17 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections import deque
 from typing import Awaitable, Callable
 
 from loguru import logger
 
 from jarvis.config import settings
 from jarvis.shared.protocol import Barge, Hello, StreamEvent, Utterance
+
+#: How many un-shipped error entries to hold while the brain link is down. A whole outage's worth of
+#: chatter is not worth the memory, and the disk journal is the complete record either way.
+_SPOOL_MAX = 200
 
 EventCb = Callable[[StreamEvent], Awaitable[None] | None]
 StateCb = Callable[[str], None]
@@ -62,6 +67,11 @@ class BrainClient:
         self._ws = None                 # live connection or None
         self._stop = False
         self._state = "idle"
+        # Error entries logged while the link was down, replayed on the next connect (see
+        # ship_error). Bounded: a long outage must not grow this without limit, and the oldest
+        # entries are the least useful — the ones that explain a failure are near the end. The
+        # journal on disk keeps everything regardless, so dropping the tail here loses no record.
+        self._spool: deque[dict] = deque(maxlen=_SPOOL_MAX)
 
     @property
     def connected(self) -> bool:
@@ -109,6 +119,7 @@ class BrainClient:
                             headphones_connected=self.headphones_connected,
                         )
                     )
+                    await self._drain_spool()          # AFTER Hello: the brain wants the session first
                     await self._reader(ws)             # returns when the socket closes
             except asyncio.CancelledError:
                 raise
@@ -177,10 +188,19 @@ class BrainClient:
         """Hand one journal entry to the brain (fire-and-forget).
 
         Synchronous by design: it is called from the loguru sink, which must never block or await.
-        If the link is down the entry is simply dropped — it is already on local disk, and the whole
-        point is that observability can fail without taking a turn with it."""
+        The entry is already on local disk, so the whole point is that observability can fail
+        without taking a turn with it.
+
+        While the link is down the entry goes to a bounded in-memory SPOOL and is replayed on the
+        next connect. That closes a blind spot that mattered precisely when it hurt: an error from
+        brain_client itself describes the very socket it would have shipped over, so 13 of 45 edge
+        entries never reached the VPS journal — and `diagnose` therefore could not see
+        brain-connection failures, which is exactly what the owner asks about when the link is bad.
+        In memory, not on disk, because this runs inside the logging sink and must not do I/O; the
+        journal on disk is already the durable copy, so a crash loses nothing but the uplink."""
         ws = self._ws
         if ws is None:
+            self._spool.append(entry)
             return
         try:
             import asyncio
@@ -190,7 +210,41 @@ class BrainClient:
             msg = ErrorReport(session_id=self.session_id, entry=entry)
             asyncio.get_running_loop().create_task(self._send(msg))
         except Exception:  # noqa: BLE001 — never let error reporting raise into the logger
-            pass
+            # No running loop (or the send could not even be scheduled) — spool it rather than drop
+            # it. This is the path taken when the sink fires from a non-async thread.
+            try:
+                self._spool.append(entry)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _drain_spool(self) -> None:
+        """Replay entries logged while the link was down. Called once per successful connect.
+
+        Each is marked ``replayed`` so the brain journal cannot be misread as "this happened now" —
+        the entry keeps its ORIGINAL timestamp, and a reader comparing it to arrival order deserves
+        to know why they disagree."""
+        if not self._spool:
+            return
+        from jarvis.shared.protocol import ErrorReport
+
+        pending, self._spool = list(self._spool), deque(maxlen=_SPOOL_MAX)
+        sent = 0
+        for entry in pending:
+            # _send RETURNS False on failure rather than raising, so this has to be a value check —
+            # wrapping it in try/except would look right and silently drop the remainder.
+            ok = False
+            try:
+                ok = await self._send(ErrorReport(session_id=self.session_id,
+                                                  entry={**entry, "replayed": True}))
+            except Exception:  # noqa: BLE001 — belt and braces; never raise out of the drain
+                ok = False
+            if not ok:                      # link died again mid-drain — keep what's left
+                self._spool.extend(pending[sent:])
+                break
+            sent += 1
+        if sent:
+            logger.info(f"brain link: replayed {sent} error entr{'y' if sent == 1 else 'ies'} "
+                        "logged while disconnected")
 
     async def barge(self) -> bool:
         """Tell the brain to cancel the in-flight turn (user started talking over Jarvis)."""

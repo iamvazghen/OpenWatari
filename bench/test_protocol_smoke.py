@@ -61,15 +61,20 @@ async def main() -> None:
             print(f"      syntax error: {e}")
         check(f"{name}: valid Python", ok)
 
-    print("\n[2] recovery scripts actually contain their claimed behaviour")
-    check("phoenix RELAUNCHES the edge (jarvis.edge.assistant)",
-          "jarvis.edge.assistant" in _src("phoenix"))
-    check("phoenix kills the old process first", "taskkill" in _src("phoenix").lower()
-          or "kill" in _src("phoenix").lower())
-    check("ragnarok REBOOTS the machine (shutdown /r)", "shutdown" in _src("ragnarok").lower()
-          and "/r" in _src("ragnarok"))
-    check("goodnight TERMINATES the edge", "taskkill" in _src("goodnight").lower()
-          or "terminate" in _src("goodnight").lower())
+    print("\n[2] recovery protocols carry their claimed behaviour — in the REGISTRY, not the scripts")
+    # Until 2026-08-01 these three checks read the SCRIPTS, which is where the behaviour used to live.
+    # The brain moved to the VPS and the scripts became landmines (taskkill against what is now the
+    # brain's pid; `shutdown -r` aimed at the server), so the real commands moved into the registry as
+    # `pc_command` and travel to the laptop. Asserting against the scripts would now pin the bug.
+    from jarvis.brain.protocols import _registry as _reg
+
+    _cmds = {n: (p.get("pc_command") or "") for n, p in _reg().items()}
+    check("phoenix RELAUNCHES the edge (WatariEdgeRefresh on the laptop)",
+          "WatariEdgeRefresh" in _cmds["phoenix"], _cmds["phoenix"][:70])
+    check("ragnarok REBOOTS the machine (shutdown /r on the laptop)",
+          "shutdown" in _cmds["ragnarok"].lower() and "/r" in _cmds["ragnarok"], _cmds["ragnarok"][:70])
+    check("goodnight STOPS the edge and marks the silence as ordered",
+          "edge_stopped_by_owner" in _cmds["goodnight"], _cmds["goodnight"][:70])
 
     print("\n[3] password gate holds; correct password launches the RIGHT script (Popen STUBBED)")
     # Stub subprocess.Popen inside the protocols module so a 'launch' records the argv but runs nothing.
@@ -158,6 +163,35 @@ async def main() -> None:
     # phoenix is a RESTART, not an archive — no overlap with the archive trio (audit conclusion).
     check("phoenix is a restart, not an archive (no backup/checkpoint overlap)",
           "zipfile" not in _src("phoenix") and "make_archive" not in _src("phoenix"))
+
+    print("\n[H1.5] routed protocols cannot execute on the brain host")
+    from jarvis.brain.protocols import _registry, run_protocol
+
+    reg = _registry()
+    routed = [n for n, p in reg.items() if p.get("pc_command")]
+    check("goodnight/phoenix/ragnarok are the routed set",
+          set(routed) == {"goodnight", "phoenix", "ragnarok"}, str(sorted(routed)))
+    for n in routed:
+        # The sync launcher is public. Reaching it for a routed protocol on the VPS would run
+        # laptop-era logic against the brain host — ragnarok's old POSIX branch was `shutdown -r +1`,
+        # and goodnight/phoenix ran `taskkill` on a pid that is now the BRAIN's.
+        r = run_protocol(n, reg[n]["password"], drill=False)
+        check(f"sync run_protocol('{n}') refuses to execute here", r.ok is False, r.message[:70])
+        check("...and says why, in his voice", "laptop" in r.message.lower(), r.message[:70])
+    for n in ("backup", "ping", "diagnostics", "auditpack", "checkpoint"):
+        check(f"brain-side '{n}' still passes its gate",
+              run_protocol(n, reg[n]["password"], drill=True).ok)
+
+    print("\n[H1.5b] the three scripts are inert stubs, and fail loudly if ever launched")
+    for n in routed:
+        src = _src(n)
+        # Check for the ABILITY to act, not for the words: the docstrings deliberately name taskkill
+        # and shutdown while explaining why they were removed. A stub that imports only `sys` can't
+        # kill or reboot anything.
+        check(f"{n}.py can no longer execute anything (no subprocess/os import)",
+              "import subprocess" not in src and "import os" not in src, src[:70])
+        check(f"{n}.py exits non-zero (a silent success would hide a misroute)",
+              "return 2" in src and "SystemExit" in src)
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

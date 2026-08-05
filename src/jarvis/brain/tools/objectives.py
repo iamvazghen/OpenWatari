@@ -114,11 +114,16 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "objective_status",
-            "description": ("Report progress on ONE multi-day objective by name. Use for 'how's the X objective "
-                            "going', 'progress on X'."),
+            "description": ("Report progress on ONE named multi-day objective, including anything "
+                            "waiting on the owner's approval. Use for 'how's the X objective "
+                            "going', 'progress on X'. For every objective at once, use "
+                            "list_objectives."),
             "parameters": {
                 "type": "object",
                 "properties": {"topic": {"type": "string", "description": "A word from the objective to match."}},
+                # Required: OBJECTIVES.find("") returns None, so without a topic these can do nothing
+                # but ask again. Saying so up front stops the model calling them empty.
+                "required": ["topic"],
             },
         },
     },
@@ -126,10 +131,15 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "complete_objective",
-            "description": "Mark a multi-day objective done so Watari stops driving it. Use for 'that objective is done'.",
+            "description": "Mark a multi-day objective DONE so Watari stops driving it. Use for "
+                           "'that objective is done', 'I've finished X'. Objectives only — a to-do "
+                           "is complete_task, a Notion row is notion_complete_task.",
             "parameters": {
                 "type": "object",
                 "properties": {"topic": {"type": "string", "description": "A word from the objective to match."}},
+                # Required: OBJECTIVES.find("") returns None, so without a topic these can do nothing
+                # but ask again. Saying so up front stops the model calling them empty.
+                "required": ["topic"],
             },
         },
     },
@@ -137,10 +147,17 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "drop_objective",
-            "description": "Stop driving a multi-day objective (abandon it). Use for 'drop that objective', 'forget X'.",
+            # 'forget X' deliberately removed: that is memory.forget's trigger, and advertising it
+            # here made an objective the model's first guess for "forget what I told you about X".
+            "description": "ABANDON a multi-day objective unfinished so Watari stops driving it. "
+                           "Use for 'drop that objective', 'stop working on X'. Objectives only — "
+                           "to erase a remembered fact use forget.",
             "parameters": {
                 "type": "object",
                 "properties": {"topic": {"type": "string", "description": "A word from the objective to match."}},
+                # Required: OBJECTIVES.find("") returns None, so without a topic these can do nothing
+                # but ask again. Saying so up front stops the model calling them empty.
+                "required": ["topic"],
             },
         },
     },

@@ -9,6 +9,7 @@ confirm-gated). Read-only and degrades to a clear note when no contact book is c
 from __future__ import annotations
 
 from jarvis.brain import contacts as _contacts
+from jarvis.brain.tools.base import tool_error
 
 
 async def resolve_contact(args: dict) -> str:
@@ -43,7 +44,12 @@ async def save_contact(args: dict) -> str:
     try:
         _contacts.BOOK.save(c)
     except RuntimeError as e:
-        return f"I couldn't save that contact, sir — {e}."
+        # Phrased to match tool_failed()'s "i couldn't complete the" marker while keeping the real
+        # cause. The old wording read well but was invisible to that check, so a digest or proactive
+        # caller would have happily read the failure aloud as though it were data.
+        return f"I couldn't complete the contact save just now, sir — {e}."
+    except Exception as e:  # noqa: BLE001 — save() writes JSON to disk: OSError, encoding, disk-full
+        return tool_error("contact save", e)
     return f"Saved, sir: {c.name} — {c.targets()}. I'll remember them next time."
 
 

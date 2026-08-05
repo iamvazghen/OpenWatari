@@ -165,7 +165,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "stop_music_room",
-            "description": "Stop playback and leave the Jarvis Music Room Telegram voice chat.",
+            "description": "Stop playback and LEAVE the Telegram Music Room voice chat. Use for "
+                           "'stop the music room', 'leave the voice chat'. Telegram group playback "
+                           "only — stop_music stops audio on the laptop.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },

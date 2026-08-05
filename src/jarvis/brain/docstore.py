@@ -14,6 +14,7 @@ The index is deliberately EPHEMERAL (one document at a time, in memory): loading
 from __future__ import annotations
 
 import re
+from io import BytesIO
 from pathlib import Path
 
 from jarvis.config import settings
@@ -27,18 +28,26 @@ def _terms(text: str) -> list[str]:
     return [t for t in _WORD_RE.sub(" ", text.lower()).split() if len(t) > 1]
 
 
-def _extract_pdf(path: Path) -> str | None:
-    """Best-effort PDF text via whatever reader is installed; None if none is."""
+def _extract_pdf(src: Path | bytes) -> str | None:
+    """Best-effort PDF text via whatever reader is installed; None if none is.
+
+    Takes a path OR the raw bytes, because a document the owner names lives on his laptop while the
+    only installed PDF reader is on the brain — so the bytes travel and the parsing stays here.
+    """
+    data = src if isinstance(src, bytes) else None
     try:
         from pypdf import PdfReader  # type: ignore
 
-        return "\n".join((p.extract_text() or "") for p in PdfReader(str(path)).pages)
+        return "\n".join((p.extract_text() or "")
+                         for p in PdfReader(BytesIO(data) if data is not None else str(src)).pages)
     except ImportError:
         pass
     try:
         import fitz  # type: ignore  # PyMuPDF
 
-        with fitz.open(str(path)) as doc:
+        opened = (fitz.open(stream=data, filetype="pdf") if data is not None
+                  else fitz.open(str(src)))
+        with opened as doc:
             return "\n".join(page.get_text() for page in doc)
     except ImportError:
         return None
@@ -73,7 +82,7 @@ class DocStore:
         return bool(self._chunks)
 
     def load(self, path: str) -> tuple[bool, str]:
-        """Ingest a local document. Returns (ok, message). Message is a brief, speakable note."""
+        """Ingest a document from THIS host's filesystem. Returns (ok, message)."""
         p = Path(path).expanduser()
         if not p.is_file():
             return False, f"I can't find a file at '{path}', sir."
@@ -82,19 +91,29 @@ class DocStore:
                 return False, f"'{p.name}' is too large to read in one go, sir (over 5 MB)."
         except OSError:
             pass
-        suffix = p.suffix.lower()
+        try:
+            return self.load_bytes(p.name, p.read_bytes())
+        except OSError as e:
+            return False, f"I couldn't read '{p.name}', sir: {type(e).__name__}."
+
+    def load_bytes(self, name: str, data: bytes) -> tuple[bool, str]:
+        """Ingest a document from its raw bytes, whichever machine they came from.
+
+        Split out from ``load`` so a file on the owner's laptop can be read there and parsed here:
+        the PDF reader is installed on the brain, not the laptop, so shipping the bytes keeps PDFs
+        working instead of trading one broken path for another.
+        """
+        suffix = Path(name).suffix.lower()
         if suffix == ".pdf":
-            text = _extract_pdf(p)
+            text = _extract_pdf(data)
             if text is None:
                 return False, ("That's a PDF, sir, and no PDF reader is installed. Run "
                                "`uv pip install pypdf` and I'll be able to read it.")
         elif suffix in _TEXT_EXTS or suffix == "":
-            try:
-                text = p.read_text(encoding="utf-8", errors="ignore")
-            except OSError as e:
-                return False, f"I couldn't read '{p.name}', sir: {type(e).__name__}."
+            text = data.decode("utf-8", errors="ignore")
         else:
             return False, f"I don't know how to read a '{suffix}' file, sir."
+        p = Path(name)
         chunks = _chunk(text)
         if not chunks:
             return False, f"'{p.name}' seems to be empty, sir."

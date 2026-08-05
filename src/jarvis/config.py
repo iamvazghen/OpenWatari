@@ -78,9 +78,13 @@ class Settings(BaseSettings):
 
     # --- Wake word ----------------------------------------------------------------------
     wake_word_enabled: bool = True
-    wake_word_engine: str = "openwakeword"   # openwakeword (now) | porcupine (custom phrases)
-    # The owner's required wake set. Only phrases with a pretrained openWakeWord model load today
-    # (currently just "jarvis"); the rest are pending the Porcupine path (see README).
+    # NB: there is no engine selector. Porcupine was evaluated and dropped, and `wake_word_engine` /
+    # `porcupine_access_key` sat here afterwards being read by nothing — settable in .env, and
+    # setting them did precisely nothing. Custom phrases are openWakeWord models (trained
+    # out-of-repo with openWakeWord's own pipeline under WSL; the .onnx files live in .wakewords/)
+    # and are named by PATH in wake_words below.
+    # The owner's wake set. An entry ending .onnx/.tflite is loaded directly as a trained model;
+    # anything else must be a pretrained openWakeWord phrase or it is skipped.
     wake_words: str = "jarvis,alfred,robbin,assist,time to work,wake up,six-one-nine"
     wake_word_threshold: float = 0.5
     # Speakers barge-in: on a shared (half-duplex) endpoint, saying the wake word OVER Watari's
@@ -106,7 +110,6 @@ class Settings(BaseSettings):
     # when the conversation goes idle again. Set false to disable.
     listening_pulse: bool = True
     listening_pulse_period_s: float = 2.5   # seconds between pulses while idle
-    porcupine_access_key: str | None = None  # Picovoice key, for the custom-phrase engine
 
     # --- VAD & barge-in (Phase 1) -------------------------------------------------------
     # Silero VAD (CPU, bundled) detects speech start/stop. Barge-in lets you interrupt
@@ -446,7 +449,7 @@ class Settings(BaseSettings):
     #   {"filesystem": {"command": "npx", "args": ["-y","@modelcontextprotocol/server-filesystem","/dir"]}}
     mcp_servers: str | None = None
     # MyNews (the owner's RSS aggregator) — base URL for the proactive morning-brief signal
-    # (brain/tools/mynews.py). Blank = source off. On-demand news tools come via mcp_servers.
+    # (brain/mynews.py). Blank = source off. On-demand news tools come via mcp_servers.
     mynews_url: str | None = None
     # Composio (breadth layer): API key for the 250+ OAuth-managed app integrations. Used by the
     # accounts health-check (bench/test_composio_accounts.py) and, once an MCP server URL is added to
@@ -652,6 +655,15 @@ class Settings(BaseSettings):
     # face + lighting: raise to reject look-alikes, lower if it fails to recognise you. Upgrade path:
     # a real face-embedding model (dlib/insightface) if this proves too coarse.
     face_match_threshold: float = 0.62
+    # I1 — face as a SECOND factor on privileged (confirm-gated) actions. The voice gate cannot carry
+    # authorisation on its own: measured on the live mic the owner's accept median is 0.33 while the
+    # impostor ceiling is 0.30, and logs/edge.log shows 61 accepts against 0 rejections — ambient
+    # television was being forwarded to the brain as though he had said it. So for actions that are
+    # gated anyway, "he said yes" must also mean he was THERE.
+    # Deliberately fail-open: if the camera is unreachable, unenrolled, or the laptop is offline, this
+    # falls back to the confirm-only behaviour it has today. It can only ever ADD a refusal when the
+    # camera positively shows the owner is not present — never lock him out of his own assistant.
+    face_second_factor: bool = True
 
     # --- Phase 2 companion: field coaching (skill reviews + progress in your focus areas) --------
     # Watari tracks your LEVEL + progress in skill fields (e.g. German) and offers an evening review

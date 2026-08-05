@@ -84,15 +84,20 @@ def _hidden_startupinfo():
     return si
 
 
-async def _dispatch(op: str, args: dict, local) -> str:
+async def _dispatch(op: str, args: dict, local, timeout: float | None = None) -> str:
     """Run a PC op on the laptop executor if one is connected to THIS brain (the VPS case); else run
     it locally (correct when the brain itself runs on the laptop). This is what gives the 24/7 VPS
-    brain full control of the laptop's files/processes."""
+    brain full control of the laptop's files/processes.
+
+    ``timeout`` overrides the default forward window for the rare long op (a full test run takes
+    minutes, and the default would report a timeout while it was still succeeding)."""
     from jarvis.brain.pc_link import PC_LINK
 
     if PC_LINK.active:
         try:
-            return await PC_LINK.forward(op, args)
+            if timeout is None:
+                return await PC_LINK.forward(op, args)
+            return await PC_LINK.forward(op, args, timeout=timeout)
         except Exception as e:  # noqa: BLE001
             return (f"Your laptop didn't respond, sir ({type(e).__name__}) — it may be offline or the "
                     "executor isn't running.")
@@ -606,8 +611,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "open_app",
-            "description": "Launch an application or executable on the owner's PC by name or path "
-                           "(e.g. 'notepad', 'spotify', 'code', 'explorer').",
+            "description": "Launch an application on the owner's PC by name or path ('notepad', "
+                           "'spotify', 'code', 'explorer'). Use for 'open X', 'launch X', 'start "
+                           "X'. Local apps only — for a website use open_url.",
             "parameters": {
                 "type": "object",
                 "properties": {"app": {"type": "string", "description": "App name or path to launch."}},

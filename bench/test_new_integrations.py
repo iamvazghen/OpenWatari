@@ -116,7 +116,13 @@ def main() -> None:
               abs((max(mains) - min(mains)).total_seconds() - 2400) < 60, str(mains))
         plan = json.loads(routines_mod._DAY_PLAN.read_text(encoding="utf-8"))
         check("day plan recorded (planning prompt goes quiet)", "training" in plan, str(plan))
-        out2 = asyncio.run(routines_mod.plan_today({"commitment": "training", "time": "00:01"}))
+        # An unambiguous past instant, the same way the future case above is built. This used to be
+        # the literal "00:01", which is only in the past for all but ~60 seconds of the day — and the
+        # 2026-08-01 deploy gate happened to run through 00:00:08, so it planned the time instead of
+        # refusing it and failed a build over the clock rather than the code.
+        past = datetime.now(routines_mod.USER_TZ) - timedelta(hours=13)
+        out2 = asyncio.run(routines_mod.plan_today(
+            {"commitment": "training", "time": past.isoformat()}))
         check("a past time is refused, not silently scheduled", "already past" in out2, out2)
     finally:
         rem.set_reminder = orig

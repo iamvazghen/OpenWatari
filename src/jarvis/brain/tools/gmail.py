@@ -161,7 +161,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "draft_email",
-            "description": "Save a Gmail draft (does NOT send). Use when he wants to review before sending.",
+            "description": "Save a Gmail draft WITHOUT sending it, so the owner can review first. "
+                           "Use for 'draft an email to X', 'write it but don't send'. send_email "
+                           "actually sends — never substitute one for the other.",
             "parameters": {
                 "type": "object",
                 "properties": {

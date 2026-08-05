@@ -144,6 +144,7 @@ SCHEMAS = [
                     "prompt": {"type": "string", "description":
                                "Optional specific question about the screen (default: describe it)."},
                 },
+                "required": [],   # every argument genuinely optional — stated, not left implied
             },
         },
     },
@@ -162,6 +163,7 @@ SCHEMAS = [
                     "path": {"type": "string", "description":
                              "Where to save the PNG (default ~/.jarvis/screenshots/latest.png)."},
                 },
+                "required": [],
             },
         },
     },
@@ -181,6 +183,7 @@ SCHEMAS = [
                     "path": {"type": "string", "description":
                              "Screenshot path (default ~/.jarvis/screenshots/latest.png)."},
                 },
+                "required": [],
             },
         },
     },

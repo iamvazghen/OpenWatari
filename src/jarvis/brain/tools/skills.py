@@ -133,7 +133,8 @@ async def read_skill(args: dict) -> str:
     try:
         return clip(p.read_text(encoding="utf-8", errors="ignore"), 6000)
     except OSError as e:
-        return f"I couldn't open that skill, sir ({type(e).__name__})."
+        # Same shape as tool_error so tool_failed() recognises it (see contacts.py for why).
+        return f"I couldn't complete the skill read just now, sir ({type(e).__name__})."
 
 
 SCHEMAS = [

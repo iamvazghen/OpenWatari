@@ -3,9 +3,11 @@
 * ``safe_call(coro)`` — wraps any awaitable so an exception returns a short speakable error
   string instead of crashing the brain. Use in tools where the owner-facing error needs to be
   calm (e.g. a flaky external API).
-* ``health_probe()`` — runs every 4h on the scheduler; surfaces a one-line status to the
-  proactive engine if any of [vault, telegram, pass, Composio, ElevenLabs, Deepgram] is
-  unreachable for >24h.
+* ``health_probe()`` — runs every 4h on the scheduler (``_scheduled_jobs._fire_reliability_probe``)
+  and reports the state of [vault, telegram, pass, Composio, ElevenLabs, Deepgram]. It probes and
+  records; it does not speak. Surfacing to the owner is ``brain/health.py::health_signals``, a
+  registered proactive source (``proactive.py:609``), and paging on a sustained outage is
+  ``attempt_repair_and_escalate``.
 
 The A/B prompt harness lives in ``bench/ab_prompts.py`` (separate module) — not auto-toggled
 here because swapping system prompts is invasive.
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -209,29 +211,9 @@ async def attempt_repair_and_escalate(
     return summary
 
 
-def format_probe_report(probes: list[dict]) -> str:
-    ok = [p["name"] for p in probes if p["ok"]]
-    bad = [p for p in probes if not p["ok"]]
-    if not bad:
-        return "All systems green, sir."
-    parts = [f"{p['name']} is down ({p['err'] or 'no response'})" for p in bad]
-    return f"Watari probe, sir: {', '.join(parts)}."
-
-
-async def health_probe_and_surface() -> str:
-    """Run a probe, and if anything failed, surface a one-line proactive signal."""
-    probes = await health_probe()
-    msg = format_probe_report(probes)
-    bad = [p for p in probes if not p["ok"]]
-    if not bad:
-        return msg  # silent success
-    # Surface via proactive if available.
-    try:
-        from jarvis.brain.proactive import Signal  # type: ignore
-        # Hand-off: just log here; the scheduler fires the proactive engine from
-        # default_signal_sources in another lifecycle path. Logging is enough so the
-        # next tick / proactive cycle sees the degraded state if it queries probes.
-        logger.warning(f"health_probe: {msg}")
-    except Exception:
-        pass
-    return msg
+# Removed 2026-08-01: ``health_probe_and_surface()`` and its only caller-helper
+# ``format_probe_report()``. The former had no callers anywhere in the repo, and its docstring
+# promised to "surface a one-line proactive signal" while the body imported ``Signal``, used it for
+# nothing, and logged — the kind of dead code that reads as a working feature and stops anyone from
+# noticing the real one is missing. Health IS surfaced, by ``brain/health.py::health_signals``,
+# which is registered with the proactive engine and emits actual Signals.

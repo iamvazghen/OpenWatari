@@ -127,6 +127,10 @@ async def test_read_intents_force_tools() -> None:
         "any overdue tasks",
         "search my vault for the rabbit farm",
         "what are the latest headlines",
+        # A bare "news" is still a data read. "any tech news" used to force nothing, so the model
+        # answered a right-now question out of its own training data.
+        "any tech news",
+        "what's the news in Armenia",
     ]
     should_not = [
         "how are you today",
@@ -135,6 +139,9 @@ async def test_read_intents_force_tools() -> None:
         "what's two plus two",
         "thanks, that's all",
         "good morning",
+        # "news" as ordinary speech, not a request for the news.
+        "that's good news",
+        "no news is good news",
     ]
     miss = [t for t in should_force if not _wants_forced_tool(t)]
     over = [t for t in should_not if _wants_forced_tool(t)]
@@ -149,13 +156,19 @@ async def test_parallel_independent_tools() -> None:
     agent = JarvisAgent()
     order: list[str] = []
 
+    span: dict[str, float] = {}
+
     async def slow_a(_args: dict) -> str:
+        span["a_start"] = time.perf_counter()
         await asyncio.sleep(0.25)
+        span["a_end"] = time.perf_counter()
         order.append("a")
         return "alpha"
 
     async def slow_b(_args: dict) -> str:
+        span["b_start"] = time.perf_counter()
         await asyncio.sleep(0.25)
+        span["b_end"] = time.perf_counter()
         order.append("b")
         return "beta"
 
@@ -169,7 +182,16 @@ async def test_parallel_independent_tools() -> None:
     t0 = time.perf_counter()
     outcomes = await agent._execute_calls(messages, calls)
     dt = time.perf_counter() - t0
-    check("both tools ran concurrently (~max, not sum)", dt < 0.4, f"elapsed={dt:.2f}s")
+    # Assert the OVERLAP, not the stopwatch. "dt < 0.4" was measuring the machine's mood: two 0.25s
+    # sleeps land at 0.29s each under Windows' ~16ms timer granularity, _execute_calls adds ~0.15s of
+    # its own book-keeping, and the total sat right on the 0.4s line — so a busy box failed a build
+    # while the tools were provably running side by side (both started and finished the same
+    # instant). Whether B began before A finished is the actual property, and it can't be bribed by
+    # load. Elapsed is still reported so a real slowdown remains visible.
+    overlapped = span.get("b_start", 0) < span.get("a_end", 0)
+    check("both tools ran concurrently (B starts before A ends)", overlapped,
+          f"a={span.get('a_start', 0):.3f}->{span.get('a_end', 0):.3f} "
+          f"b={span.get('b_start', 0):.3f}->{span.get('b_end', 0):.3f} elapsed={dt:.2f}s")
     check("outcomes preserve call order", [o["name"] for o in outcomes] == ["tool_a", "tool_b"],
           repr(outcomes))
     check("tool result messages match call ids in order",

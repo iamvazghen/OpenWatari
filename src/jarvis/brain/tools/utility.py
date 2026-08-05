@@ -369,27 +369,34 @@ async def osrm_travel_time(args: dict) -> str:
 SCHEMAS = [
     {"type": "function", "function": {
         "name": "weather",
-        "description": "Current weather for a place (temp, feels-like, wind). No key needed.",
+        "description": "Current conditions for a place — temperature, feels-like, wind. Use for "
+                       "'what's the weather', 'how cold is it', 'do I need a jacket'. RIGHT NOW "
+                       "only; for a forecast ('will it rain tomorrow') use web_search.",
         "parameters": {"type": "object", "properties": {
             "location": {"type": "string", "description": "City or place name."}},
             "required": ["location"]}}},
     {"type": "function", "function": {
         "name": "crypto_price",
-        "description": "Current price of a cryptocurrency by ticker (btc, eth, sol…), with 24h change.",
+        "description": "Live cryptocurrency price by ticker (btc, eth, sol…) with its 24-hour "
+                       "change. Use for 'what's bitcoin at', 'how's ether doing'. Coins only — "
+                       "for shares use stock_price.",
         "parameters": {"type": "object", "properties": {
             "symbol": {"type": "string", "description": "Coin ticker, e.g. BTC."},
             "vs": {"type": "string", "description": "Quote currency (default usd)."}},
             "required": ["symbol"]}}},
     {"type": "function", "function": {
         "name": "stock_price",
-        "description": "Latest stock/ETF quote by ticker (e.g. AAPL). US tickers assumed unless a "
-                       "market suffix is given (e.g. 'air.de').",
+        "description": "Latest stock/ETF quote by ticker, with its move on the day. Use for "
+                       "'how's Apple doing', 'what's NVDA at'. US tickers assumed unless a market "
+                       "suffix is given (e.g. 'air.de'). Shares only — for coins use crypto_price.",
         "parameters": {"type": "object", "properties": {
             "symbol": {"type": "string", "description": "Ticker symbol."}},
             "required": ["symbol"]}}},
     {"type": "function", "function": {
         "name": "fx_rate",
-        "description": "Convert between currencies at the latest ECB reference rate (e.g. USD to EUR).",
+        "description": "Convert money between two currencies at the latest ECB reference rate. Use "
+                       "for 'how much is 500 dollars in euros', 'what's the pound at'. Currency "
+                       "only — for units (km, kg, °C) use convert.",
         "parameters": {"type": "object", "properties": {
             "base": {"type": "string", "description": "From currency code, e.g. USD."},
             "quote": {"type": "string", "description": "To currency code, e.g. EUR."},
@@ -397,26 +404,36 @@ SCHEMAS = [
             "required": ["base", "quote"]}}},
     {"type": "function", "function": {
         "name": "news_brief",
-        "description": "A short headline brief — top tech/world stories, or news matching a topic.",
+        # Says Hacker News on purpose: this reads HN's top stories / HN search and nothing else, so
+        # the old "top tech/world stories" actively steered the model here for world and local news
+        # it cannot answer.
+        "description": "Top Hacker News headlines, or HN stories matching a topic. Use for 'what's "
+                       "on Hacker News', 'any tech news'. Tech/startup only — for world, local or "
+                       "business news use web_search.",
         "parameters": {"type": "object", "properties": {
             "topic": {"type": "string", "description": "Optional topic; blank = top stories."}},
             "required": []}}},
     {"type": "function", "function": {
         "name": "wiki_lookup",
-        "description": "A concise Wikipedia summary of a topic, person, or thing.",
+        "description": "A short Wikipedia summary of one topic, person or thing. Use for 'who is X', "
+                       "'what is Y'. Encyclopaedic facts only — for anything current or news-driven "
+                       "use web_search.",
         "parameters": {"type": "object", "properties": {
             "topic": {"type": "string", "description": "What to look up."}},
             "required": ["topic"]}}},
     {"type": "function", "function": {
         "name": "define_word",
-        "description": "Dictionary definition of an English word.",
+        "description": "Dictionary definition of a single ENGLISH word, with its part of speech. "
+                       "Use for 'what does X mean', 'define X'. One word only — for a concept, "
+                       "phrase or foreign word use wiki_lookup or web_search.",
         "parameters": {"type": "object", "properties": {
             "word": {"type": "string", "description": "The word to define."}},
             "required": ["word"]}}},
     {"type": "function", "function": {
         "name": "convert",
-        "description": "Convert a quantity between units (length/mass/volume/temperature) or between "
-                       "two currency codes.",
+        "description": "Convert a quantity between units of length, mass, volume or temperature. "
+                       "Use for 'how many miles is 10 km', '200 grams in ounces'. Three-letter "
+                       "currency codes are handed to fx_rate automatically.",
         "parameters": {"type": "object", "properties": {
             "value": {"type": "number", "description": "The number to convert."},
             "from": {"type": "string", "description": "Source unit or 3-letter currency code."},

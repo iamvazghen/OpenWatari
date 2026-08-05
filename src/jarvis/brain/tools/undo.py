@@ -123,7 +123,8 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_recent_actions",
-            "description": "Show the recent-actions log (the 8 things undo_last would roll back).",
+            "description": "Show the log of recent reversible actions — the last 8 things undo_last "
+                           "could roll back. Use for 'what have you done', 'what can you undo'.",
             "parameters": {"type": "object", "properties": {}},
         },
     },

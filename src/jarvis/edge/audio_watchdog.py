@@ -27,6 +27,19 @@ from pipecat.frames.frames import Frame, InputAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
+def _pref_mtime() -> float:
+    """Modification time of the saved output preference, or 0.0 when it has never been written.
+
+    Cheap enough to stat every poll (~5s) — no device enumeration, unlike route_should_change.
+    """
+    from jarvis.edge.audio_devices import PREF_PATH
+
+    try:
+        return PREF_PATH.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 class AudioLivenessProbe(FrameProcessor):
     """Timestamps every input audio frame. Placed right after ``transport.input()`` (before any gate
     that could mute the mic), so it sees the RAW stream — the true signal of a live vs dead mic."""
@@ -115,6 +128,11 @@ async def watch_audio_liveness(
     out_misses = 0
     last_count = -1
     last_wall = time.time()
+    # "Switch to my headphones" writes the output preference and nothing else — resolve_output_index
+    # is only read when the worker is BUILT, and route_should_change watches devices appearing and
+    # vanishing, not the preference. So the command used to save a setting and change nothing the
+    # owner could hear until the next restart. Track the file's mtime and rebuild when it moves.
+    last_pref = _pref_mtime()
     while not dead.is_set():
         gap = time.monotonic() - probe.last_input
         # Sleep/resume: after modern standby every audio stream and cloud WebSocket this process holds
@@ -162,6 +180,12 @@ async def watch_audio_liveness(
         # (the earlier "bursty gaps" were an event-loop-blocking bug, since fixed via to_thread below).
         if gap > silence_limit_s:
             logger.error(f"audio watchdog: mic gap {gap:.0f}s (frames={probe.count}) — stream dead, restarting edge")
+            dead.set()
+            return
+        pref_mtime = _pref_mtime()
+        if pref_mtime != last_pref:
+            last_pref = pref_mtime
+            logger.info("audio watchdog: output preference changed — re-routing (restarting edge)")
             dead.set()
             return
         if i % device_check_every == 0:

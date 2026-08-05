@@ -87,6 +87,9 @@ SCHEMAS = [
                     "topic": {"type": "string",
                               "description": "Which one: 'first', an id, or a word from the action."},
                 },
+                # This tool EXECUTES a queued action; approving the wrong one is not recoverable.
+                # Without a topic it can only list what's pending, so demand the identifier.
+                "required": ["topic"],
             },
         },
     },
@@ -94,14 +97,16 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "reject_action",
-            "description": ("Reject/drop a queued action so it never runs. Use for 'no, drop that', "
-                            "'don't send it', 'reject the first one'."),
+            "description": ("Reject a queued action so it never runs. Use for 'no, drop that', "
+                            "'don't send it', 'reject the first one'. approve_action runs it "
+                            "instead; list_approvals shows what's waiting."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "topic": {"type": "string", "description": "Which one: 'first', an id, or a word."},
                     "reason": {"type": "string", "description": "Optional reason."},
                 },
+                "required": ["topic"],   # reason stays optional; the identifier does not
             },
         },
     },

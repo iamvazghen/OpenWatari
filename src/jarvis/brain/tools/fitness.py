@@ -90,15 +90,17 @@ SCHEMAS = [
             "description": ("How the owner SLEPT last night (duration, wake time) from their "
                             "wearable via Google Fit — 'how did I sleep', wellbeing checks."),
             "parameters": {"type": "object", "properties": {
-                "hours_back": {"type": "integer", "description": "Lookback window (default 24h)."}}},
+                "hours_back": {"type": "integer", "description": "Lookback window (default 24h)."}},
+                "required": []},
         },
     },
     {
         "type": "function",
         "function": {
             "name": "activity_summary",
-            "description": ("The owner's steps + heart rate TODAY from their wearable via Google "
-                            "Fit — 'how active was I', training-load checks."),
+            "description": ("The owner's steps and average heart rate TODAY from their wearable via "
+                            "Google Fit. Use for 'how active was I', 'how many steps', "
+                            "training-load checks. For last night's rest use sleep_summary."),
             "parameters": {"type": "object", "properties": {}},
         },
     },

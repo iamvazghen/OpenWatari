@@ -1,34 +1,27 @@
-"""Protocol PHOENIX — restart Jarvis.
+"""Protocol PHOENIX — restart Watari's edge. PC_LINK-routed; this file deliberately does nothing.
 
-Launched detached with: <parent_pid> <repo_root> <python_exe>. Kills the old Jarvis edge
-process, waits for it to release the mic/audio devices, then starts a fresh one.
+Until 2026-08-01 this script ran ``taskkill /PID <parent_pid> /F`` and then started a fresh edge from
+the repo root. Both halves broke when the brain moved to the VPS: ``taskkill`` doesn't exist on Linux,
+the parent pid is now the BRAIN rather than the edge, and the edge it tried to spawn would have come
+up on a server with no microphone. The working command is ``Start-ScheduledTask -TaskName
+WatariEdgeRefresh`` in the protocol registry, which runs on the laptop where the audio devices are.
+
+Kept (and inert, exiting non-zero) for the same reason as ``ragnarok.py``: the authorization gate
+requires the script to be present, and a silent success would hide a misrouted call.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
-import time
+
+_MESSAGE = ("phoenix is PC_LINK-routed and must not be launched as a script — "
+            "use run_protocol_async, which forwards it to the laptop")
 
 
-def main() -> None:
-    if len(sys.argv) < 4:
-        return
-    parent_pid, repo_root, python_exe = sys.argv[1], sys.argv[2], sys.argv[3]
-    time.sleep(3)  # let Jarvis announce the reboot
-    subprocess.run(["taskkill", "/PID", str(parent_pid), "/F"], capture_output=True)
-    time.sleep(2)  # give the OS time to free the audio devices
-
-    flags = 0
-    if sys.platform == "win32":
-        flags = subprocess.CREATE_NEW_CONSOLE  # type: ignore[attr-defined]
-    subprocess.Popen(
-        [python_exe, "-m", "jarvis.edge.assistant"],
-        cwd=repo_root,
-        creationflags=flags,
-        close_fds=True,
-    )
+def main() -> int:
+    sys.stderr.write(_MESSAGE + "\n")
+    return 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

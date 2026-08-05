@@ -6,20 +6,34 @@ verifies it in constant time before launching anything. The scripts live in
 ``src/jarvis/protocols/`` and are launched **detached** so they survive Jarvis being killed
 (needed for the stop/restart protocols).
 
-The three shipped protocols:
-  * ``goodnight`` — stops Jarvis (terminates the running edge process).
-  * ``phoenix``   — restarts Jarvis (kills the old process, starts a fresh one).
+The eight shipped protocols, in two kinds.
+
+ROUTED — they act on the OWNER'S LAPTOP, so they carry a ``pc_command`` and may only leave via
+PC_LINK (``run_protocol_async``). Running one locally on the VPS would aim laptop-era logic at the
+server — ragnarok's POSIX branch is ``shutdown -r +1``, pointed at the brain host — so the sync
+launcher refuses them outright:
+  * ``goodnight`` — stops Watari (terminates the running edge process).
+  * ``phoenix``   — restarts Watari (kills the old process, starts a fresh one).
   * ``ragnarok``  — restarts the laptop.
+
+BRAIN-SIDE — they run here, on whichever host the brain is:
+  * ``backup``      — backs up Watari's memory.
+  * ``ping``        — sends a phone push test.
+  * ``diagnostics`` — writes a health report.
+  * ``auditpack``   — archives the audit logs.
+  * ``checkpoint``  — archives key non-secret context (README/SECURITY/TODO/pyproject + memory).
 
 Passwords come from settings (``JARVIS_PROTOCOL_*_PASSWORD``) — CHANGE the defaults in .env.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -109,6 +123,60 @@ class ProtocolResult:
         self.spoken = spoken
 
 
+#: Brain-side protocols that produce a FILE, and the glob that finds it. Three of the five wrote
+#: their output to ``backups/`` on the brain host and stopped there — which was fine while the brain
+#: was the laptop, and became useless the moment it moved to the VPS: the owner was told "diagnostics
+#: written" and had no way to read a word of it. Anything listed here gets delivered to him.
+_REPORTS = {
+    "diagnostics": "jarvis-diagnostics-*.txt",
+    "auditpack": "jarvis-audit-*.zip",
+    "checkpoint": "jarvis-checkpoint-*.zip",
+}
+#: How long to wait for a detached script to finish writing before giving up on delivery.
+_REPORT_WAIT_S = 90.0
+
+
+async def _deliver_report(name: str, since: float) -> None:
+    """Wait for a brain-side protocol's artifact, then send it to the owner.
+
+    Fail-quiet: this is a courtesy on top of a protocol that has already run. If Telegram is not
+    configured, or the script wrote nothing, the owner is no worse off than before — but the failure
+    is logged, because silence here is exactly the bug being fixed.
+    """
+    pattern = _REPORTS.get(name)
+    if not pattern:
+        return
+    backups = _REPO_ROOT / "backups"
+    deadline = asyncio.get_running_loop().time() + _REPORT_WAIT_S
+    newest = None
+    while asyncio.get_running_loop().time() < deadline:
+        # Only files written AFTER this run started — otherwise a failed run happily delivers the
+        # previous week's report and looks like it succeeded.
+        fresh = [p for p in backups.glob(pattern) if p.is_file() and p.stat().st_mtime >= since]
+        if fresh:
+            newest = max(fresh, key=lambda p: p.stat().st_mtime)
+            break
+        await asyncio.sleep(2.0)
+    if newest is None:
+        logger.warning(f"protocol '{name}': no {pattern} appeared within {_REPORT_WAIT_S:.0f}s — "
+                       "nothing to deliver")
+        return
+    try:
+        from jarvis.brain.tools.telegram import send_telegram
+
+        kb = newest.stat().st_size / 1024
+        caption = f"Protocol {name} — {newest.name} ({kb:.0f} KB), sir."
+        if newest.suffix == ".txt":
+            # A text report is more use read than downloaded, so lead with the content and attach
+            # the file behind it.
+            body = newest.read_text(encoding="utf-8", errors="replace").strip()
+            caption = f"{caption}\n\n{body[:2500]}" + ("\n…(truncated)" if len(body) > 2500 else "")
+        out = await send_telegram({"message": caption, "file": str(newest)})
+        logger.info(f"protocol '{name}': delivered {newest.name} to the owner ({out[:60]})")
+    except Exception as e:  # noqa: BLE001 — delivery is best-effort; the protocol itself already ran
+        logger.warning(f"protocol '{name}': could not deliver {newest.name}: {type(e).__name__}: {e}")
+
+
 async def run_protocol_async(name: str, password: str, drill: bool = False) -> ProtocolResult:
     """Run a protocol, sending the machine-level ones to the LAPTOP when it's connected.
 
@@ -123,7 +191,14 @@ async def run_protocol_async(name: str, password: str, drill: bool = False) -> P
     entry = reg.get((name or "").strip().lower())
     pc_command = (entry or {}).get("pc_command")
     if not pc_command:
-        return run_protocol(name, password, drill=drill)
+        started = time.time()
+        res = run_protocol(name, password, drill=drill)
+        # A brain-side protocol that writes a file: follow it up and hand the file to the owner. Not
+        # awaited — the script is detached and takes seconds to minutes, and the turn must not block
+        # on it. Skipped for drills, which deliberately write nothing.
+        if res.ok and not drill and name.strip().lower() in _REPORTS:
+            asyncio.create_task(_deliver_report(name.strip().lower(), started))
+        return res
 
     from jarvis.brain.pc_link import PC_LINK
 
@@ -185,6 +260,19 @@ def run_protocol(name: str, password: str, drill: bool = False) -> ProtocolResul
             f"Drill OK: protocol {name} verified — password accepted, script {proto['script']} present. "
             f"Live, it would {proto['description']}. Not executed (drill).",
             spoken=f"Drill passed, sir — {name} is ready and would {proto['description']}. I didn't run it.",
+        )
+    # A routed protocol targets the OWNER'S machine and must only ever leave via PC_LINK. Reaching
+    # this line means some caller took the sync path for one of them, which on the VPS would execute
+    # laptop-era logic against the brain host — ragnarok's POSIX branch is `shutdown -r +1`, aimed at
+    # the server. No caller does that today; the guard is here because the function is public and the
+    # failure would be catastrophic and silent rather than noisy.
+    if proto.get("pc_command"):
+        logger.error(f"protocol '{name}' reached the sync launcher — routed protocols must go through "
+                     "run_protocol_async; refusing to execute it on this host")
+        return ProtocolResult(
+            False,
+            f"Protocol {name} acts on your laptop and can only be sent there, sir — I won't run it here.",
+            spoken=f"{name} has to run on your laptop, sir, so I didn't run it.",
         )
     try:
         flags = 0

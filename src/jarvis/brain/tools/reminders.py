@@ -184,7 +184,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_reminders",
-            "description": "List the owner's pending reminders with their next fire time and id.",
+            "description": "List pending reminders with each one's next fire time and short id. Use "
+                           "for 'what reminders do I have', 'what am I being reminded about'. Get "
+                           "the id here before cancel_reminder.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -192,7 +194,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "cancel_reminder",
-            "description": "Cancel a reminder by its id (a short prefix from list_reminders is fine).",
+            "description": "Cancel ONE pending reminder by its id (a short prefix from "
+                           "list_reminders works). Use for 'cancel that reminder', 'drop the 6pm "
+                           "one'. Call list_reminders first if you don't have the id.",
             "parameters": {
                 "type": "object",
                 "properties": {"id": {"type": "string", "description": "Reminder id (or prefix)."}},

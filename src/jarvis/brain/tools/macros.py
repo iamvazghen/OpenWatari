@@ -8,6 +8,18 @@ steps from natural language; macros.py only persists + executes them.
 
 Lazy group: 'macros' (loaded by trigger keywords: "macro", "routine", "recurring", "every
 morning", "set up a shortcut").
+
+IMPORT CYCLE — DO NOT PROMOTE ``tool_handlers`` TO A TOP-LEVEL IMPORT.
+``tools/__init__.py`` imports this module at module level (it is in ``_MODULES``), and running a
+macro step needs ``tool_handlers()`` from that same ``__init__``. The cycle is broken in exactly
+one way: every ``from jarvis.brain.tools import tool_handlers`` here lives INSIDE the function
+that needs it, so it resolves after ``__init__`` has finished executing. Hoisting one to the top
+of the file makes ``import jarvis.brain.tools`` fail on a half-initialised module, which takes
+down brain startup — not this module, the whole brain, and the traceback points at ``__init__``
+rather than here. A guard in ``bench/test_finetune.py`` fails if a top-level one appears.
+
+(The other 11 mutual pairs in the tools package are the deliberate proactive-signal lazy-import
+pattern and are fine; this one is load-bearing.)
 """
 
 from __future__ import annotations
@@ -201,7 +213,7 @@ async def run_step_tool(tool: str, sub_args: dict, *, authorized: bool, label: s
     from jarvis.shared import errors as _err
 
     try:
-        from jarvis.brain.tools import tool_handlers  # lazy (avoid cycle)
+        from jarvis.brain.tools import tool_handlers  # lazy (avoid cycle) — see module docstring
         fn = tool_handlers().get(tool)
     except Exception:  # noqa: BLE001
         fn = None
@@ -323,7 +335,7 @@ async def if_then(args: dict) -> str:
         tool = step.get("tool", "")
         sub_args = step.get("args") or {}
         try:
-            from jarvis.brain.tools import tool_handlers
+            from jarvis.brain.tools import tool_handlers  # lazy (avoid cycle) — see module docstring
             fn = tool_handlers().get(tool)
         except Exception:
             fn = None
@@ -365,7 +377,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_macros",
-            "description": "List every saved macro (name + step count + description).",
+            "description": "List every saved macro with its step count and description. Use for "
+                           "'what macros do I have', 'what shortcuts have I saved', or to find a "
+                           "macro's exact name before run_macro.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -373,7 +387,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "run_macro",
-            "description": "Execute a saved macro by name. Returns a transcript of each step.",
+            "description": "Execute a saved macro by name, running each step in order and returning "
+                           "a transcript. Use for 'run the morning macro', 'do my shutdown "
+                           "routine'. Call list_macros if unsure of the exact name.",
             "parameters": {
                 "type": "object",
                 "properties": {"name": {"type": "string", "description": "Macro name."}},
@@ -385,7 +401,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "delete_macro",
-            "description": "Forget a saved macro.",
+            "description": "Permanently delete ONE saved macro by name so it can no longer be run. "
+                           "Use for 'delete the morning macro', 'remove that shortcut'. Macros "
+                           "only — to erase a remembered fact use forget.",
             "parameters": {
                 "type": "object",
                 "properties": {"name": {"type": "string", "description": "Macro name."}},

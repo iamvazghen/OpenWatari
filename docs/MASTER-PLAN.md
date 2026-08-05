@@ -347,8 +347,10 @@ native for those; Notion stays native via its integration key.)
 
 ## Part 8 — Deferred / scale-only / explicitly skipped
 
-- **8.1** Custom **"hey watari" wake-word** openWakeWord model (synthetic Piper voices + negatives + CPU
-  training → `watari.onnx`). Interim trigger stays "hey jarvis". `bench/train_wakeword.py` exists.
+- **8.1** ~~Custom **"hey watari" wake-word** openWakeWord model~~ — DONE 2026-07-01: `watari.onnx` and
+  `hey_watari.onnx` are trained and live in `.wakewords/`, both listed in `JARVIS_WAKE_WORDS`. Trained
+  out-of-repo with openWakeWord's pipeline under WSL — there is no `bench/train_wakeword.py`, and this
+  line used to claim there was.
 - **8.2** iPhone **mic over HTTPS** (in-browser capture): `tailscale serve` routes (tailnet-only, additive)
   → brain HTTP/WS; rewrite the client to capture via `getUserMedia`+`MediaRecorder` and POST audio to a new
   brain `audio` handler running Deepgram REST STT; build `wss://<tailnet-host>/voice`. Needs the phone.

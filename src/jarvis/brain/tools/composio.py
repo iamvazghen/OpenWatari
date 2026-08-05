@@ -19,6 +19,7 @@ import asyncio
 import json
 
 import httpx
+from loguru import logger
 
 from jarvis.brain.tools.base import not_configured, tool_error
 from jarvis.config import settings

@@ -132,7 +132,11 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "forget",
-            "description": "Delete the best-matching fact from long-term memory ('forget that X').",
+            # Names the three tools that used to steal this call. "forget" is the owner's word for
+            # four different erasures, and drop_objective even advertised 'forget X' as its trigger.
+            "description": "Delete ONE remembered fact from long-term memory. Use for 'forget that "
+                           "I…', 'delete what you know about X'. Personal facts only — not macros "
+                           "(delete_macro), objectives (drop_objective) or to-dos (delete_task).",
             "parameters": {
                 "type": "object",
                 "properties": {

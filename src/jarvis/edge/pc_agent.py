@@ -23,13 +23,22 @@ from loguru import logger
 from jarvis.brain.tools.system import LOCAL_HANDLERS as _SYS_HANDLERS
 from jarvis.brain.tools.camera import LOCAL_HANDLERS as _CAM_HANDLERS
 from jarvis.brain.tools.browser import LOCAL_HANDLERS as _BROWSER_HANDLERS
+from jarvis.brain.tools.coding import LOCAL_HANDLERS as _REPO_HANDLERS
+from jarvis.brain.tools.localplay import LOCAL_HANDLERS as _AUDIO_HANDLERS
+from jarvis.brain.tools.documents import LOCAL_HANDLERS as _DOC_HANDLERS
+from jarvis.brain.tools.audioout import LOCAL_HANDLERS as _AUDIO_OUT_HANDLERS
+from jarvis.config import settings
 
 # The laptop executor runs system ops (files/processes/screenshot), camera ops (presence/enroll/
-# capture) and the interactive BROWSER locally — the camera, the owner's face refs and the browser
-# profile with his logged-in sessions are all on this machine, not on the VPS brain. A browser driven
-# brain-side would be headless on a server he can't see, with an empty cookie jar.
-LOCAL_HANDLERS = {**_SYS_HANDLERS, **_CAM_HANDLERS, **_BROWSER_HANDLERS}
-from jarvis.config import settings
+# capture), the interactive BROWSER, and the REPO ops locally — the camera, the owner's face refs and
+# the browser profile with his logged-in sessions are all on this machine, not on the VPS brain. A
+# browser driven brain-side would be headless on a server he can't see, with an empty cookie jar.
+# Repo ops matter for the same reason: the VPS copy is a deploy artefact whose git points at the real
+# remote and whose files are overwritten by every deploy, so edits and commits belong here. AUDIO too:
+# the VPS has ffplay installed, so playing there succeeded silently into a machine with no speakers.
+# Documents likewise: "read this file" names a path on HIS disk, which doesn't exist on the VPS.
+LOCAL_HANDLERS = {**_SYS_HANDLERS, **_CAM_HANDLERS, **_BROWSER_HANDLERS, **_REPO_HANDLERS,
+                  **_AUDIO_HANDLERS, **_DOC_HANDLERS, **_AUDIO_OUT_HANDLERS}
 
 # Bumped when the executor's behaviour changes, so the brain log confirms which code is live after a
 # restart (e.g. the elevated-session PATH / absolute-exe fixes).

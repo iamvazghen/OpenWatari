@@ -15,6 +15,7 @@ Exit code is non-zero only if a runnable test actually fails.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -91,6 +92,20 @@ TESTS = [
      "offline", ["checks passed ==="]),
     ("Phase 13: coding tools + git safety + skills", "test_phase13_coding.py",
      "offline", ["checks passed ==="]),
+    ("Local audio plays on the LAPTOP (the VPS has ffplay too — it just has no speakers)",
+     "test_localplay_routing.py", "offline", ["checks passed ==="]),
+    ("'Read this file' means the OWNER's disk: laptop reads the bytes, brain parses them",
+     "test_documents_routing.py", "offline", ["checks passed ==="]),
+    ("'Switch to my headphones' exists AND re-routes the live stream (not just a saved setting)",
+     "test_audio_output_switch.py", "offline", ["checks passed ==="]),
+    ("Tool failures speak in his voice and stay detectable as failures (not raw exception names)",
+     "test_tool_error_handling.py", "offline", ["checks passed ==="]),
+    ("Errors logged while the brain link is DOWN still reach it (spool + replay on reconnect)",
+     "test_error_spool.py", "offline", ["checks passed ==="]),
+    ("A brain-side protocol's report reaches the OWNER, not just the brain's disk",
+     "test_protocol_reports.py", "offline", ["checks passed ==="]),
+    ("Face as a second factor on privileged actions — adds refusals, never locks the owner out",
+     "test_face_second_factor.py", "offline", ["checks passed ==="]),
     ("Fine-tuning: lean prompt + per-turn tool surface + fast primary", "test_finetune.py",
      "offline", ["checks passed ==="]),
     ("Latency regression guard: config invariants + TTFW/VAQI floor", "test_latency_guard.py",
@@ -219,6 +234,8 @@ TESTS = [
      "test_error_tracking.py", "offline", ["checks passed ==="]),
     ("Production guards: one live process per role (newest wins) + no unconfirmed macro actions",
      "test_singleton_and_macro_guard.py", "offline", ["checks passed ==="]),
+    ("Coding tools act on the owner's repo (PC_LINK-routed), never the VPS deploy copy",
+     "test_coding_routing.py", "offline", ["checks passed ==="]),
     ("Document RAG: ingest/query/close a temp local-doc index, graceful edges",
      "test_documents.py", "offline", ["checks passed ==="]),
     ("Search/scrape fallback: Tavily->Brave->Jina (keyless), Jina->Firecrawl",
@@ -290,22 +307,68 @@ RUNNABLE_FAILURE = (
 )
 
 
+#: Per-test wall clock. Was 180s, which turned out to be *just* under what the heaviest offline test
+#: legitimately needs: building the pipeline warms the ECAPA speaker embedder, and importing
+#: torch+speechbrain and loading the checkpoint measured 183s on this box while Docker, three VS Code
+#: instances and Chrome were holding ~72% CPU. The tests weren't hanging — they were finishing a few
+#: seconds late, and whichever one crossed the line got reported as a hang and blocked the deploy.
+#: Five consecutive deploys died on that, each on a different test, each passing in isolation.
+#: Override with JARVIS_TEST_TIMEOUT_S on a slower machine.
+TEST_TIMEOUT_S = int(os.environ.get("JARVIS_TEST_TIMEOUT_S", "420"))
+
+
+#: How long to wait between deadline checks. Also the suspend detector's resolution: ask for a slice
+#: this long, and any wall time beyond it that we can't account for is time the machine wasn't running.
+_SLICE_S = 15.0
+
+
 def run(script: str, timeout: int) -> tuple[int, str]:
-    t0 = time.perf_counter()
-    try:
-        p = subprocess.run(
-            [PY, str(ROOT / "bench" / script)],
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-        )
-        dt = (time.perf_counter() - t0) * 1000
-        return p.returncode, (p.stdout or "") + "\n" + (p.stderr or "") + f"\n[{dt:.0f}ms]"
-    except subprocess.TimeoutExpired:
-        return 124, f"TIMEOUT after {timeout}s"
+    """Run one test, charging it only the time the machine was actually awake.
+
+    subprocess.run(timeout=...) measures WALL CLOCK, and on Windows time.monotonic() keeps ticking
+    through Modern Standby — so closing the lid mid-gate charges the child every frozen second and
+    kills it for a hang it never had. That is not hypothetical: the 2026-08-01 gate suspended twice
+    (13:56->16:56 and 16:56->18:27) and murdered test_llm_routing and test_task_todos, which need 91s
+    and 3s against a 420s cap. Both passed in isolation minutes later.
+
+    So the deadline is enforced in slices: whenever a slice takes far longer than we asked for, the
+    excess is time nobody was executing, and it's credited back rather than charged to the test. Real
+    hangs are unaffected — a wedged child burns the budget in awake time and still dies at 124.
+    """
+    t0 = time.monotonic()
+    suspended = 0.0
+    p = subprocess.Popen(
+        [PY, str(ROOT / "bench" / script)],
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    deadline = t0 + timeout
+    while True:
+        mark = time.monotonic()
+        want = min(_SLICE_S, max(0.1, deadline - mark))
+        try:
+            out, err = p.communicate(timeout=want)
+            break
+        except subprocess.TimeoutExpired:
+            # communicate() leaves the child alive and its reader threads draining, so it is safe to
+            # call again — no output is lost across these slices.
+            drift = (time.monotonic() - mark) - want
+            if drift > _SLICE_S:      # >2x what we asked for: the box was asleep, not merely busy
+                suspended += drift
+                deadline += drift
+                print(f"    (system suspended ~{drift:.0f}s during this test — not counted "
+                      f"against its {timeout}s budget)")
+            if time.monotonic() >= deadline:
+                p.kill()
+                out, err = p.communicate()
+                awake = (time.monotonic() - t0) - suspended
+                return 124, f"TIMEOUT after {awake:.0f}s awake ({timeout}s budget)"
+    dt = ((time.monotonic() - t0) - suspended) * 1000
+    return p.returncode, (out or "") + "\n" + (err or "") + f"\n[{dt:.0f}ms]"
 
 
 def classify_result(tag: str, code: int, out: str, needles: list[str]) -> str:
@@ -313,7 +376,7 @@ def classify_result(tag: str, code: int, out: str, needles: list[str]) -> str:
     if code == 0 and all(n in out for n in needles):
         return "PASS"
     if tag == "network" and code == 124:
-        # A [network] test that hit the 180s wall = the LLM dependency didn't respond in time in THIS
+        # A [network] test that hit the timeout wall = the LLM dependency didn't respond in time in THIS
         # env (a dev box on a slow/rate-limited key; the VPS carries the working chain). Same
         # 'unavailable dependency' signal as a refused connection -> SKIP, not a false red. (An
         # OFFLINE test that times out is a genuine hang and still FAILs — it never reaches here.)
@@ -342,11 +405,31 @@ def main() -> int:
 
     for label, script, tag, needles in TESTS:
         print(f"\n--- [{tag}] {label}\n    ({script})")
-        code, out = run(script, timeout=180)
+        code, out = run(script, timeout=TEST_TIMEOUT_S)
         tail = "\n".join(line for line in out.splitlines() if line.strip())[-1500:]
         print("    " + tail.replace("\n", "\n    "))
 
         status = classify_result(tag, code, out, needles)
+        if status == "FAIL":
+            # Say WHY. A child can print "15/15 checks passed" and still fail here — a non-zero exit
+            # after the summary (a crash during interpreter shutdown, say) is invisible otherwise, and
+            # the log then shows a passing test marked FAIL with no explanation. Costs one line.
+            absent = [n for n in needles if n not in out]
+            # The child's own failing lines, wherever they are in its output. The tail printed above
+            # is only the last 1500 chars, so a check that failed early scrolls off — which is how a
+            # test reporting "24/25 checks passed" got summarised as "output looked fine": the needle
+            # "checks passed ===" matches a PARTIAL pass just as happily as a total one.
+            bad = [ln.strip() for ln in out.splitlines()
+                   if "[FAIL]" in ln or ln.lstrip().startswith("x ") or "FAILED" in ln]
+            why = f", missing output: {absent}" if absent else ""
+            print(f"    -> FAIL (exit={code}{why})")
+            for ln in bad[:10]:
+                print(f"       {ln[:200]}")
+            if len(bad) > 10:
+                print(f"       … and {len(bad) - 10} more failing checks")
+            if not bad and not absent:
+                print("       (no failing check printed — the child exited non-zero after its "
+                      "summary, e.g. a crash during interpreter shutdown)")
         if status == "SKIP":
             print("    -> SKIP (freellmapi proxy unreachable — start the VPS tunnel to run this)")
         results.append((status, label))

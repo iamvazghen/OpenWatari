@@ -342,7 +342,9 @@ async def telegram_music(args: dict) -> str:
         else:
             msg, label = random.choice(tracks)  # no query = shuffle
 
-        # local=true → actually PLAY it out loud on the desktop (download + ffplay).
+        # local=true → actually PLAY it out loud on the desktop. The track downloads here (the
+        # Telegram session lives on the brain) and localplay ships the bytes to the laptop, which is
+        # where the speakers are. Oversize falls through to phone delivery rather than just failing.
         if bool(args.get("local")):
             import os
             import tempfile
@@ -350,11 +352,25 @@ async def telegram_music(args: dict) -> str:
             fd, tmp = tempfile.mkstemp(suffix=".mp3")
             os.close(fd)
             await client.download_media(msg, file=tmp)
-            await client.disconnect()
-            from jarvis.brain.tools.localplay import play_file
+            from jarvis.brain.tools.localplay import MAX_STREAM_BYTES, play_file
 
-            err = play_file(tmp, label)
-            return err or f"Playing '{label}' out loud now, sir."
+            try:
+                too_big = os.path.getsize(tmp) > MAX_STREAM_BYTES
+            except OSError:
+                too_big = False
+            if not too_big:
+                await client.disconnect()
+                err = await play_file(tmp, label)
+                # The player writes and owns its own copy from the bytes we sent (even in the
+                # single-host fallback), so this download has done its job either way.
+                os.unlink(tmp)
+                return err or f"Playing '{label}' out loud now, sir."
+            os.unlink(tmp)
+            target = _entity(settings.telegram_music_target)
+            await client.send_file(target, msg.media, caption=f"▶ {label}")
+            await client.disconnect()
+            return (f"'{label}' is too large to stream to your laptop, sir, so I've sent it to your "
+                    "phone instead — open Telegram and tap play.")
 
         # default → deliver to the phone (Telegram has no remote press-play API).
         target = _entity(settings.telegram_music_target)
@@ -391,7 +407,9 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "check_telegram",
-            "description": "Read the owner's unread Telegram direct messages and summarize them aloud.",
+            "description": "Summarise the owner's UNREAD Telegram direct messages. Use for 'any "
+                           "messages', 'check Telegram', 'who messaged me'. Reading only — "
+                           "send_telegram sends; read_chat reads one named chat's history.",
             "parameters": {
                 "type": "object",
                 "properties": {

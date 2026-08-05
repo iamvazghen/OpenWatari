@@ -17,6 +17,7 @@ from jarvis.brain.tools import (
     approvals,
     browser,
     calendar,
+    audioout,
     camera,
     channels,
     coaching,
@@ -59,7 +60,8 @@ _MODULES = [vault, memory, web, telegram, voicechat, music, localplay, system, b
             protocols, reminders, notify, gmail, calendar, smarthome, utility, routines,
             coding, skills, notion, tasks, contacts, documents, composio, channels,
             macros, multimodal, undo, graphmem, activity, coaching, camera, objectives,
-            approvals, relationship, phone, maps, wolfram, fitness, diagnose]  # noqa: E501
+            approvals, relationship, phone, maps, wolfram, fitness, diagnose,
+            audioout]  # noqa: E501
 
 Handler = Callable[[dict], Awaitable[str]]
 
@@ -89,6 +91,7 @@ _LAZY_GROUPS: dict[str, list] = {
     "places": [maps],                    # live travel time + place search (Google Maps)
     "compute": [wolfram],                # exact math/facts via Wolfram Alpha
     "vitals": [fitness],                 # sleep/steps/heart from the wearable via Google Fit
+    "audioout": [audioout],              # which speaker/headphones Watari talks through — H1.3
 }
 # Substring triggers (lowercased) that activate a group for a turn. Broad on purpose — a miss just
 # means a one-turn delay (the follow-up usually contains the word, and groups stay warm one turn).
@@ -166,6 +169,11 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
                 "in kilograms", "in pounds", "in euros", "in dollars", "sunset", "sunrise"),
     "vitals": ("sleep", "slept", "steps", "heart rate", "vitals", "how active", "my workout data",
                "recovery", "resting heart"),
+    # Distinctive enough to trigger reliably, which is why this can be lazy rather than eating a
+    # slot in the per-turn surface. "out loud" is deliberately absent — it belongs to playback.
+    "audioout": ("headphone", "headphones", "airpod", "airpods", "speaker", "speakers", "earbuds",
+                 "switch to my", "play through", "output device", "sound device", "audio output",
+                 "talk through", "speak through", "which speakers"),
 }
 
 

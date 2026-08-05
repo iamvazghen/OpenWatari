@@ -4,7 +4,7 @@ NEVER launches the real (stop/restart/reboot) script. Patches subprocess.Popen t
 import asyncio
 
 import jarvis.brain.protocols as proto
-from jarvis.brain.protocols import ProtocolResult, protocol_names, run_protocol
+from jarvis.brain.protocols import protocol_names, run_protocol
 from jarvis.config import settings
 
 _ok = 0
@@ -66,9 +66,16 @@ async def main():
 
     # --- 5) a real (non-drill) run with a good password DOES reach the launch path -----------
     _launched.clear()
-    r_live = run_protocol(names[0], _password_for(names[0]), drill=False)
+    # Must be a BRAIN-SIDE protocol. Since 2026-08-01 the sync launcher refuses the PC_LINK-routed
+    # three outright (they'd run laptop-era taskkill/shutdown against the VPS), so using names[0] —
+    # goodnight — would now assert the very behaviour that was removed as a hazard.
+    from jarvis.brain.protocols import _registry as _proto_reg
+
+    live_name = next(n for n, p in _proto_reg().items() if not p.get("pc_command"))
+    r_live = run_protocol(live_name, _password_for(live_name), drill=False)
     check(r_live.ok and len(_launched) == 1,
-          "a live (non-drill) run launches the script (drill is what suppresses it)")
+          f"a live (non-drill) run of brain-side '{live_name}' launches the script "
+          "(drill is what suppresses it)")
 
     # --- 6) machine-level protocols act on the LAPTOP, not on whatever host the brain runs on ---
     # Regression guard for the 2026-07-30 finding: with the brain on the VPS these ran server-side and

@@ -288,6 +288,50 @@ async def _visual_presence_local(args: dict) -> str:
     return f"I can see {n} people in front of the camera, sir."
 
 
+async def verify_owner_present() -> dict:
+    """I1 — a STRUCTURED owner verdict for use as a second authorisation factor.
+
+    ``visual_presence`` answers the owner in prose, which is right for him and useless to a gate.
+    This returns ``{"available": bool, "matched": bool, "faces": int}``:
+
+      * ``available`` False — no camera, no enrolment, or the laptop is offline. The caller must then
+        fall back to whatever it did before. A second factor that LOCKS THE OWNER OUT when a webcam is
+        busy is worse than no second factor at all.
+      * ``available`` True, ``matched`` False, ``faces`` 0 — the room is empty. Nobody is there to
+        authorise anything, which is exactly the case a television talking at the microphone produces.
+      * ``available`` True, ``matched`` False, ``faces`` >0 — someone is there and it is not him.
+
+    Not a tool: nothing should let the MODEL decide whether the owner is present.
+    """
+    raw = await _dispatch("camera_verify", {}, _verify_owner_present_local)
+    try:
+        d = json.loads(raw)
+        return {"available": bool(d.get("available")), "matched": bool(d.get("matched")),
+                "faces": int(d.get("faces") or 0)}
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+        # _dispatch turns a dropped PC_LINK into a spoken sentence rather than JSON — that is the
+        # "can't tell" case, not a negative verdict.
+        return {"available": False, "matched": False, "faces": 0}
+
+
+async def _verify_owner_present_local(_args: dict) -> str:
+    refs = _owner_refs()
+    if refs is None:
+        return json.dumps({"available": False, "matched": False, "faces": 0})
+    try:
+        # Same burst as visual_presence: one frame is a coin-flip when he glances away.
+        jpegs = await asyncio.to_thread(_capture_burst, 0, 12, 20, 12.0, 0.2)
+        if not jpegs:
+            return json.dumps({"available": False, "matched": False, "faces": 0})
+        results = [await asyncio.to_thread(_recognise, j, refs) for j in jpegs]
+        return json.dumps({"available": True,
+                           "matched": any(m for _, m in results),
+                           "faces": max((c for c, _ in results), default=0)})
+    except Exception as e:  # noqa: BLE001 — an unreadable camera is "can't tell", never "not him"
+        logger.warning(f"face second factor: camera check failed ({type(e).__name__}: {e})")
+        return json.dumps({"available": False, "matched": False, "faces": 0})
+
+
 async def enroll_owner_face(args: dict) -> str:
     """Phase 3.3 — learn the owner's face locally so ``visual_presence`` can recognise them. Forwards
     to the laptop (camera + owner.npy live there) when the brain is the cameraless VPS, else local."""
@@ -330,6 +374,7 @@ SCHEMAS = [
                     "prompt": {"type": "string", "description": "Optional specific question about the view."},
                     "camera_index": {"type": "integer", "description": "Webcam index (default 0)."},
                 },
+                "required": [],   # every argument genuinely optional — stated, not left implied
             },
         },
     },
@@ -348,6 +393,7 @@ SCHEMAS = [
                 "properties": {
                     "camera_index": {"type": "integer", "description": "Webcam index (default 0)."},
                 },
+                "required": [],
             },
         },
     },
@@ -366,6 +412,7 @@ SCHEMAS = [
                     "camera_index": {"type": "integer", "description": "Webcam index (default 0)."},
                     "frames": {"type": "integer", "description": "How many frames to sample (default 6)."},
                 },
+                "required": [],
             },
         },
     },
@@ -381,4 +428,7 @@ LOCAL_HANDLERS = {
     "camera_capture": _camera_capture_local,
     "camera_presence": _visual_presence_local,
     "camera_enroll": _enroll_owner_face_local,
+    # Runs on the laptop, where the camera and owner.npy live. Only the verdict crosses the link —
+    # the biometric refs never leave the machine.
+    "camera_verify": _verify_owner_present_local,
 }

@@ -22,6 +22,7 @@ The gate **decision** is a pure function (``should_accept``) so it's unit-testab
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -114,6 +115,11 @@ class SpeakerVerifier:
         return path
 
     # ---- embedding backend ------------------------------------------------------------
+    #: What a complete ECAPA cache looks like. All five must be present before we trust the cache
+    #: enough to skip the hub check — a partial one has to be allowed to finish downloading.
+    _ECAPA_FILES = ("hyperparams.yaml", "embedding_model.ckpt", "classifier.ckpt",
+                    "label_encoder.ckpt", "mean_var_norm_emb.ckpt")
+
     def _ensure_embedder(self):
         if self._embedder is not None or self._tried_load:
             return self._embedder
@@ -122,10 +128,26 @@ class SpeakerVerifier:
             import torch  # noqa: F401
             from speechbrain.inference.speaker import EncoderClassifier
 
-            savedir = str(Path(__file__).resolve().parents[3] / ".speechbrain-ecapa")
-            clf = EncoderClassifier.from_hparams(
-                source="speechbrain/spkrec-ecapa-voxceleb", savedir=savedir
-            )
+            savedir = Path(__file__).resolve().parents[3] / ".speechbrain-ecapa"
+            # from_hparams asks huggingface.co for the current revision even when every file is
+            # already sitting in savedir, so booting the speaker gate depends on the hub being
+            # reachable. Once the cache is complete there is nothing to ask about, so pin it offline
+            # — but only around THIS call: the flag is global, and leaving it set would break any
+            # other HF model in this process (Whisper, say) that hasn't been downloaded yet.
+            cached = all((savedir / f).exists() for f in self._ECAPA_FILES)
+            prev = os.environ.get("HF_HUB_OFFLINE")
+            if cached:
+                os.environ["HF_HUB_OFFLINE"] = "1"
+            try:
+                clf = EncoderClassifier.from_hparams(
+                    source="speechbrain/spkrec-ecapa-voxceleb", savedir=str(savedir)
+                )
+            finally:
+                if cached:
+                    if prev is None:
+                        os.environ.pop("HF_HUB_OFFLINE", None)
+                    else:
+                        os.environ["HF_HUB_OFFLINE"] = prev
 
             def _embed(wav: np.ndarray) -> np.ndarray:
                 import torch as _t

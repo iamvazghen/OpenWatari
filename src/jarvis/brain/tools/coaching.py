@@ -155,7 +155,9 @@ SCHEMAS = [
             "required": ["field", "level"]}}},
     {"type": "function", "function": {
         "name": "list_coaching",
-        "description": "List the fields Watari is coaching, with each level + streak. Use for 'what are you coaching me on?'.",
+        "description": "List the fields Watari is actively coaching, with each one's level and "
+                       "current streak. Use for 'what are you coaching me on', 'how's my training "
+                       "going'. For one field in depth, use skill_progress.",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
 ]
 

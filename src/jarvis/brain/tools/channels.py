@@ -13,7 +13,6 @@ Lazy group: 'channels' (loaded by trigger keywords: "youtube channel", "channel"
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import re
 
@@ -202,13 +201,29 @@ def _format_listing(videos: list[dict], picked: dict | None = None) -> str:
     return "\n".join(lines)
 
 
+def _limit(args: dict, default: int, lo: int, hi: int) -> int:
+    """Clamp the requested count, tolerating a non-numeric one.
+
+    The model sometimes fills this with a word ("twelve") or an empty string; ``int()`` then raises
+    and the owner hears "ValueError" from the agent's blanket catch. A sensible default is a far
+    better answer to "show me a few videos" than an error.
+    """
+    try:
+        n = int(args.get("limit", default))
+    except (TypeError, ValueError):
+        n = default
+    return max(lo, min(hi, n))
+
+
 async def list_channel_videos(args: dict) -> str:
     """List recent videos on a YouTube channel."""
     name = (args.get("channel") or args.get("name") or "").strip()
-    limit = max(1, min(30, int(args.get("limit", 12))))
+    limit = _limit(args, 12, 1, 30)
     videos, err = await _resolve_videos(name, limit)
     if err:
         return err
+    if not videos:
+        return f"I couldn't find any videos on '{name}', sir." if name else "I found no videos, sir."
     header = f"Recent videos on '{name}', sir:\n" if name else "Recent videos, sir:\n"
     return header + _format_listing(videos)
 
@@ -216,10 +231,13 @@ async def list_channel_videos(args: dict) -> str:
 async def play_random_from_channel(args: dict) -> str:
     """Pick a random video from a channel and open it."""
     name = (args.get("channel") or args.get("name") or "").strip()
-    limit = max(5, min(30, int(args.get("limit", 20))))  # at least 5 to randomise from
+    limit = _limit(args, 20, 5, 30)  # at least 5 to randomise from
     videos, err = await _resolve_videos(name, limit)
     if err:
         return err
+    if not videos:
+        # random.choice([]) is an IndexError, and "no videos" is a complete answer, not a failure.
+        return f"I couldn't find any videos on '{name}', sir."
     picked = random.choice(videos)
     # Dispatch the open to the laptop (pc_agent) so the browser pops on the owner's screen.
     from jarvis.brain.tools.system import open_url
@@ -237,6 +255,8 @@ async def play_latest_from_channel(args: dict) -> str:
     videos, err = await _resolve_videos(name, limit)
     if err:
         return err
+    if not videos:
+        return f"I couldn't find any videos on '{name}', sir."
     picked = videos[0]  # YouTube orders by recency in the /videos tab
     from jarvis.brain.tools.system import open_url
     open_res = await open_url({"url": picked["url"]})

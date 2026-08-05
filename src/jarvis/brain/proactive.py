@@ -111,8 +111,21 @@ CONFIRM_TIER = {
     # Deleting a task is destructive (archives the row) — confirm. Creating/updating/completing a
     # task is frictionless by design (capture-by-voice), so those are intentionally NOT gated.
     "notion_delete_task",
+    # ...with one exception: "mark everything done" sweeps the whole open list in one call, which is
+    # a bigger loss than the single archive above and has no undo. Gated DYNAMICALLY on the same
+    # bulk test the tool itself uses, so completing one task by name stays frictionless.
+    "notion_complete_task",
     # Composio app actions: gated only when the slug is a WRITE (see _composio_write below).
     "composio_run_tool",
+    # Things that destroy owner state with no undo. A macro, a task row and a memory note are gone
+    # the moment they're dropped, and an objective that stops being driven stops silently — the
+    # owner only finds out by noticing nothing happened. write_vault lands in the durable knowledge
+    # base, where a wrong note is worse than no note because it gets trusted later.
+    "delete_macro", "delete_task", "forget", "write_vault",
+    "drop_objective", "complete_objective",
+    # Updates are gated DYNAMICALLY (see _update_is_destructive): adding a note or nudging a
+    # deadline stays frictionless, but overwriting a title or blanking a field loses what was there.
+    "update_task", "notion_update_task",
     # A macro/skill is a stored sequence that runs tools on the owner's behalf. Gated DYNAMICALLY:
     # only when its own steps contain a confirm-gated tool (see _sequence_needs_confirm). Without
     # this, a saved macro was an unguarded path to every destructive tool in the system, since the
@@ -164,6 +177,26 @@ def _composio_write(slug: str) -> bool:
 _PRONOUN_ONLY = {"it", "that", "this", "them", "those", "these", "him", "her", "they"}
 
 
+#: Fields whose old value is simply gone once an update writes over them. Progress, priority and
+#: status aren't here: they're small, visible and trivially re-stated, which is the frictionless
+#: voice path the task tools were built for.
+_OVERWRITES = ("title", "description")
+_CLEARABLE = ("title", "description", "deadline", "reminder", "note", "priority", "status")
+
+
+def _update_is_destructive(args: dict | None) -> bool:
+    """True when an update_* call would lose something rather than add to it.
+
+    Two shapes qualify: replacing prose that was already written (a title or a description), and
+    passing a blank value, which both task backends treat as 'clear this field'. Everything else —
+    moving a deadline, bumping priority, appending a note — flows without asking.
+    """
+    a = args or {}
+    if any(a.get(k) for k in _OVERWRITES):
+        return True
+    return any(k in a and not str(a[k] or "").strip() for k in _CLEARABLE)
+
+
 def confirm_required(tool_name: str, args: dict | None = None) -> bool:
     """True if Jarvis should re-ask for confirmation before running this tool.
 
@@ -182,6 +215,16 @@ def confirm_required(tool_name: str, args: dict | None = None) -> bool:
         return _composio_write(str((args or {}).get("tool_slug", "")))
     if name in {"run_macro", "invoke_skill"}:
         return _sequence_needs_confirm(name, args)
+    if name in {"update_task", "notion_update_task"}:
+        return _update_is_destructive(args)
+    if name == "notion_complete_task":
+        # Reuse the tool's own bulk test rather than re-deriving it here — two copies of "did he mean
+        # all of them?" would drift, and the copy that drifts is the one guarding the sweep.
+        try:
+            from jarvis.brain.tools.notion import _is_bulk
+        except Exception:  # noqa: BLE001 — tool module unavailable: gate rather than wave it through
+            return True
+        return _is_bulk(args or {})
     if name == "ha_call":
         # Only security-sensitive actuation confirms (locks/alarms/covers/garage). Turning on a
         # light or a scene should flow without friction — that's the whole point of a voice home.
@@ -577,7 +620,7 @@ def default_signal_sources() -> list[SignalSource]:
     # owner with the same two lines 7-8x a day. They're now a single once-daily digest delivered by
     # the 06:00 briefing + the first live-edge turn of the day (see brain/daily_digest.py).
     try:
-        from jarvis.brain.tools.mynews import news_signals
+        from jarvis.brain.mynews import news_signals   # brain/, not tools/ — it is not a tool
 
         sources.append(news_signals)      # morning news-of-interest brief (MyNews)
     except Exception:  # noqa: BLE001

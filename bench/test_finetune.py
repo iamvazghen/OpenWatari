@@ -74,8 +74,10 @@ def main() -> None:
     # of lazy groups). The absolute number tracks legitimate core growth across phases — the task
     # co-pilot (plan_task/execute_task, advertised as agent schemas) and media control (media_pause)
     # added real capability — so the guard is expressed relatively: core is well under 60% of the
-    # full set, with an absolute ceiling to catch runaway growth. (Was 48 when core was ~46.)
-    check(f"per-turn surface <= 55 (got {core})", core <= 55, f"{core}")
+    # full set, with an absolute ceiling to catch runaway growth. (Was 48 when core was ~46; 56 since
+    # now_playing, which can't be lazy: lazy groups are per-MODULE, and demoting localplay would take
+    # stop_music with it — "stop the music" must never wait a turn for a trigger word to match.)
+    check(f"per-turn surface <= 56 (got {core})", core <= 56, f"{core}")
     check(f"per-turn surface stays a subset (<60% of full): {core}/{full}", core < 0.6 * full, f"{core}/{full}")
     check(f"full registry intact (>= 63, got {full})", full >= 63, f"{full}")
     # No capability removed: every lazy tool is still resolvable to a handler.
@@ -84,6 +86,68 @@ def main() -> None:
                      "ha_call", "play_in_music_room"]
     check("all lazy tools still have handlers", all(t in handlers for t in lazy_examples),
           str([t for t in lazy_examples if t not in handlers]))
+
+    # H2.3 — every schema that takes arguments must SAY which are mandatory. 12 declared properties
+    # with no `required` key at all, so the model was left to guess; an omitted `required` reads as
+    # "nothing is needed", which is right for a screenshot and wrong for approve_action. An explicit
+    # empty list is fine — the point is that it's a decision, not an oversight.
+    from jarvis.brain.tools import tool_schemas
+    undeclared = [s["function"]["name"] for s in tool_schemas()
+                  if (s["function"].get("parameters") or {}).get("properties")
+                  and "required" not in (s["function"].get("parameters") or {})]
+    check("every schema with properties declares `required`", not undeclared, str(undeclared))
+    # Tools that mutate or execute must name their identifier, or the model can fire them blind.
+    must_require = {"approve_action": "topic", "reject_action": "topic",
+                    "complete_objective": "topic", "drop_objective": "topic"}
+    by_name = {s["function"]["name"]: s["function"] for s in tool_schemas()}
+    for tool, arg in must_require.items():
+        got = (by_name[tool].get("parameters") or {}).get("required") or []
+        check(f"{tool} requires '{arg}'", arg in got, str(got))
+
+    # H2.4 — a tool description is the ONLY text the model gets to choose between 136 tools, and
+    # wrong-tool selection is the dominant benchmark failure. 39 were under 120 chars, several so
+    # bare they collided outright ("Forget a saved macro." vs the `forget` memory tool). 120 is a
+    # floor for "says what it does AND when to pick it over its neighbour", not a target.
+    stubs = sorted((len(f["description"]), n) for n, f in by_name.items()
+                   if len(f.get("description") or "") < 120)
+    check("no tool description is a stub (>= 120 chars)", not stubs, str(stubs[:6]))
+    # ...but they are prefilled EVERY turn, so richer text is not free. Bound the total so a future
+    # description spree can't quietly re-inflate the per-turn prompt that Phase C worked to shrink.
+    core_chars = sum(len(s["function"].get("description") or "") for s in core_tool_schemas())
+    check(f"core tool catalog stays under ~3.6k tok (~{core_chars // 4})", core_chars < 14_500,
+          f"{core_chars} chars")
+
+    # H2.7 — everything in tools/ is a tool. `mynews.py` lived here exposing zero schemas and zero
+    # handlers (it is a proactive signal source, now in brain/), which quietly made that sentence
+    # false and left the package a mix of two unrelated things. `base` is the one honest exception:
+    # shared helpers, imported by the rest.
+    import importlib
+    from pathlib import Path
+    tools_dir = Path(__file__).resolve().parents[1] / "src" / "jarvis" / "brain" / "tools"
+    strays = []
+    for p in sorted(tools_dir.glob("*.py")):
+        if p.stem in ("__init__", "base"):
+            continue
+        m = importlib.import_module(f"jarvis.brain.tools.{p.stem}")
+        if not (getattr(m, "SCHEMAS", None) or getattr(m, "HANDLERS", None)
+                or getattr(m, "LOCAL_HANDLERS", None)):
+            strays.append(p.stem)
+    check("every module in tools/ actually exposes tools", not strays, str(strays))
+
+    # H2.8 — the tools/__init__ <-> macros cycle. `__init__` imports macros at module level, and
+    # macros needs tool_handlers() back out of `__init__`; it survives ONLY because every such
+    # import sits inside a function. Promote one to the top of the file and `import
+    # jarvis.brain.tools` fails on a half-initialised module — brain startup dies, with a traceback
+    # pointing at __init__ rather than at the line someone just moved. A comment can't stop that;
+    # this can. AST, not grep, so an import inside a function is correctly ignored.
+    import ast
+    macros_src = (tools_dir / "macros.py").read_text(encoding="utf-8")
+    top_level_cycle = [
+        n.module for n in ast.parse(macros_src).body
+        if isinstance(n, ast.ImportFrom) and (n.module or "") == "jarvis.brain.tools"
+    ]
+    check("macros.py imports tools/__init__ only INSIDE functions", not top_level_cycle,
+          f"top-level import of {top_level_cycle} would break brain startup")
 
     print("\n[3] Item 2 — lazy groups activate on the right utterances")
     check("'commit my code' -> coding", "coding" in groups_for_text("commit my code to git"))

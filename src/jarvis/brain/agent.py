@@ -174,6 +174,12 @@ _READ_INTENT_PATTERNS = (
     r"\b(due|overdue)\b|\b(my|any) (tasks?|reminders?|to-?dos?)\b|\bon my plate\b|\bwhat'?s due\b",
     r"\b(search|look up|google|find)\b.{0,30}\b(online|web|vault|notes?|internet)\b",
     r"\b(latest|recent) (news|headlines?|on)\b|\bheadlines\b",
+    # A bare "news" too, when it's clearly a request for some: "any tech news", "what's the news".
+    # Without this, "any tech news" forced no tool at all and the model answered from its own
+    # weights — a stale-knowledge answer to a question that is only ever about right now, which is
+    # the exact fabrication this list exists to stop. Qualifier-led so "that's good news" and
+    # "no news is good news" stay chat.
+    r"\b(any|whats?|what'?s|latest|recent|todays?|the)\b.{0,20}\bnews\b",
     r"\bsearch (my )?vault\b|\bin my (vault|notes)\b",
 )
 _READ_INTENT_RE = re.compile("|".join(_READ_INTENT_PATTERNS), re.IGNORECASE)
@@ -1129,6 +1135,40 @@ class JarvisAgent:
         msg = await self._llm.complete(messages)
         return _clean_reply(msg.content or "") or text or "Here's what I found, sir."
 
+    async def _face_second_factor(self, name: str, args: dict) -> str | None:
+        """Return a refusal sentence if the camera shows the owner is NOT there, else None.
+
+        Runs only for confirm-gated actions, and only after the yes has been given — so it costs a
+        camera burst on the handful of calls that can actually lose something, not on every turn.
+
+        Everything that is not a positive "he is not present" returns None. An unreachable camera, an
+        unenrolled face, an offline laptop, a raised exception — all of those mean CAN'T TELL, and
+        can't-tell must behave exactly as the system did before this existed. The alternative is an
+        assistant that stops obeying its owner because a webcam is busy.
+        """
+        try:
+            from jarvis.brain.tools.camera import verify_owner_present
+
+            v = await verify_owner_present()
+        except Exception as e:  # noqa: BLE001 — a broken check must never block the owner
+            logger.warning(f"face second factor: skipped ({type(e).__name__}: {e})")
+            return None
+        if not v.get("available"):
+            logger.info(f"face second factor: unavailable — {name} proceeds on the spoken yes alone")
+            return None
+        if v.get("matched"):
+            logger.info(f"face second factor: owner verified for {name}")
+            return None
+        # Positive negative: the camera worked and he is not the one in front of it.
+        faces = int(v.get("faces") or 0)
+        logger.warning(f"confirm-gate: REFUSED {name}({args}) — camera saw {faces} face(s), none the owner")
+        if faces == 0:
+            return ("BLOCKED — the camera shows nobody at the desk, so that confirmation did not come "
+                    "from the owner. Tell him you've held the action until he's back, and do NOT "
+                    "claim it was done.")
+        return ("BLOCKED — the camera shows someone at the desk who isn't the owner. Tell him the "
+                "action is held pending his own confirmation, and do NOT claim it was done.")
+
     async def _execute_calls(
         self,
         messages: list[dict[str, Any]],
@@ -1176,6 +1216,15 @@ class JarvisAgent:
                 outcomes[idx] = {"name": name, "result": blocked, "ok": False,
                                  "args": args, "blocked": True}
                 continue
+            # I1 — SECOND FACTOR. The yes has been given; confirm it was given by someone actually
+            # there. Only for gated actions, and only ever to add a refusal (see _face_second_factor).
+            if confirm_required(name, args) and settings.face_second_factor:
+                refusal = await self._face_second_factor(name, args)
+                if refusal:
+                    audit.record(name, args, "blocked: owner not visually present", ok=False)
+                    outcomes[idx] = {"name": name, "result": refusal, "ok": False,
+                                     "args": args, "blocked": True}
+                    continue
             # ACKNOWLEDGEMENT: announce what we're about to do BEFORE running the tool, always — so
             # Watari is never silently "working" (the Jarvis "Right away, sir — getting the time"
             # beat). Deterministic + instant (no LLM), and contextual from the args.

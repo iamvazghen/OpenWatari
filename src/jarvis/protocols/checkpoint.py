@@ -11,7 +11,9 @@ from datetime import datetime
 from pathlib import Path
 
 INCLUDE_DIRS = ("memory", "personality", "docs")
-INCLUDE_FILES = ("README.md", "SECURITY.md", "TODO-NOW.md", "pyproject.toml")
+#: TODO.md, not TODO-NOW.md — the latter was deleted in 75cea2d and the loop below skips names that
+#: don't exist, so every checkpoint archive since then has quietly shipped without the roadmap in it.
+INCLUDE_FILES = ("README.md", "SECURITY.md", "TODO.md", "pyproject.toml")
 SKIP_DIRS = {"learned", "journal", "__pycache__"}
 
 

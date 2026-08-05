@@ -4,6 +4,10 @@ On-demand news lives behind the MyNews MCP tools (``mcp_servers``); this is the 
 side: once each morning, surface the top headlines as a proactive Signal so Watari mentions
 what matters without being asked. Off unless JARVIS_MYNEWS_URL is set — fail-quiet like every
 other signal source.
+
+Lives in ``brain/``, NOT ``brain/tools/``: it exposes no schema and no handler, so it was never a
+tool — it sat in the tools package purely because of where news happened to be written first, and
+made "everything in tools/ is a tool" false. Its one consumer is ``proactive.py``.
 """
 
 from __future__ import annotations

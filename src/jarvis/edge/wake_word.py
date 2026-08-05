@@ -44,9 +44,13 @@ OPENWAKEWORD_PRETRAINED: dict[str, str] = {
 def resolve_openwakeword_models(desired: list[str]) -> tuple[list[str], list[str]]:
     """Split desired phrases into (loadable openWakeWord models, pending phrases).
 
-    A phrase that is a path to a trained model file (``.onnx``/``.tflite``) — e.g. a custom
-    "hey watari" model from ``bench/train_wake_word.py`` — is loaded directly by path. Everything
-    else maps to a pretrained model name; unmatched phrases are reported pending.
+    A phrase that is a path to a trained model file (``.onnx``/``.tflite``) — e.g. the custom
+    "watari" models in ``.wakewords/`` — is loaded directly by path. Everything else maps to a
+    pretrained model name; unmatched phrases are reported pending.
+
+    (Those models are trained out-of-repo with openWakeWord's own pipeline under WSL. Four places
+    used to cite a ``bench/train_wake_word.py`` / ``train_wakeword.py`` that has never existed in
+    this repo, one of them asserting outright that it does.)
     """
     import os
 
