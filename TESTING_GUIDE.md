@@ -53,24 +53,34 @@ list with the credential audit in SOP §2.3 rather than trusting this paragraph.
 
 | # | Do | Expect | Fail means |
 |---|---|---|---|
-| 0.1 | `curl -s http://<brain-host>:<port>/healthz` | `ok` | brain down; see SOP §4.1 |
-| 0.2 | `curl -sH "Authorization: Bearer $TOKEN" .../metrics` | JSON with `counters`, `latency_ms` | auth token wrong, or brain started before .env loaded |
-| 0.3 | On the laptop: list running `pythonw` processes | Exactly **two** — `pc_agent` and `assistant` | see 0.4 |
+| 0.1 | `curl -s http://<brain-host>:8766/healthz` | `ok` | brain down; see SOP §4.1 |
+| 0.2 | `curl -sH "Authorization: Bearer $TOKEN" http://<brain-host>:8766/metrics` | JSON with `counters`, `latency_ms` | auth token wrong, or brain started before .env loaded |
+| 0.3 | On the laptop: list `pythonw` processes **with their parents** | **Four** — a supervisor + worker for each of `AfonEdge` and `AfonPcAgent`; exactly one supervisor per role | see 0.4 and the note below |
 | 0.4 | Start a *second* edge deliberately | It exits, logging that another holds the role | `shared/singleton.py` guard broken — two edges both hold the mic and you hear Afon twice |
 | 0.5 | `uv run python bench/show_errors.py --summary` | No CRITICAL in the last 24h | read the entries before proceeding |
-| 0.6 | `Get-ScheduledTask \| ? {$_.TaskName -like '*Afon*' -or $_.TaskName -like '*Watari*'}` | `AfonEdge`, `AfonPcAgent`, `AfonEdgeRefresh`, `AfonEdgeGuard` — all **Ready**, all pointing at paths that exist | see the box below |
+| 0.6 | `Get-ScheduledTask \| ? {$_.TaskName -match 'Afon\|Watari\|Jarvis'}` | `AfonEdge`, `AfonPcAgent`, `AfonEdgeRefresh`, `AfonEdgeGuard` — Ready/Running, all pointing at paths that exist, **no `Watari*`/`Jarvis*` left** | see the box below |
 | 0.7 | Reboot the laptop, wait 2 min | Edge comes back by itself | autostart is registered but broken — 0.6 |
 
 > **Why 0.4 is not optional.** Duplicate processes are the most common production failure in this
 > system and the hardest to diagnose from symptoms — it presents as "Afon answers twice", "the
 > speaker gate fights itself", or doubled proactive messages.
 
-> **Why 0.6 is not optional — it was already broken when this guide was written.** On 2026-08-09
-> the live tasks were still the pre-rename `WatariPcAgent` and `WatariEdgeRefresh`, both pointing
-> into **`C:\Jarvis`, a directory that no longer exists**, while `AfonEdgeGuard` was **Disabled**.
-> No edge process was running, nothing would have started one at logon, and the watchdog whose job
-> is to notice was off. A Scheduled Task whose executable is missing fails **silently** — there is
-> no error anywhere, the edge is simply never there. `scripts/preflight.sh` now asserts this.
+> **Why 0.6 is not optional — it was already broken when this guide was written.** On 2026-08-09 the
+> live tasks were still the pre-rename `JarvisEdge`, `WatariPcAgent` and `WatariEdgeRefresh`, all
+> pointing into **`C:\Jarvis`, a directory that no longer exists**, while `AfonEdgeGuard` was
+> **Disabled**. No edge process was running, nothing would have started one at logon, and the
+> watchdog whose job is to notice was off. A Scheduled Task with a missing executable fails
+> **silently** — no error anywhere, the edge is simply never there.
+> Fix: `powershell -ExecutionPolicy Bypass -File scripts\finish_afon_rename.ps1` (elevated).
+> `scripts/preflight.sh` now asserts it permanently.
+
+> **On process count (0.3 vs 0.4):** expect **four** `pythonw` processes, not two —
+> `AfonEdge` and `AfonPcAgent` each run a supervisor plus its worker (`_supervisor.run_supervised`).
+> A duplicate is two processes with the **same parent** (Task Scheduler, PID ~2308) running the same
+> module. Check parentage with
+> `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Select ProcessId,ParentProcessId,CommandLine`
+> before concluding anything — a raw count of four looks exactly like the duplicate-edge failure and
+> is not.
 
 ---
 

@@ -131,7 +131,7 @@ if command -v powershell.exe >/dev/null 2>&1; then
   tasks=$(powershell.exe -NoProfile -Command '
     $bad = @()
     Get-ScheduledTask -ErrorAction SilentlyContinue |
-      Where-Object { $_.TaskName -like "*Afon*" -or $_.TaskName -like "*Watari*" } |
+      Where-Object { $_.TaskName -match "Afon|Watari|Jarvis" } |
       ForEach-Object {
         $t = $_
         foreach ($a in $t.Actions) {

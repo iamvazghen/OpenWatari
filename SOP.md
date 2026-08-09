@@ -128,8 +128,13 @@ uv run python -m afon.brain.server                    # foreground, for debuggin
 systemctl --user status  afon-brain                   # normal operation
 systemctl --user restart afon-brain
 journalctl --user -u afon-brain -f                    # live logs
-curl -s localhost:<port>/healthz                      # → ok
+curl -s http://<brain-host>:8766/healthz              # → ok
 ```
+
+**Two ports, and using the wrong one looks like an outage.** `brain_port` **8765** is
+WebSocket-only (`/voice` for devices, `/control` for `pc_agent`) — an HTTP request there returns
+**426 Upgrade Required**, which reads like a broken brain but means the opposite. The HTTP surface
+(`/healthz`, `/metrics`, `/hud`, `/iphone`, `/talk`) is on `client_http_port` **8766**.
 
 Uses **systemd `--user` with linger** so it survives logout. A daily refresh timer restarts it at
 01:00 UTC — which is why anything that must accumulate across days has to be on disk, not in memory.
@@ -158,27 +163,39 @@ Start-ScheduledTask AfonEdgeRefresh      # restart the edge WITHOUT a UAC prompt
 **`AfonEdgeGuard`** runs every 30 minutes and restarts the edge if it died — unless you stopped it
 deliberately. Use the documented stop path so the guard doesn't fight you.
 
-> ### ⚠️ Verify the tasks before trusting any of the above
+> ### ⚠️ Verify the tasks — this was broken in production and nothing said so
 >
-> **Checked on 2026-08-09, this machine was in exactly the broken state this box warns about.** The
-> live tasks were still the pre-rename `WatariPcAgent` and `WatariEdgeRefresh`, both pointing into
-> **`C:\Jarvis` — a directory that no longer exists** — and `AfonEdgeGuard` was **Disabled**. Net
-> effect: no edge process running, nothing would start it at logon, and the watchdog whose job is to
-> notice was switched off. Every command in this section would have appeared to work while changing
-> nothing.
+> **On 2026-08-09 this machine was in exactly that state.** The live tasks were still the pre-rename
+> `JarvisEdge`, `WatariPcAgent` and `WatariEdgeRefresh`, all pointing into **`C:\Jarvis`, a directory
+> that no longer exists**, while `AfonEdgeGuard` was **Disabled**. No edge process was running,
+> nothing would have started one at logon, and the watchdog whose job is to notice was switched off.
+> Every command in this section would have appeared to work while changing nothing.
 >
-> The rename moved the *code*. It does not move Scheduled Tasks, which keep pointing at the old
-> interpreter and the old path, and a task whose executable is missing fails **silently**.
+> The rename moves the *code*. It does not move Scheduled Tasks, systemd units, or anything else
+> holding an absolute path — and **a task whose executable is missing fails silently**.
 >
 > ```powershell
-> Get-ScheduledTask | Where-Object { $_.TaskName -like '*Afon*' -or $_.TaskName -like '*Watari*' } |
+> Get-ScheduledTask | Where-Object { $_.TaskName -match 'Afon|Watari|Jarvis' } |
 >   Select-Object TaskName, State
 > (Get-ScheduledTask -TaskName <name>).Actions      # confirm the path still exists
 > ```
 >
-> **Recovery:** unregister the stale `Watari*` tasks, re-run the three install scripts above, then
-> confirm two `pythonw` processes are live (SOP §4.3). `scripts/preflight.sh` now checks this — see
-> §3.
+> Match **all three** name generations. Filtering on `Afon|Watari` alone misses `JarvisEdge` — the
+> task that runs the voice assistant itself.
+>
+> **Recovery (this is the script for it):**
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File C:\Afon\scripts\finish_afon_rename.ps1   # approve UAC
+> ```
+>
+> It **renames** rather than recreates: each task's XML is exported and its paths rewritten, so
+> triggers, principal and RunLevel survive byte-for-byte — which matters because `AfonPcAgent` must
+> stay `RunLevel Highest`. Do **not** reach for `install_edge_autostart.ps1` here; it only modifies
+> tasks that already exist and silently skips missing ones.
+>
+> Verified working after the fix: all four tasks correct, `pc_agent` connected to the VPS brain, wake
+> word firing, utterances routed. `scripts/preflight.sh` now asserts this permanently (§3).
 
 ### 4.3 The singleton rule
 
@@ -209,7 +226,7 @@ swallowed entries is worse than a noisy one.
 ### 5.2 Metrics
 
 ```bash
-curl -sH "Authorization: Bearer $TOKEN" http://<brain>/metrics
+curl -sH "Authorization: Bearer $TOKEN" http://<brain-host>:8766/metrics
 ```
 
 Counters (`turns`, `tool_calls`, `tool_errors`, `tool.<name>`) and rolling latency summaries.
@@ -458,14 +475,14 @@ such — don't burn time on them.
 # health
 bash scripts/preflight.sh
 uv run python bench/run_all_tests.py
-curl -s localhost:<port>/healthz
+curl -s http://<brain-host>:8766/healthz
 
 # what broke
 uv run python bench/show_errors.py --summary
 uv run python bench/show_errors.py --turn <id>
 
 # what's it doing
-curl -sH "Authorization: Bearer $TOKEN" localhost:<port>/metrics
+curl -sH "Authorization: Bearer $TOKEN" http://<brain-host>:8766/metrics
 uv run python bench/tool_usage_report.py
 cat ~/.afon/proactive_state.json
 

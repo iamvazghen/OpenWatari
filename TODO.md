@@ -200,8 +200,28 @@ Legend: ⬜ not started · 🔄 in development · ✅ done & verified.
 - [x] Design confirmed: `SpeakerGate` (after STT, before brain) embeds every heard utterance + scores vs
       the owner voiceprint; non-owner transcripts dropped. `test_phase5_identity_bench.py` **25/25**
       (owner accepted, stranger rejected/dropped).
-- [ ] **[flag, 1 live check]** `speaker_threshold=0.25` is permissive — tune from a real owner-vs-stranger
-      recording. Not headlessly testable.
+- [x] **Live check DONE 2026-08-09 — and the plan in this item was WRONG.** Two corrections first:
+      the setting is **0.30**, not 0.25 (stale), and it must **not** be raised.
+      Real owner speech from `logs/edge.log` (live session, wake word firing, 7 gate decisions):
+      accepted `0.33 0.36 0.47 0.50 0.59 0.64`, **rejected `0.29`** — a *false rejection*, provable
+      because the identical phrase ("What's your name?") was accepted at 0.36 twenty seconds later.
+      | threshold | owner utterances it would reject |
+      |---|---|
+      | 0.25 | 0/7 (0%) |
+      | **0.30 (current)** | **1/7 (14%)** |
+      | 0.35 | 2/7 (29%) |
+      | 0.40 | 3/7 (**43%**) |
+      So the item's plan — "raise to the observed valley, expect ~0.40" — would reject **nearly half**
+      of the owner's speech. Matches the earlier note that the data says keep 0.30.
+      **The methodological trap, worth keeping:** you cannot read a "valley" out of this log. The
+      accepted/ignored split is *defined by* the threshold (everything ≥0.30 was accepted **because**
+      it was ≥0.30), so the two distributions abut at 0.30 by construction, not by observation. The
+      only honest reading is the owner-score spread itself.
+      **The real defect is not the threshold — it is the voiceprint.** An enrolled speaker scoring
+      0.29–0.64 (median 0.47, ceiling 0.64) is a weak reference, and no threshold choice fixes a
+      weak reference: lower it and strangers get in, raise it and the owner is locked out. That
+      makes re-enrolment from the live mic array (below) the blocking item, and any threshold change
+      should wait for it rather than trading one failure for the other.
 
 ### G4 · Perception / face — up-to-date, knows my face — ✅ (verified, fresh)
 - [x] `owner.npy` enrolled: **45 LBP references**, 2026-07-20 (fresh); `face_match_threshold=0.62`;
@@ -224,7 +244,12 @@ Legend: ⬜ not started · 🔄 in development · ✅ done & verified.
       `test_audio_route.py` (3/3).
 - [x] **Brain answers end-to-end**: sent a real `Utterance` over the edge's WS protocol → brain fired
       `get_time` and streamed back "Friday, 24 July 2026, 19:49". Full path edge↔brain↔tools verified live.
-- [ ] **[you: 1 live check]** say "hey afon" / "hey afon" — the only link that needs a human voice.
+- [x] **DONE 2026-08-09 — the human-voice link is verified.** After the Scheduled-Task fix the owner
+      spoke to the live edge: `logs/edge.log` records **14** `wake: 'hey_afon' detected — listening`
+      events, the speaker gate accepting the owner (0.33–0.64) and
+      `remote_brain:_route_utterance - heard: '…' -> VPS brain` on real utterances. So wake word →
+      VAD → STT → speaker verification → brain routing is confirmed on real speech, not synthesised
+      audio. Audio liveness steady throughout (`gap=0.0s`, ~1400 frames/30s).
 
 ### G5 · Inter-subsystem connectivity audit — ✅ (audit done + top fix shipped)
 **Connectivity map (real wires traced):**
@@ -991,6 +1016,11 @@ since the plan was written — the plan's own later addendum supersedes parts of
       `to-read-script.md`, ~3 min owner action). Measured cause: owner-accept median is 0.33 and the
       impostor ceiling is 0.30 — the distributions **touch**, so no threshold can separate them. The
       voiceprint was enrolled under different acoustics than the live mic. Target owner median ≥0.6.
+      **Re-measured 2026-08-09 on a live session** (7 gate decisions, edge freshly restarted): owner
+      median has moved **0.33 → 0.47**, spread 0.29–0.64. Better, still short of the 0.6 target, and
+      still producing confirmed false rejections — one utterance rejected at 0.29 and the *same
+      phrase* accepted at 0.36 seconds later. So the item stands: the reference is weak, and the
+      ceiling of 0.64 is the ceiling that matters. Re-enrolment remains the unblocking action.
 - [ ] **Then** re-measure and raise `speaker_threshold` to the observed valley (the plan expects
       ~0.45–0.50). ⚠️ **Sequenced, not immediate** — the plan's own 2026-07-30/31 addendum rules that the
       threshold **stays at 0.30** on today's data, because raising it now starts rejecting the owner. This
@@ -1276,14 +1306,32 @@ means the nodes grouped together barely reference each other.
       Handler) · `_enabled()` (system, coding) · `_configured()` (phone, composio) · `_load()` (>=5).
 
 ### Rename · the laptop autostart was dead the whole time (found 2026-08-09)
-- [ ] **Re-register the laptop Scheduled Tasks. [needs an elevated shell — owner action]** Found
-      while writing `SOP.md`, by listing the tasks instead of documenting what the install scripts
-      *would* create. Live state on 2026-08-09:
+- [x] **RESOLVED 2026-08-09** by `scripts/finish_afon_rename.ps1` (owner ran it elevated). It renames
+      rather than recreates — exporting each task's XML and rewriting `C:\Jarvis`→`C:\Afon`,
+      `jarvis.edge`→`afon.edge` — so triggers, principal and RunLevel carry over byte-for-byte
+      instead of being guessed at, which matters for the elevated `AfonPcAgent`.
+      Verified live: `AfonEdge` + `AfonPcAgent` **Running**, `AfonEdgeGuard` + `AfonEdgeRefresh`
+      **Ready**, no `Watari*`/`Jarvis*` left, preflight green. `pc_agent` claimed its singleton and
+      connected to the VPS brain; the edge logged `wake: 'hey_afon' detected`, speaker gate accepted
+      the owner (0.47/0.59) and routed real utterances to the brain.
+      **Two things I nearly got wrong.** (1) I almost recommended `install_edge_autostart.ps1`; it
+      only *modifies* existing tasks and prints "not found - skipping", so it would have done
+      nothing. (2) Four `pythonw` processes looked like the duplicate-edge failure until the
+      ancestry showed supervisor+worker per task — `run_supervised` working as designed. Counting
+      processes without their parents would have produced a confident wrong diagnosis.
+- [x] **The finding, kept for the record.** Found while writing `SOP.md`, by listing the tasks
+      instead of documenting what the install scripts *would* create. Live state on 2026-08-09:
       | task | state | points at |
       |---|---|---|
+      | `JarvisEdge` | Ready | `C:\Jarvis\.venv\Scripts\pythonw.exe -m jarvis.edge.assistant` |
       | `WatariPcAgent` | Ready | `C:\Jarvis\.venv\Scripts\pythonw.exe -m jarvis.edge.pc_agent` |
       | `WatariEdgeRefresh` | Ready | `C:\Jarvis\scripts\restart_edge.ps1` |
       | `AfonEdgeGuard` | **Disabled** | `afon-guard-hidden.vbs` |
+      **`JarvisEdge` — the task that runs the actual voice assistant — was missing from my first
+      report**, because I filtered on `*Afon*`/`*Watari*` and it matches neither. The guard I wrote
+      had the same blind spot and under-reported by one; both now match `Afon|Watari|Jarvis`. A
+      naming-convention filter is only as good as the conventions that were actually used, and this
+      repo has been through two renames.
       **`C:\Jarvis` does not exist**, and no python process was running. So: no edge, nothing to
       start one at logon, and the 30-minute watchdog whose entire job is to notice a dead edge was
       switched off. **A Scheduled Task whose executable is missing fails silently** — no error, no
