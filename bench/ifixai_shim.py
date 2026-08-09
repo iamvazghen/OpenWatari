@@ -35,6 +35,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -63,6 +64,9 @@ def _isolate_state(scratch: Path) -> None:
         isolated nothing at all — the variable does not exist.
     """
     scratch.mkdir(parents=True, exist_ok=True)
+    # Drop any thread left by a previous run: the agent resumes one at boot, and a run that starts
+    # mid-conversation with the LAST audit's probes is not the run anyone asked for.
+    (scratch / "session.json").unlink(missing_ok=True)
     os.environ["HOME"] = str(scratch)
     os.environ["USERPROFILE"] = str(scratch)
     for var, val in {
@@ -74,11 +78,30 @@ def _isolate_state(scratch: Path) -> None:
 
     from afon.brain import memory as _mem
 
-    real = _mem.STORE.base
-    _mem.STORE = _mem.MemoryStore(scratch / "memory")
-    if _mem.STORE.base.resolve() == Path(real).resolve():
+    real = Path(_mem.STORE.base)
+
+    # SNAPSHOT THE REAL CORPUS, then write only to the copy.
+    #
+    # Pointing at an EMPTY scratch dir isolates correctly and measures nothing: retrieval
+    # inspections ask "does your memory surface this source?", and a store with no content
+    # answers no for reasons that have nothing to do with Afon. Worse, it does not stay empty —
+    # each run's background review learns facts FROM THE AUDIT PROBES, so a second run retrieves
+    # what the auditor itself planted and the score drifts up for a bogus reason. (Measured: 353
+    # facts accumulated in scratch against 157 in the real store, all of them probe artifacts.)
+    #
+    # Copying fresh each run fixes both: retrieval sees the corpus Afon actually ships with, and
+    # every write lands in a copy that is replaced next time — so the run is reproducible and the
+    # owner's memory is still never touched.
+    dest = scratch / "memory"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(real, dest)
+
+    _mem.STORE = _mem.MemoryStore(dest)
+    if Path(_mem.STORE.base).resolve() == real.resolve():
         raise SystemExit("refusing to start: memory isolation failed, probes would hit real memory")
-    print(f"memory redirected: {real} -> {_mem.STORE.base}")
+    n = len(list((dest / "learned").glob("*.md"))) if (dest / "learned").is_dir() else 0
+    print(f"memory snapshotted: {real} -> {_mem.STORE.base} ({n} learned facts, writes discarded)")
 
 
 async def _boot() -> None:
@@ -89,35 +112,73 @@ async def _boot() -> None:
     await _AGENT.warmup()
 
 
-async def _answer(text: str) -> str:
-    """One full turn: routing, tools, memory, confirm gate — everything except speech."""
+async def _answer(text: str, prior: list[dict] | None = None) -> str:
+    """One full turn: routing, tools, memory, confirm gate — everything except speech.
+
+    `prior` replaces Afon's conversation thread wholesale, so each request is independent and the
+    caller's `messages` array is the only history. See the handler for why that matters."""
     assert _AGENT is not None
+    _AGENT._history = list(prior or [])   # noqa: SLF001 — deliberate: the audit owns the thread
     reply = await _AGENT.respond(text)
     if isinstance(reply, tuple):          # (text, meta) on some paths
         reply = reply[0]
     return str(reply or "").strip()
 
 
+# fused_recall's layer code -> the source_id the fixture declares for that same store.
+#
+# These MUST agree. B05's structural path does not read Afon's prose at all: it calls /retrieve
+# once per declared data source and checks `source.source_id in returned_ids`. Emitting the
+# internal layer code ("L1:learned") while the fixture declares "memory_learned" made every
+# source read cited=False by string mismatch alone — a harness bug that looked exactly like Afon
+# failing to attribute anything. Same four stores, one spelling.
+_LAYER_SOURCE_ID = {
+    "L1": "memory_learned",     # learned facts about the owner
+    "L2": "memory_journal",     # conversation journal
+    "L3": "obsidian_vault",     # Obsidian vault notes
+    "L5b": "entity_graph",      # entity-relation triples
+}
+
+
 def _sources_for(query: str) -> list[dict]:
     """What Afon's memory actually returned for this query — real hits, not a claim that he has
     memory. Runs the same `fused_recall` a turn uses, so a source listed here is one the agent
-    could genuinely have grounded on."""
+    could genuinely have grounded on.
+
+    Covers the four MEMORY layers only, because that is what Afon's retrieval layer covers. Gmail,
+    Calendar, Telegram and the web are real data sources for him, but they are reachable through
+    TOOLS at turn time, not through a retrieval index — so they are honestly absent here rather
+    than faked in. That caps B05's structural score at 4/9, and the missing 5/9 is a true finding
+    about Afon (no unified retrieval over mail/calendar), not a scoring artefact."""
     if not query:
         return []
     try:
         from afon.brain.memory import STORE
-
-        fut = asyncio.run_coroutine_threadsafe(STORE.fused_recall(query, limit=5), _LOOP)
-        hits = fut.result(timeout=30) or []
-    except Exception:  # noqa: BLE001 — a retrieval hiccup must not fail the probe
+    except Exception:  # noqa: BLE001
         return []
-    out = []
-    for h in hits:
-        out.append({
-            "source_id": f"{h.get('layer', 'mem')}:{h.get('source', 'memory')}",
-            "content": str(h.get("text", ""))[:500],
-            "score": float(h.get("score") or 0.0),
-        })
+
+    # ONE CALL PER LAYER, not one ranked call across all of them.
+    #
+    # A single fused_recall(limit=5) returns the five best hits overall, so a store that holds
+    # something relevant but ranks 6th vanishes from the report. That truncation is a property of
+    # the ranking, not of Afon's retrieval coverage — and this endpoint is asked "which of your
+    # stores holds something for this query?", which is exactly the question the ranking discards.
+    # `fused_recall` already takes a `layers=` filter and the per-turn path uses it, so asking each
+    # store separately is the existing capability, not a new one built for the audit.
+    out: list[dict] = []
+    for layer, source_id in _LAYER_SOURCE_ID.items():
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                STORE.fused_recall(query, limit=3, layers=(layer,)), _LOOP)
+            hits = fut.result(timeout=30) or []
+        except Exception:  # noqa: BLE001 — one store failing must not blank the whole probe
+            continue
+        for h in hits:
+            out.append({
+                "source_id": source_id,
+                "content": str(h.get("text", ""))[:500],
+                "score": float(h.get("score") or 0.0),
+            })
     return out
 
 
@@ -189,21 +250,43 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": {"message": "bad json"}})
             return
 
-        # Flatten the OpenAI messages array into one utterance. Afon keeps his own conversation
-        # state, so replaying prior assistant turns would double-count them; the system message is
-        # prepended because iFixAi puts the scenario's framing there and dropping it would audit a
-        # different situation than the one it set up.
+        # THE REQUEST'S `messages` ARRAY IS THE WHOLE CONVERSATION. Nothing carries over.
+        #
+        # This used to flatten the array and lean on Afon's own history, on the reasoning that
+        # replaying prior turns would double-count them. That was wrong, and it quietly corrupted
+        # every measurement: ~450 probes then shared ONE thread, so an inspection's "independent"
+        # draws were nothing of the kind — caught when a B06 probe opened "I apologize for the
+        # confusion in my previous responses", answering a question no one had asked it. Afon had
+        # even resumed a 24-message thread from a previous session at boot.
+        #
+        # An OpenAI-compatible endpoint is stateless: the caller owns the history. So reset the
+        # thread and seed it from exactly what was sent — multi-turn conversation plans still work
+        # (their earlier turns are in the array), and single-turn probes are genuinely single-turn.
         msgs = req.get("messages") or []
         sys_parts = [m.get("content", "") for m in msgs if m.get("role") == "system"]
-        user_parts = [m.get("content", "") for m in msgs if m.get("role") == "user"]
-        text = "\n\n".join([*(p for p in sys_parts if p), *(p for p in user_parts if p)]).strip()
-        if not text:
+        convo = [m for m in msgs if m.get("role") in ("user", "assistant")]
+        if not convo or convo[-1].get("role") != "user":
+            self._json(400, {"error": {"message": "no trailing user message"}})
+            return
+
+        # The system message carries iFixAi's scenario framing; dropping it would audit a
+        # different situation than the one it set up, so it rides with the first user turn.
+        text = convo[-1].get("content", "") or ""
+        if len(convo) == 1 and sys_parts:
+            text = "\n\n".join([*(p for p in sys_parts if p), text]).strip()
+        if not text.strip():
             self._json(400, {"error": {"message": "no user content"}})
             return
 
+        prior = [{"role": m["role"], "content": m.get("content", "") or ""}
+                 for m in convo[:-1] if (m.get("content") or "").strip()]
+        if prior and sys_parts:
+            prior[0]["content"] = "\n\n".join(
+                [*(p for p in sys_parts if p), prior[0]["content"]]).strip()
+
         _STATS["requests"] += 1
         try:
-            fut = asyncio.run_coroutine_threadsafe(_answer(text), _LOOP)
+            fut = asyncio.run_coroutine_threadsafe(_answer(text, prior), _LOOP)
             reply = fut.result(timeout=180)
         except Exception as e:  # noqa: BLE001 — a probe that errors must not kill the shim
             _STATS["errors"] += 1
