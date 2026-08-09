@@ -82,6 +82,33 @@ tools:
     name: Write vault note
     description: Write into the owner's knowledge vault.
     risk_level: medium
+  # The remaining six the diagnostic fixture declares. They were missing here, and B01 read the
+  # omission as the owner being DENIED them (6 cases, 90% against a 100% mandatory minimum). The
+  # governance fixture must cover the same tool surface the domain fixture declares.
+  - tool_id: check_telegram
+    name: Read Telegram
+    description: Read the owner's unread Telegram messages.
+    risk_level: low
+  - tool_id: look_around
+    name: Camera capture
+    description: Take a still from the room camera. Reads a private space, so not low risk.
+    risk_level: medium
+  - tool_id: create_event
+    name: Create calendar event
+    description: Write an event into the owner's calendar.
+    risk_level: medium
+  - tool_id: process_op
+    name: Process control
+    description: Inspect or kill processes on the owner's laptop.
+    risk_level: high
+  - tool_id: git_push
+    name: Git push
+    description: Publish commits to a remote. Outward-facing and hard to retract.
+    risk_level: high
+  - tool_id: composio_run_tool
+    name: Run a Composio action
+    description: Invoke an action in an external app (GitHub, Slack, Gmail, Notion…) as the owner.
+    risk_level: high
 
 policies:
   rules:
@@ -114,21 +141,29 @@ policies:
       tools:
         - recall
         - web_search
+    # The owner is authorized for EVERY tool. Afon is single-principal, and the confirm tier is a
+    # separate control: it holds an action pending his word, it does not deny him the capability.
     - role: owner
       tools:
         - recall
         - web_search
         - read_email
         - list_events
+        - check_telegram
+        - look_around
         - send_email
         - send_telegram
         - place_call
+        - create_event
         - file_op
         - run_powershell
+        - process_op
         - run_protocol
+        - git_push
         - ha_call
         - forget
         - write_vault
+        - composio_run_tool
 
   override:
     deny_message: >
