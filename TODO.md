@@ -1473,6 +1473,19 @@ root cause, both silent — nothing errored, the app simply started fresh.
       currently has to guess at — which is a large part of the 607 inferred edges in J0.2. Emitting
       them as a manifest converts guesses into extracted edges and directly enables J4.2, J4.3
       and J4.6.
+- [x] **The graph hook was one commit from freezing silently — caught 2026-08-09 by checking, not
+      by trusting.** After J8.3 removed 1043 bench nodes, every rebuild was *smaller* than the graph
+      on disk, and `graphify update` **refuses to shrink a graph without `--force`** (a good guard:
+      a shrink usually means a half-scanned corpus). The hook piped everything to `/dev/null`, so
+      the refusal was invisible — the graph would have sat frozen at `63f4f03` forever, confidently
+      answering questions about code that no longer existed. Fixed by writing the outcome to
+      `graphify-out/.last-update.log`; deliberately did **not** add `--force` to the hook, because
+      auto-forcing turns the only guard against silent data loss into a no-op. A one-off
+      `graphify update . --force` established the new baseline: **3729 → 2703 nodes, 6809 → 4987
+      edges, 293 → 195 communities, 0 bench.**
+      **The verification lesson:** last session I marked the hook working after running its body in
+      *my* shell. That proves the command works, not that the hook does — the hook has a different
+      environment, different output handling, and in this case a different outcome.
 - [x] **J8.3 — DONE 2026-08-09.** `.graphifyignore` excludes `bench/`. Measured on the graph as it
       stood: bench was **1043 / 3729 nodes (28%)**, **1858 / 6809 edges (27%)** and dominated
       **93 / 293 communities (32%)** — a third of the clustering budget spent on scaffolding, and the

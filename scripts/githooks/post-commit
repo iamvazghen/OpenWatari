@@ -1,6 +1,22 @@
 #!/bin/sh
 # Keep the code graph fresh: AST-only rebuild after each commit. Never blocks the commit.
 # (core.hooksPath=scripts/githooks, so .git/hooks/post-commit is ignored — this lives here.)
+#
+# The log is NOT optional. On 2026-08-09 this hook stopped updating the graph entirely and nobody
+# could have noticed: after .graphifyignore removed bench/ (1043 nodes), every rebuild was smaller
+# than the graph on disk, and `graphify update` REFUSES to shrink a graph without --force — a
+# sensible guard against a half-scanned corpus. With output going to /dev/null, the refusal was
+# invisible and the graph would have sat frozen at an old commit forever, silently answering
+# questions about code that no longer existed.
+#
+# So: keep it non-blocking and backgrounded, but write the outcome somewhere a person can look.
+# The deliberate REFUSAL to add --force here: a shrink is usually a bug (a failed scan, a missing
+# chunk), and auto-forcing would turn the one guard against silent data loss into a no-op. When a
+# shrink is intended, run `graphify update . --force` by hand, once.
+#
+# `scripts/graph_fresh.py` is the backstop that catches a frozen graph regardless of this log,
+# because it compares mtimes rather than trusting that the rebuild happened.
 command -v graphify >/dev/null 2>&1 || exit 0
-( cd "$(git rev-parse --show-toplevel)" && graphify update >/dev/null 2>&1 & )
+ROOT=$(git rev-parse --show-toplevel)
+( cd "$ROOT" && graphify update > graphify-out/.last-update.log 2>&1 & )
 exit 0
