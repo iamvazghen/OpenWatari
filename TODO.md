@@ -1372,6 +1372,51 @@ root cause, both silent — nothing errored, the app simply started fresh.
       *Lesson worth keeping: a rename checklist must enumerate STATE directories, not just code
       paths and service names. Both halves of this were missed the same way.*
 
+### Rename · the VPS is DEPLOYED and live on the `afon` package (2026-08-09)
+- [x] **The brain now runs the renamed code in production**, verified end to end: `/healthz` ok,
+      `/talk` answering (`X-Afon-Reply: Pong`, and "what time is it" → `2:08 PM on Sunday, 9 August
+      2026`), vault L3 8976 notes, L1 509 facts, all three LLM providers primed, edge reconnected
+      and its error spool **replayed while disconnected**. Done in four reversible steps:
+      1. **Dual-prefix `.env`.** The VPS had **108 `JARVIS_` vars and 0 `AFON_`**, and the renamed
+         code declares `env_prefix="AFON_"` with `extra="ignore"` — deploying onto that reads
+         **zero configuration** and still starts, answers `/healthz` and looks fine. Confirmed by
+         `preflight --remote`, which is precisely why that check exists. Fixed by appending an
+         `AFON_` mirror and **keeping** the `JARVIS_` block so a rollback still works. Verified by
+         comparing SHA-256 digests of both value sets (identical) rather than eyeballing — values
+         were never printed.
+      2. **A systemd drop-in**, not a unit edit: `jarvis-brain.service.d/afon.conf` sets
+         `PYTHONPATH=…/src` and repoints `ExecStart` at `afon.brain.server`. Rollback is `rm` +
+         `daemon-reload`, with the original unit byte-for-byte intact.
+         `PYTHONPATH` **instead of reinstalling**: this host's `pyproject.toml` still declares
+         `packages = ["src/jarvis"]` and `deploy_vps.sh` does not sync `pyproject.toml`, so
+         `python -m afon.brain.server` would have died with `ModuleNotFoundError` — a deploy that
+         reports success and changes nothing. Running `uv sync` to fix that would mutate a
+         production venv mid-session; putting `src/` on the path does the same job and nothing else.
+      3. **Pruned two stale files** the deploy refused to restart over (`personality/jarvis.md`,
+         `skills/jarvis-architecture.md`) — moved to `.pre-rename-attic/`, not deleted. Then
+         `verify_vps_sync.sh`: **168 local = 168 remote, content-verified**.
+      4. **Recovered ten stranded state files — a regression the deploy itself caused.** Switching
+         to the `afon` package moved the brain's state dir from `~/.jarvis` to `~/.afon`, leaving
+         behind `routines.json`, `macros.json`, `objectives.json`, `relationship.json` (5.8 KB),
+         `patterns.jsonl` (539 lines), `approvals.json`, `world_model.json` (14.8 KB),
+         `health_probe.json`, `health_escalation.json`, `resurfaced_memories.json`. The brain
+         started, answered `/healthz` and held a normal conversation **while having no routines, no
+         macros and no relationship history** — nothing errored. Copied across, restarted, verified.
+      **The lesson, which is the whole point of preflight:** the local stranded-state check had
+      existed for months; there was no *remote* one, so the deploy introduced the exact failure the
+      script was written to prevent. Added `preflight --remote` §4 to assert it, negative-control
+      verified (plant a file → red, remove → green).
+      **Also worth keeping:** two of Afon's answers after the recovery looked like failures and were
+      not — "no macros saved yet" (`macros.json` is genuinely `{}`) and "no active objectives" (the
+      one objective has `status: dropped`). Per the rule in `TESTING_GUIDE.md` §12, I checked what
+      was in the store before concluding, and the store was right both times.
+- [ ] **Cleanup, deliberately deferred.** (a) Drop the `JARVIS_` block from the VPS `.env` once the
+      deploy has run a few days — it is the rollback path, so removing it now trades a real safety
+      net for tidiness. (b) `~/jarvis` and `jarvis-brain.service` keep their old names; renaming a
+      live 24/7 unit is a separate decision from changing what it runs, and `deploy_vps.env` now
+      points at reality. (c) `deploy_vps.sh` still never syncs `pyproject.toml` — fine while the
+      drop-in supplies `PYTHONPATH`, a trap the moment someone removes the drop-in.
+
 ### Rename · the VPS side is outstanding (found 2026-08-08 by J4.1)
 
 - [ ] **The Watari/Jarvis -> Afon rename never reached the VPS.** Local repo, scripts and Windows

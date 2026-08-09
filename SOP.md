@@ -359,7 +359,37 @@ bash scripts/verify_vps_sync.sh
 ```
 
 **Known gap:** the deploy never deletes. A file removed locally lingers on the VPS. Orphans are
-detected but not yet removed automatically — check after a rename or a file deletion.
+*detected* (`verify_vps_sync.sh` runs before the restart and aborts on drift) but never removed
+automatically — deleting files on a live brain is a decision, not a deploy step. Move them to an
+attic directory rather than `rm`, then re-run.
+
+**Two things `deploy_vps.sh` does NOT do, and both are silent:**
+
+- **It does not sync `pyproject.toml`.** The VPS copy still declares `packages = ["src/jarvis"]`,
+  so a freshly-synced `src/afon` is not an installed package. The unit compensates with
+  `PYTHONPATH=…/src` (see below). Remove that and `python -m afon.brain.server` dies with
+  `ModuleNotFoundError`.
+- **It does not move state.** The brain's state dir is derived from the package identity, so
+  switching packages moved it `~/.jarvis` → `~/.afon` and left ten files behind — routines, macros,
+  objectives, relationship, patterns, approvals, world model. The brain started, passed `/healthz`
+  and conversed normally **with none of them**. `preflight --remote` now asserts this; run it after
+  any deploy that changes where state lives.
+
+### 7.1a The brain's entry point (systemd drop-in)
+
+The VPS unit is still named `jarvis-brain.service`, but a drop-in at
+`~/.config/systemd/user/jarvis-brain.service.d/afon.conf` repoints it:
+
+```ini
+[Service]
+Environment=PYTHONPATH=/home/openclaw/jarvis/src
+ExecStart=
+ExecStart=/bin/bash -c "source /home/openclaw/.jarvis/load-secrets.sh && exec /home/openclaw/.local/bin/uv run --no-sync python -m afon.brain.server"
+```
+
+A drop-in rather than an edit, so **rollback is `rm` + `systemctl --user daemon-reload`** and the
+original unit stays intact. The VPS `.env` deliberately carries **both** `AFON_` and `JARVIS_`
+copies of every setting for the same reason: the old build still works if you roll back.
 
 ### 7.2 Code graph
 

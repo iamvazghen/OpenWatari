@@ -101,6 +101,15 @@ list with the credential audit in SOP §2.3 rather than trusting this paragraph.
 **Bench support:** `uv run python bench/verify_wakeword.py .wakewords/afon.onnx <clips...>` scores a
 model on WAV clips. Use it to quantify 1.4/1.5 rather than guessing.
 
+> **On a fresh clone, 1.1 will fail unless you know this.** openWakeWord ships pretrained models for
+> only a handful of phrases, and "afon" is not one of them, so `edge/wake_word.py:_MAP` routes
+> `"afon"` / `"hey afon"` onto the pretrained **`hey_jarvis`** model. Configure the phrase as "hey
+> afon" and the thing actually listening for is *"hey Jarvis"* — the log gives it away
+> (`wake words active: ['hey_jarvis']`). Either say "hey Jarvis", pick a phrase from the pretrained
+> set, or train a custom model and point `AFON_WAKE_WORDS` at the `.onnx` **path** (which is what
+> this deployment does: `wake: 'hey_afon' detected`). Check the log line before concluding the wake
+> word is broken.
+
 ---
 
 ## Section 2 — Voice quality and latency

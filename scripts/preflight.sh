@@ -225,6 +225,25 @@ if [[ "$REMOTE_CHECKS" -eq 1 ]]; then
       fail "remote unit $SERVICE does not exist" "candidates: ${cands:-none}; set AFON_VPS_SERVICE"
     fi
 
+    # REMOTE stranded state — the same check §2 runs locally, on the machine that actually
+    # matters. Added 2026-08-09 after the rename deploy CAUSED this: switching the brain to the
+    # afon package moved its state dir from ~/.jarvis to ~/.afon, and ten files stayed behind —
+    # routines.json, macros.json, objectives.json, relationship.json, patterns.jsonl,
+    # approvals.json, world_model.json and three more. The brain started, answered /healthz and
+    # held a normal conversation while silently having no routines, no macros and no relationship
+    # history. Nothing errored; it simply behaved like a fresh install.
+    # The local half of this check existed for months. The remote half did not, which is why the
+    # deploy could introduce exactly the failure the script was written to prevent.
+    rstranded=$(ssh -o ConnectTimeout=10 "$AFON_VPS" \
+      'test -d ~/.jarvis && cd ~/.jarvis && find . -maxdepth 2 -type d -name run -prune -o -type f \( -name "*.json" -o -name "*.jsonl" -o -name "*.npy" -o -name "*.sqlite" \) -print 2>/dev/null | while read f; do [ -e "$HOME/.afon/${f#./}" ] || echo "${f#./}"; done | head -12' \
+      2>/dev/null | tr '\n' ' ')
+    if [[ -n "${rstranded// /}" ]]; then
+      fail "state stranded on the VPS (in ~/.jarvis, absent from ~/.afon): ${rstranded}" \
+           "the brain reads ~/.afon — it will behave like a fresh install for these, without erroring"
+    else
+      pass "no stranded state on the VPS"
+    fi
+
     # THE SILENT ONE. A prefix mismatch on the target is invisible at runtime: the brain
     # starts, answers /healthz, and behaves like a fresh install with no credentials.
     if [[ -n "$PREFIX" ]]; then
