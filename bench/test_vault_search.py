@@ -71,6 +71,36 @@ async def main() -> None:
             check("Nothing in the vault matched" in r4,
                   "a deleted note stops matching", r4[:60])
 
+            # WARM-UP. Without it the L3 leg of fused_recall is not slow, it is UNREACHABLE: a cold
+            # scan of the real vault costs ~108s against a 6s budget, so recall abandons the wait
+            # every single time, and the module cache dies with the process so every restart is
+            # cold again. Measured on the real vault 2026-08-09: 108s cold, 3.2s / 2.4s warm.
+            (root / "alpha.md").write_text("the owner keeps bees", encoding="utf-8")
+            (root / "beta.md").write_text("the owner keeps goats", encoding="utf-8")
+            vault._CACHE.clear()
+            vault._cached_bytes = 0
+            n = await asyncio.to_thread(vault.warm_cache)
+            check(n >= 2, "warm_cache reads every note", f"{n} notes")
+            check(len(vault._CACHE) >= 2, "warm_cache populates the body cache",
+                  f"{len(vault._CACHE)} entries")
+
+            # The point of warming: the next search is served without re-reading anything.
+            reads: list[Path] = []
+            real_read = Path.read_text
+
+            def _counting_read(self, *a, **kw):   # noqa: ANN001
+                reads.append(self)
+                return real_read(self, *a, **kw)
+
+            Path.read_text = _counting_read       # noqa: B010
+            try:
+                r5 = await vault.search_vault({"query": "bees"})
+            finally:
+                Path.read_text = real_read        # noqa: B010
+            check("alpha.md" in r5, "a warm search still finds the note", r5.splitlines()[0][:60])
+            check(not reads, "a warm search re-reads NOTHING from disk",
+                  f"{len(reads)} reads: {[p.name for p in reads][:3]}")
+
             # The loop must keep ticking while a search runs. Ticker beside the call, same
             # harness as bench/profile_memory_recall.py.
             (root / "big.md").write_text("rabbit " * 200_000, encoding="utf-8")

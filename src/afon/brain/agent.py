@@ -810,7 +810,32 @@ class AfonAgent:
             logger.info("brain warmup complete (all providers primed)")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"brain warmup skipped: {e}")
+        self._warm_vault_cache()
         await self._load_mcp_tools()
+
+    def _warm_vault_cache(self) -> None:
+        """Read the vault once in the background so L3 recall actually works.
+
+        NOT awaited, and deliberately so: the scan takes ~108s on a cold cache and must never sit
+        between startup and the first answer. Until it finishes, L3 behaves exactly as it did
+        before (abandoned at the 6s budget); after it, an explicit `recall` reaches the vault in
+        ~3s instead of never. The per-turn auto-recall path is untouched — it only uses L1+L2.
+        """
+        async def _run() -> None:
+            try:
+                from afon.brain.tools.vault import warm_cache
+
+                t0 = time.monotonic()
+                n = await asyncio.to_thread(warm_cache)
+                if n:
+                    logger.info(f"vault (L3) cache warm: {n} notes in {time.monotonic() - t0:.0f}s")
+            except Exception as e:  # noqa: BLE001 — a cold cache is slow, never fatal
+                logger.debug(f"vault cache warm skipped: {type(e).__name__}: {e}")
+
+        try:
+            asyncio.get_running_loop().create_task(_run())
+        except RuntimeError:
+            pass   # no loop (tests constructing the agent synchronously) — nothing to warm
 
     async def _load_mcp_tools(self) -> None:
         """Start any configured MCP servers and fold their tools into the registry + core surface, so

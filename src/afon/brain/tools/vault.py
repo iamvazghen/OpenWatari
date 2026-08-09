@@ -60,10 +60,13 @@ def _snippet(body: str, query: str, width: int = 200) -> str:
     return clip(body[start : start + width], width)
 
 
-# Body cache, keyed by path -> (mtime, size, body). The vault is 10,670 files / 25.7MB: the
-# rglob costs 400ms but READING all of it costs 4.9s, every single search. Re-reading a note
-# whose mtime and size are unchanged cannot return different text, so the reads are pure waste
-# after the first pass.
+# Body cache, keyed by path -> (mtime, size, body). The vault is 10,716 files / 26.0MB: the
+# rglob costs 400ms and the stats another 250ms, but READING all of it costs **73s** on a cold
+# OS file cache, every single search. Re-reading a note whose mtime and size are unchanged cannot
+# return different text, so the reads are pure waste after the first pass.
+#
+# (The 4.9s this comment used to claim was measured against an already-warm OS cache and was
+# wildly optimistic. Measured 2026-08-09: first full scan 108s, second 3.2s, third 2.4s.)
 #
 # ponytail: a dict keyed on (mtime, size), not an index. An index means a schema, a writer, an
 # invalidation story and a rebuild command; this is eight lines and gets the same 10x. Build the
@@ -117,6 +120,26 @@ def _search_sync(query: str, root: Path) -> str:
         rel = p.relative_to(root).as_posix()
         lines.append(f"[{rel}] {_snippet(body, query)}")
     return f"Found {len(hits)} vault note(s) matching '{query}'. Top results:\n" + "\n".join(lines)
+
+
+def warm_cache() -> int:
+    """Read every note once so the body cache is warm. Returns notes cached. Never raises.
+
+    Without this the L3 leg of `fused_recall` is not slow — it is UNREACHABLE. A cold scan of this
+    vault costs ~108s against a 6s budget, so `fused_recall` abandons the wait every time; and
+    because the module cache dies with the process, every brain restart puts it back to cold. The
+    warm scan is ~3s, comfortably inside the budget. Measured 2026-08-09: 108s / 3.2s / 2.4s.
+
+    Cheap to call again — an unchanged note is a stat, not a read.
+    """
+    root = _vault_root()
+    if root is None:
+        return 0
+    n = 0
+    for p in root.rglob("*.md"):
+        if _body(p) is not None:
+            n += 1
+    return n
 
 
 async def search_vault(args: dict) -> str:

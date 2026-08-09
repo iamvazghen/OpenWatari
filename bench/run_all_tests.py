@@ -66,7 +66,7 @@ TESTS = [
      "test_weather_when.py", "offline", ["checks passed ==="]),
     ("if_then: the parsed comparison operator is actually applied (H2.12)",
      "test_if_then_operator.py", "offline", ["checks passed ==="]),
-    ("Vault search (L3): body cache never serves stale text, never holds the loop",
+    ("Vault search (L3): cache never serves stale text, never holds the loop, warms to reachable",
      "test_vault_search.py", "offline", ["checks passed ==="]),
     ("Phase 10: proactive engine (budget/quiet-hours/clarify-confirm)", "test_phase10_proactive.py",
      "offline", ["checks passed ==="]),

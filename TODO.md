@@ -1679,12 +1679,28 @@ the harness, never a flattering description.
       through TOOLS at turn time but are **not in any retrieval index**. Both are true statements
       about the architecture. Fix by building the capability or leave it and report the gap —
       never by deleting the sources from the fixture, which also feeds B06's prompts.
-- [ ] **L3 vault search exceeds its 6s budget on every call. (P1, found while fixing B05)** The log
-      shows `fused_recall: L3 vault search exceeded 6.0s — returning without it` on 100% of probes
-      against the 10,700-note vault. The per-turn path only uses `("L1","L2")` so this is invisible
-      day to day, but the **`recall` tool asks for all layers** — meaning the vault is effectively
-      unreachable through recall in production. Either raise `memory_vault_search_budget_s` or
-      index the vault; measure first.
+- [x] **L3 vault search exceeded its 6s budget on every call — FIXED 2026-08-09. (P1)** The log
+      showed `fused_recall: L3 vault search exceeded 6.0s — returning without it` on 100% of probes.
+      The per-turn path only uses `("L1","L2")` so it was invisible day to day, but the **`recall`
+      tool asks for all layers**, so the vault was not slow — it was **unreachable**, and had been
+      for as long as the vault has been this size.
+      Measured rather than guessed (`vault.py` already had a body cache, so the obvious "add a
+      cache" answer was wrong): rglob 0.40s, stat 0.25s, **read all 10,716 bodies 73s cold**. Full
+      `_search_sync`: **108s cold, 3.2s then 2.4s warm.** The cache worked; nothing ever warmed it,
+      and it dies with the process, so every brain restart went back to cold — the budget was
+      preventing the very warm-up that would have made it fast.
+      Fix: `vault.warm_cache()` + a **fire-and-forget** task in `AfonAgent.warmup()`. Not awaited —
+      108s must never sit between startup and the first answer; until it completes L3 behaves
+      exactly as before. Verified end to end: warm search 3.02s (inside the 6s budget) and
+      `fused_recall(layers=("L3",))` returns **5 hits where it previously returned none**.
+      Regression checks added to `bench/test_vault_search.py` (10/10), including one asserting a
+      warm search re-reads **nothing** from disk.
+      *Also corrected a stale comment there claiming the full read cost 4.9s — that was measured
+      against an already-warm OS cache and was out by 15x.*
+- [ ] **Consider persisting the vault index across restarts. (P2)** The warm-up now hides the 108s,
+      but it is 108s of disk churn on every brain start, and L3 is dead for the first ~2 minutes.
+      A persisted (path, mtime, size) index would make restarts instant. Only worth it if restarts
+      become frequent — the fire-and-forget warm covers the 24/7 case.
 - [ ] **B06 Explicit Uncertainty Signalling — 2%. (P1, fix applied, not yet re-measured)** Afon
       answers ambiguous questions with the same confidence as certain ones. B06 probes four
       orthogonal unknowables — a future state, a counterfactual, an exact figure with no data, a
@@ -1778,8 +1794,21 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       one turn at a time), plus `--concurrency 1`. **Runs 7 and 8 both carried this race, so every
       judged number in the table above is suspect and run 9 is the first clean one.** The structural
       inspections (B01–B04) are unaffected: they never go through `/chat/completions`.
-- [ ] **Re-measure the judged inspections (B05/B06/B07/B25) now the race is gone, and repeat once**
-      before quoting any of them. Serialised runs are slower; budget for it.
+- [x] **Re-measured, and repeated. THE JUDGED INSPECTIONS ARE STILL WIDELY VARIABLE.** Two clean
+      serialised runs of identical code:
+
+      | | run 9 | run 10 |
+      |---|---|---|
+      | B06 Uncertainty | 65% | **79%** |
+      | B25 Regulatory | 17% | **50%** |
+      | Strategic Score | 72.0% | **79.9%** |
+
+      B01–B04 returned 100% in both — the structural inspections are stable because they never
+      touch the model. Everything judged swings: B25 by 33 points on no code change at all.
+      **Never quote a single run.** Anything cited needs ≥3 runs and a range, not a point. The
+      honest current statement is "72–80% strategic, structural governance 100%".
+- [ ] **Decide how many runs a citable number needs, and write it into the SOP.** Three is a guess;
+      the spread above suggests more for B25. Cheap to measure: the structural half is free.
 - [ ] **The connection banner lies about capabilities, in both directions.** It reports the
       CLI-wrapped provider; the inspections use the fixture-wrapped one. Run 8 printed
       `tools=no, audit=no, auth=no, governance=no` while B01–B04 all scored 100%. Ignore the banner.
