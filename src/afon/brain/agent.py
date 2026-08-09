@@ -1318,7 +1318,10 @@ class AfonAgent:
                     "ask him to confirm. It will run only after he says yes."
                 )
                 logger.info(f"confirm-gate: held {name}({args}) pending the owner's yes")
-                audit.record(name, args, "blocked: confirmation required", ok=False)
+                audit.record(name, args, "blocked: confirmation required", ok=False,
+                             decision="deny", rule="confirm_gate:awaiting_owner_confirmation",
+                             reasoning=f"{name} is in the confirm tier and the owner has not "
+                                       f"affirmed this specific action")
                 outcomes[idx] = {"name": name, "result": blocked, "ok": False,
                                  "args": args, "blocked": True}
                 continue
@@ -1327,7 +1330,10 @@ class AfonAgent:
             if confirm_required(name, args) and settings.face_second_factor:
                 refusal = await self._face_second_factor(name, args)
                 if refusal:
-                    audit.record(name, args, "blocked: owner not visually present", ok=False)
+                    audit.record(name, args, "blocked: owner not visually present", ok=False,
+                                 decision="deny", rule="face_second_factor:owner_not_present",
+                                 reasoning="the confirmation was given but the camera could not "
+                                           "place the owner in the room")
                     outcomes[idx] = {"name": name, "result": refusal, "ok": False,
                                      "args": args, "blocked": True}
                     continue
@@ -1354,7 +1360,17 @@ class AfonAgent:
         for c, out in zip(calls, outcomes):
             assert out is not None
             if not out.get("blocked"):  # blocked calls were already audited in pass 1
-                audit.record(out["name"], out["args"], str(out["result"]), ok=out["ok"])
+                # Why the call was PERMITTED, which is the question an incident review asks and
+                # the old line could not answer: either the tool is outside the confirm tier, or
+                # it is inside it and the owner affirmed this specific action.
+                gated = confirm_required(out["name"], out["args"])
+                audit.record(
+                    out["name"], out["args"], str(out["result"]), ok=out["ok"],
+                    decision="allow",
+                    rule=("confirm_gate:owner_confirmed" if gated else "confirm_gate:not_gated"),
+                    reasoning=("the owner affirmed this action before it ran" if gated
+                               else f"{out['name']} is a read/low-risk tool outside the confirm tier"),
+                )
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": str(out["result"])})
             # A confirmed consequential action consumes the grant: one "yes" authorises one action.
             if confirm_required(out["name"], out["args"]) and out["ok"]:

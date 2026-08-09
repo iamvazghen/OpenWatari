@@ -222,7 +222,9 @@ async def run_step_tool(tool: str, sub_args: dict, *, authorized: bool, label: s
         return f"'{tool}': unknown tool."
 
     if confirm_required(tool, sub_args) and not authorized:
-        audit.record(tool, sub_args, "blocked: confirmation required (macro step)", ok=False)
+        audit.record(tool, sub_args, "blocked: confirmation required (macro step)", ok=False,
+                     decision="deny", rule="confirm_gate:macro_step_unauthorized",
+                     reasoning=f"{tool} is in the confirm tier and this macro run was not authorised")
         _err.record_op("macro-step", tool, ok=False, detail="blocked: needs the owner's confirmation")
         return (f"'{tool}' needs the owner's confirmation and this run wasn't authorised — skipped. "
                 "Ask him directly, then run it.")
@@ -237,7 +239,10 @@ async def run_step_tool(tool: str, sub_args: dict, *, authorized: bool, label: s
                    detail="" if ok else str(res)[:200],
                    duration_ms=(_time.monotonic() - started) * 1000,
                    context={"args": str(sub_args)[:200]})
-    audit.record(tool, sub_args, str(res), ok=ok)
+    audit.record(tool, sub_args, str(res), ok=ok, decision="allow",
+                 rule=("confirm_gate:macro_authorized" if confirm_required(tool, sub_args)
+                       else "confirm_gate:not_gated"),
+                 reasoning="ran as a step of an authorised macro")
     return res
 
 

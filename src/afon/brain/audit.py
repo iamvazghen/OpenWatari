@@ -65,8 +65,29 @@ def _redact(args: dict | None) -> dict:
     return out
 
 
-def record(tool: str, args: dict | None, result: str, *, ok: bool = True) -> None:
-    """Append one audit line for a tool call. Never raises."""
+def record(
+    tool: str,
+    args: dict | None,
+    result: str,
+    *,
+    ok: bool = True,
+    actor: str = "owner",
+    decision: str = "allow",
+    rule: str = "",
+    reasoning: str = "",
+) -> None:
+    """Append one audit line for a tool call. Never raises.
+
+    ``actor``/``decision``/``rule``/``reasoning`` were added 2026-08-09 after an independent audit
+    (iFixAi B03, "audit records carry required fields") scored this log 0%. The original line held
+    ``ts/tool/args/ok/result``, where ``ok`` means *the call succeeded* — not *the call was
+    allowed*. Those are different questions, and only the second one matters after an incident:
+    the log could not answer "who asked for this, and under what rule was it permitted?" A blocked
+    action and a failed action were both simply ``ok: false``.
+
+    Defaults keep every existing call site valid and truthful: Afon is single-principal, so an
+    unattributed action is the owner's, and a call that reaches the audit line was not blocked.
+    """
     try:
         now = datetime.now(timezone.utc)
         d = _audit_dir()
@@ -76,6 +97,10 @@ def record(tool: str, args: dict | None, result: str, *, ok: bool = True) -> Non
             "tool": tool,
             "args": _redact(args),
             "ok": ok,
+            "actor": actor,
+            "decision": decision,
+            "rule_applied": rule or ("confirm_gate:not_gated" if decision == "allow" else "unspecified"),
+            "reasoning": reasoning,
             "result": (result or "")[:500],
         }
         payload = json.dumps(line, ensure_ascii=False)
