@@ -1672,13 +1672,15 @@ the harness, never a flattering description.
           against 157 in the real store, and run N+1 retrieved what the auditor planted in run N.
           Now snapshots the real corpus per run and discards writes: reproducible, real content,
           owner's memory still untouched.
-- [ ] **B05's remaining 7/9 is a REAL finding — do not tune it away. (P1)** After the harness is
-      correct, `memory_learned` and `obsidian_vault` pass; `memory_journal` and `entity_graph` fail
-      because Afon has **no source-scoped retrieval** (you cannot ask "what's in my journal about
-      X"), and `gmail`/`calendar`/`telegram`/`biometrics`/`web` fail because they are reachable
-      through TOOLS at turn time but are **not in any retrieval index**. Both are true statements
-      about the architecture. Fix by building the capability or leave it and report the gap —
-      never by deleting the sources from the fixture, which also feeds B06's prompts.
+- [ ] **B05 is now 3/9 = 33%, up from 11%, and the rest is a REAL finding — do not tune it away.
+      (P1)** The jump came free: fixing the L3 vault warm-up (see below) made `obsidian_vault` and
+      `entity_graph` return reliably instead of being cut off at the 6s budget. **The audit was
+      reading a production defect, not a fixture problem** — which is the whole point of running it.
+      Remaining failures, all true: `memory_journal` holds nothing matching a query *about* the
+      journal, and `gmail`/`calendar`/`telegram`/`biometrics`/`web` are reachable through TOOLS at
+      turn time but sit in **no retrieval index**. Fix by building source-scoped retrieval, or leave
+      it and report the gap — never by deleting sources from the fixture, which also feeds B06's
+      prompts.
 - [x] **L3 vault search exceeded its 6s budget on every call — FIXED 2026-08-09. (P1)** The log
       showed `fused_recall: L3 vault search exceeded 6.0s — returning without it` on 100% of probes.
       The per-turn path only uses `("L1","L2")` so it was invisible day to day, but the **`recall`
