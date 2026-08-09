@@ -118,6 +118,48 @@ if [[ -f graphify-out/graph.json ]]; then
   echo "  info  $("$PYBIN" scripts/graph_fresh.py --quiet 2>/dev/null | head -1)"
 fi
 
+# ── 1e. Windows Scheduled Tasks still point at code that exists ───────────
+# The rename moves the CODE. It does not move Scheduled Tasks, which keep pointing at the old
+# interpreter and the old checkout — and a task whose executable is missing fails SILENTLY, so the
+# edge simply never starts and nothing says why.
+# Found 2026-08-09: WatariPcAgent and WatariEdgeRefresh were still registered against C:\Jarvis,
+# a directory that no longer exists, while AfonEdgeGuard — the watchdog whose entire job is to
+# notice a dead edge — was Disabled. No edge was running and nothing would have started one.
+# Windows-only and advisory: this is a laptop-edge invariant, and the brain host has no Task
+# Scheduler, so a missing powershell.exe is a skip rather than a failure.
+if command -v powershell.exe >/dev/null 2>&1; then
+  tasks=$(powershell.exe -NoProfile -Command '
+    $bad = @()
+    Get-ScheduledTask -ErrorAction SilentlyContinue |
+      Where-Object { $_.TaskName -like "*Afon*" -or $_.TaskName -like "*Watari*" } |
+      ForEach-Object {
+        $t = $_
+        foreach ($a in $t.Actions) {
+          $exe = $a.Execute
+          if ($exe -and $exe -notmatch "^[a-z]+\.exe$" -and -not (Test-Path $exe)) {
+            $bad += "$($t.TaskName)->missing:$exe"
+          }
+          # ...and the script a launcher runs. WatariEdgeRefresh executes powershell.exe (which
+          # exists) with -File pointing into the deleted C:\Jarvis, so checking only Execute
+          # declared it healthy. The path that matters is the one in the arguments.
+          if ($a.Arguments -match "-File\s+`"?([^`"]+\.(ps1|vbs|py))`"?") {
+            $f = $Matches[1]
+            if (-not (Test-Path $f)) { $bad += "$($t.TaskName)->missing:$f" }
+          }
+        }
+        if ($t.TaskName -like "*Guard*" -and $t.State -eq "Disabled") {
+          $bad += "$($t.TaskName)->DISABLED"
+        }
+      }
+    $bad -join " "' 2>/dev/null | tr -d '\r')
+  if [[ -n "${tasks// /}" ]]; then
+    fail "scheduled task(s) broken: ${tasks}" \
+         "a task whose exe is missing fails silently — the edge never starts; re-run scripts/install_edge_*.ps1"
+  else
+    pass "scheduled tasks point at code that exists"
+  fi
+fi
+
 # ── 2. state directories are where the code looks ─────────────────────────
 # The code derives these from Path.home(); a rename moves the code, never the data.
 STATE_DIR="$HOME_DIR/.afon"

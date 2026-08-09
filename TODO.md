@@ -1275,6 +1275,33 @@ means the nodes grouped together barely reference each other.
       GraphMemory) · `_db_path()` (coaching, presence, tasks, graph) · `_parse_hhmm()` (serve,
       Handler) · `_enabled()` (system, coding) · `_configured()` (phone, composio) · `_load()` (>=5).
 
+### Rename · the laptop autostart was dead the whole time (found 2026-08-09)
+- [ ] **Re-register the laptop Scheduled Tasks. [needs an elevated shell — owner action]** Found
+      while writing `SOP.md`, by listing the tasks instead of documenting what the install scripts
+      *would* create. Live state on 2026-08-09:
+      | task | state | points at |
+      |---|---|---|
+      | `WatariPcAgent` | Ready | `C:\Jarvis\.venv\Scripts\pythonw.exe -m jarvis.edge.pc_agent` |
+      | `WatariEdgeRefresh` | Ready | `C:\Jarvis\scripts\restart_edge.ps1` |
+      | `AfonEdgeGuard` | **Disabled** | `afon-guard-hidden.vbs` |
+      **`C:\Jarvis` does not exist**, and no python process was running. So: no edge, nothing to
+      start one at logon, and the 30-minute watchdog whose entire job is to notice a dead edge was
+      switched off. **A Scheduled Task whose executable is missing fails silently** — no error, no
+      log, the edge is simply never there. Every `Start-ScheduledTask Afon*` command in the docs
+      would have appeared to work while doing nothing.
+      **The general lesson:** the rename moved the *code*. It does not move Scheduled Tasks, systemd
+      units, or anything else that stores an absolute path — and each of those fails in its own
+      quiet way. Preflight already covered state dirs, face refs and the env prefix; it had no
+      concept of "something outside the repo points INTO the repo".
+      Fix: unregister the two `Watari*` tasks, re-run `install_edge_autostart.ps1`,
+      `install_edge_refresh.ps1`, `install_edge_guard.ps1`, confirm two `pythonw` processes.
+- [x] **Guard added 2026-08-09: `preflight.sh` §1e** asserts every `*Afon*`/`*Watari*` Scheduled Task
+      resolves to a path that exists and that the guard is not Disabled. Checks the `-File` argument
+      too, not only `Execute` — `WatariEdgeRefresh` runs `powershell.exe`, which exists, so an
+      Execute-only check declared it healthy while its script was missing. Verified in both
+      directions: red on the real breakage (all three named), and green on a machine with no such
+      tasks, so a fresh clone that never installed the edge is not punished.
+
 ### Rename · state was left behind on BOTH sides (found 2026-08-08)
 
 The rename moved code and paths but not the data those paths point at. Two instances, same

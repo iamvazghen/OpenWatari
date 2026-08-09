@@ -167,8 +167,9 @@ uv run python -m afon.brain.server
 The optional extras are: `edge` `cloud-voice` `local-voice` `brain` `channels` `browse` `identity`
 `dev` (see [pyproject.toml](pyproject.toml) for what each pulls).
 
-After the wizard, **[`TODO-NOW.md`](TODO-NOW.md)** is the step-by-step deployment checklist: every
-one-time login/credential, voice enrollment, and the full real-device test plan.
+After the wizard, **[`SOP.md`](SOP.md)** is the operating manual (setup, running, observability,
+subsystems, diagnosis) and **[`TESTING_GUIDE.md`](TESTING_GUIDE.md)** is the live end-to-end test
+pass: every one-time login/credential, voice enrollment, and the full real-device test plan.
 
 ---
 
@@ -230,8 +231,8 @@ One brain, reached many ways — all sharing memory, all over the tailnet:
 Every setup is modelled in `src/afon/edge/device_profile.py` (`SUPPORTED_DEVICES`: laptop, **mac**,
 iphone, **android**, airpods, mentra) and verified in `bench/test_phase6_multidevice.py`. Each has a
 step-by-step acceptance test (TTFW numbers, auto-route, barge-in, Siri/Assistant voice, music room,
-proactive voice, shared memory) in **[`TODO-NOW.md`](TODO-NOW.md) §3** and the docs site's *Devices*
-page.
+proactive voice, shared memory) in **[`TESTING_GUIDE.md`](TESTING_GUIDE.md) §14** and the docs
+site's *Devices* page.
 
 ---
 
@@ -325,7 +326,7 @@ reverts cleanly if anything regresses.
   when their backend is unreachable, so an offline run still passes.
 - **`uv run python bench/efficiency_report.py`** — measures the hot paths (memory recall, cache, brain
   TTFT, full-turn latency, prompt size) against efficiency targets. See
-  [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and the audit at [`docs/AUDIT.md`](docs/AUDIT.md).
+  [`SOP.md`](SOP.md) §9 for how to act on the numbers.
 
 **Publish gate:** this repo stays **private** until the suite is green *and* the efficiency report
 meets its targets. (Current state: suite green; one marginal item — streaming TTFT — tracked in the
@@ -353,9 +354,10 @@ configuration, memory, security, and licensing.
 
 ## Deployment
 
-1. Run `uv run afon-setup`, then work through **[`TODO-NOW.md`](TODO-NOW.md)** (Tailscale on every
-   device, voice enrollment, VPS ticker, Google/Notion/Telegram logins, GitHub repo, optional
-   Redis/embedder, proactive switch-on, and the real-device test plan).
+1. Run `uv run afon-setup`, then work through **[`SOP.md`](SOP.md)** (Tailscale on every device,
+   voice enrollment, VPS ticker, Google/Notion/Telegram logins, GitHub repo, optional
+   Redis/embedder, proactive switch-on) and **[`TESTING_GUIDE.md`](TESTING_GUIDE.md)** for the
+   real-device test plan.
 2. `uv run python bench/run_all_tests.py` → all green; `efficiency_report.py` → targets met.
 3. Run the **brain** as a service on an always-on host and the **edge** on your laptop (helper scripts
    in `scripts/`; a systemd unit pattern in `deploy/vps/`). The VPS ticker delivers recurring
@@ -391,8 +393,8 @@ website/           # the Next.js documentation site (deploy to Vercel)
 deploy/vps/        # the always-on recurring-reminder ticker
 scripts/           # edge service install/uninstall helpers
 bench/             # the test suite + benchmarks + one-time login helpers
-docs/              # ROADMAP, EXPANSION-PLAN, BENCHMARKS, AUDIT, multi-device, TESTING
-LICENSE · THIRD_PARTY_NOTICES.md · SECURITY.md · TODO-NOW.md · .env.example
+docs/              # MASTER-PLAN, NEXT-UPGRADE-DECISION, home-assistant
+LICENSE · THIRD_PARTY_NOTICES.md · SECURITY.md · SOP.md · TESTING_GUIDE.md · .env.example
 ```
 
 ---
