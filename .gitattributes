@@ -4,3 +4,7 @@
 # gate and the VPS run them. preflight.sh and deploy_vps.sh both had to be repaired for exactly
 # this reason on 2026-08-08; without this file the next checkout silently reintroduces it.
 *.sh text eol=lf
+# Same reasoning, and the reason the rule cannot just be "*.sh": git hooks carry no extension.
+# They are run by sh, so a CRLF checkout breaks them exactly the same way — and a broken
+# post-commit hook fails silently, which is how the graph froze on 2026-08-09.
+scripts/githooks/* text eol=lf

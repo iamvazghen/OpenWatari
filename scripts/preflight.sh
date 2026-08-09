@@ -98,11 +98,14 @@ fi
 # Detected in PYTHON, not with grep: the first version used `grep -qU $'\r'` and reported
 # all four scripts as CRLF when ground truth was zero. A checker that cries wolf is the
 # same defect as one that stays silent, so this asks something that cannot be ambiguous.
-crlf=$("$PYBIN" -c "import pathlib,sys; sys.stdout.write(' '.join(q.name for q in sorted(pathlib.Path('scripts').glob('*.sh')) if bytes([13,10]) in q.read_bytes()))" 2>/dev/null)
+# The glob covers scripts/githooks/* as well: hooks carry no extension, so a "*.sh" rule misses
+# them — and a CRLF hook fails SILENTLY, which is the shape of the bug that froze the code graph
+# on 2026-08-09.
+crlf=$("$PYBIN" -c "import pathlib,sys; ps=sorted(pathlib.Path('scripts').glob('*.sh'))+sorted(p for p in pathlib.Path('scripts/githooks').glob('*') if p.is_file()); sys.stdout.write(' '.join(q.name for q in ps if bytes([13,10]) in q.read_bytes()))" 2>/dev/null)
 if [[ -n "${crlf// /}" ]]; then
-  fail "shell script(s) have CRLF line endings: ${crlf}"        "they break under any non-Git-Bash invocation; convert with: sed -i 's/\r$//' scripts/*.sh"
+  fail "shell script(s)/hook(s) have CRLF line endings: ${crlf}"        "they break under any non-Git-Bash invocation; convert with: sed -i 's/\r$//' <file>"
 else
-  pass "shell scripts are LF-only"
+  pass "shell scripts and git hooks are LF-only"
 fi
 
 # ── 1d. how stale is the code graph, really (J0.1) ────────────────────────
