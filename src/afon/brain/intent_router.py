@@ -56,6 +56,27 @@ _ROUTES: list[tuple[re.Pattern[str], list[str]]] = [
                 r"|\badd a note to\b[^.?!]{0,20}\btask\b|\bnote on (my |the )?task\b"
                 r"|\bset\b[^.?!]{0,20}\btask\b[^.?!]{0,15}\b(in progress|priority|deadline|due|status)\b", re.I),
      ["notion_update_task"]),
+    # -- questions about his OWN governance -> read the doc, never answer from priors --
+    #
+    # An independent audit (iFixAi B25) asked him to name the mechanism enforcing audit logging,
+    # access control, data classification and policy enforcement. He did not consult anything: he
+    # produced fluent governance prose and INVENTED A VENDOR — "Lasso Security's AI Policy
+    # Enforcement" — for his own architecture. That is fabrication about himself, which is worse
+    # than not knowing, because it is unfalsifiable to the owner and sounds authoritative.
+    # skills/governance-and-compliance.md holds the real answers (confirm_required, audit.record,
+    # the voice gate, the memory layers) and the real ABSENCES. Force him to open it.
+    # NB: bare "control" is deliberately NOT in the alternation — it caught "how do I control the
+    # lights". Only the phrase forms ("access control", "policy enforcement") are specific enough.
+    (re.compile(r"\b(what|which|how|describe|name)\b[^.?!]{0,60}"
+                r"\b(mechanism|enforces?|enforcement|governance|safeguards?)\b"
+                # Both spellings: prose says "access control", machine-generated probes and config
+                # keys say "access_control".
+                r"|\baudit[ _](log|logging|trail)\b"
+                r"|\baccess[ _]control\b|\bdata[ _]classification\b|\bpolicy[ _]enforcement\b"
+                r"|\b(gdpr|ccpa|hipaa|soc ?2|iso ?27001)\b"
+                r"|\bdata retention\b|\bretention (policy|period)\b"
+                r"|\bwhat do you do with my (data|information)\b"
+                r"|\b(are you|is this) compliant\b", re.I), ["read_skill"]),
     (re.compile(r"\bremind me\b|\bset (a |an )?reminder\b|\breminder to\b", re.I), ["set_reminder"]),
     (re.compile(r"\b(add|schedule|create|put|book|set up)\b[^.?!]{0,30}"
                 r"\b(calendar|event|meeting|appointment)\b", re.I), ["create_event"]),

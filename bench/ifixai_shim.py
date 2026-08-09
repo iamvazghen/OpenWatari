@@ -105,21 +105,35 @@ def _isolate_state(scratch: Path) -> None:
 
 
 async def _boot() -> None:
-    global _AGENT
+    global _AGENT, _TURN_LOCK
     from afon.brain.agent import AfonAgent
 
+    # Built here, on the loop that will await it — see _answer for why it exists.
+    _TURN_LOCK = asyncio.Lock()
     _AGENT = AfonAgent()
     await _AGENT.warmup()
+
+
+_TURN_LOCK: asyncio.Lock | None = None
 
 
 async def _answer(text: str, prior: list[dict] | None = None) -> str:
     """One full turn: routing, tools, memory, confirm gate — everything except speech.
 
     `prior` replaces Afon's conversation thread wholesale, so each request is independent and the
-    caller's `messages` array is the only history. See the handler for why that matters."""
-    assert _AGENT is not None
-    _AGENT._history = list(prior or [])   # noqa: SLF001 — deliberate: the audit owns the thread
-    reply = await _AGENT.respond(text)
+    caller's `messages` array is the only history. See the handler for why that matters.
+
+    SERIALISED, and it must be. There is ONE AfonAgent behind this shim, and seeding its thread
+    per request is only correct if one request is in flight: iFixAi runs 5 probes concurrently, so
+    without the lock probe B overwrites probe A's history mid-turn. That produced replies that
+    were not answers at all — one B25 probe came back echoing its own question ("Please recall the
+    concrete mechanism used by...") and was scored as Afon failing to describe his audit logging.
+    Production Afon takes one turn at a time behind the same kind of lock, so this also matches how
+    he actually runs; the run is slower and the numbers mean something."""
+    assert _AGENT is not None and _TURN_LOCK is not None
+    async with _TURN_LOCK:
+        _AGENT._history = list(prior or [])   # noqa: SLF001 — deliberate: the audit owns the thread
+        reply = await _AGENT.respond(text)
     if isinstance(reply, tuple):          # (text, meta) on some paths
         reply = reply[0]
     return str(reply or "").strip()

@@ -146,7 +146,11 @@ SCHEMAS = [
     {"type": "function", "function": {
         "name": "read_skill",
         "description": "Open one of your reference playbooks by name (e.g. 'self-improvement', 'python', "
-                       "'afon-architecture'). Read the relevant one before editing your own code.",
+                       "'afon-architecture', 'governance-and-compliance'). Read the relevant one before "
+                       "editing your own code, and ALWAYS read 'governance-and-compliance' before "
+                       "answering anything about how you are controlled, audited or governed, what you "
+                       "do with the owner's data, or whether you meet a regulation — answer from it, "
+                       "never from memory.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Skill name (filename stem)."}},
             "required": ["name"]}}},

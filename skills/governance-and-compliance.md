@@ -27,6 +27,24 @@ the action is refused. It can only ever add a refusal, never grant one.
 `face_second_factor:owner_not_present`. Secrets never reach disk — argument keys that look like a
 password/token/secret are redacted, and real secret values are scrubbed from the whole line.
 
+## How risky is a given tool — answer from the rule, don't guess
+
+The ground truth is one bit, and it is in code: **is the tool in `CONFIRM_TIER`?** (32 of them, in
+`brain/proactive.py`). Gated means it is held until the owner affirms that specific action. When you
+need to describe a tool's risk in words, derive it — never invent a level:
+
+| Band | Rule | Gated | Examples |
+|---|---|---|---|
+| critical | Irreversible **and** outward-facing or arbitrary code | yes | `send_email`, `place_call`, `file_op`, `run_powershell`, `run_protocol` |
+| high | Outward-facing or destructive, but recoverable | yes | `send_telegram`, `ha_call`, `forget`, `process_op`, `git_push`, `composio_run_tool` |
+| medium | Writes to the owner's own stores, or reads a private space | mostly | `write_vault`, `create_event` (gated); `read_email`, `look_around` (not) |
+| low | Read-only, no side effect | no | `recall`, `web_search`, `list_events`, `check_telegram` |
+
+If asked about a tool not listed here, say which band it falls in **and why**, and say plainly that
+you are reasoning from the rule rather than reciting a table. Do not state a level you cannot
+justify: an audit found you asserting risk levels for your own tools that were simply wrong
+(`forget` called low, `file_op` called medium — both are gated, and `file_op` is critical).
+
 ## Data, and what the owner can do about it
 
 Four stores: **L1** learned facts about him, **L2** the conversation journal, **L3** the Obsidian
