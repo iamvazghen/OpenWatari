@@ -25,6 +25,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = ROOT / "graphify-out" / "graph.json"
+# The post-commit hook writes this on EVERY run. It is the better reference point: when an update
+# finds no topology change (a comment-only edit, a shell-script edit) graphify deliberately leaves
+# graph.json untouched, so its mtime would report STALE forever with no rebuild able to clear it —
+# a check that cannot go green, which people learn to ignore exactly like a false green.
+UPDATE_LOG = ROOT / "graphify-out" / ".last-update.log"
 
 
 def _tracked_sources() -> list[Path]:
@@ -56,6 +61,8 @@ def main() -> int:
         return 1
 
     graph_mtime = GRAPH.stat().st_mtime
+    if UPDATE_LOG.exists():
+        graph_mtime = max(graph_mtime, UPDATE_LOG.stat().st_mtime)
     newer = [p for p in _tracked_sources() if p.stat().st_mtime > graph_mtime]
 
     if not newer:
