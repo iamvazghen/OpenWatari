@@ -99,7 +99,7 @@ def main() -> None:
         real_path.write_text(saved, encoding="utf-8")   # restore the shipped estimates
 
     print("\n[4] config TTFW target stays consistent with the reference baseline")
-    from jarvis.config import settings
+    from afon.config import settings
     # The aspirational target (ttfw_target_ms) must be <= the laptop acceptance ceiling — the
     # baseline is the 'must not exceed', the target is the 'aim for'. If someone loosens the target
     # past the acceptance ceiling, the two have diverged and this trips.

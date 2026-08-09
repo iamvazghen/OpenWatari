@@ -1,4 +1,4 @@
-"""One-time Google OAuth — produces JARVIS_GOOGLE_REFRESH_TOKEN for Gmail + Calendar.
+"""One-time Google OAuth — produces AFON_GOOGLE_REFRESH_TOKEN for Gmail + Calendar.
 
 Prereqs (do these once):
   1. Go to https://console.cloud.google.com/ → create (or pick) a project.
@@ -6,14 +6,14 @@ Prereqs (do these once):
   3. APIs & Services → OAuth consent screen → External → add yourself as a Test user.
   4. APIs & Services → Credentials → Create Credentials → OAuth client ID → **Web application**.
      Add this EXACT redirect URI:  http://127.0.0.1:8585/oauth2callback
-     (or whatever you set JARVIS_GOOGLE_OAUTH_REDIRECT to).
+     (or whatever you set AFON_GOOGLE_OAUTH_REDIRECT to).
   5. Put the client id + secret in .env:
-        JARVIS_GOOGLE_CLIENT_ID=...
-        JARVIS_GOOGLE_CLIENT_SECRET=...
+        AFON_GOOGLE_CLIENT_ID=...
+        AFON_GOOGLE_CLIENT_SECRET=...
   6. Run:  uv run python bench/google_login.py
 
 It opens your browser, you grant Gmail + Calendar access, and it prints the refresh token. Paste
-that into .env as JARVIS_GOOGLE_REFRESH_TOKEN — then Jarvis can read/send mail and your calendar.
+that into .env as AFON_GOOGLE_REFRESH_TOKEN — then Afon can read/send mail and your calendar.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import httpx
 
 sys.path.insert(0, "src")
-from jarvis.brain.google import SCOPES, TOKEN_URL  # noqa: E402
-from jarvis.config import settings  # noqa: E402
+from afon.brain.google import SCOPES, TOKEN_URL  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _code: dict[str, str] = {}
@@ -52,7 +52,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     if not (settings.google_client_id and settings.google_client_secret):
-        print("Set JARVIS_GOOGLE_CLIENT_ID and JARVIS_GOOGLE_CLIENT_SECRET in .env first.")
+        print("Set AFON_GOOGLE_CLIENT_ID and AFON_GOOGLE_CLIENT_SECRET in .env first.")
         sys.exit(1)
 
     redirect = settings.google_oauth_redirect
@@ -103,7 +103,7 @@ def main() -> None:
         sys.exit(1)
     print("\n" + "=" * 60)
     print("SUCCESS — paste this line into your .env:\n")
-    print(f"JARVIS_GOOGLE_REFRESH_TOKEN={token}")
+    print(f"AFON_GOOGLE_REFRESH_TOKEN={token}")
     print("=" * 60)
 
 

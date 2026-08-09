@@ -18,8 +18,8 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from jarvis.brain.agent import USER_TZ, JarvisAgent, _is_affirmation
-from jarvis.config import settings
+from afon.brain.agent import USER_TZ, AfonAgent, _is_affirmation
+from afon.config import settings
 
 PASS = 0
 FAIL = 0
@@ -44,7 +44,7 @@ def test_affirmation() -> None:
 
 
 def test_begin_turn_supersede() -> None:
-    agent = JarvisAgent()
+    agent = AfonAgent()
     agent._pending_confirm = {"name": "send_email", "args": {}}
     agent._last_turn_at = datetime.now(USER_TZ)
     agent._begin_turn("yes please")
@@ -57,7 +57,7 @@ def test_begin_turn_supersede() -> None:
 
 
 def test_smart_reset() -> None:
-    agent = JarvisAgent()
+    agent = AfonAgent()
     agent._idle_reset_min = 180
     agent._history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
     agent._last_turn_at = datetime.now(USER_TZ) - timedelta(minutes=200)
@@ -75,9 +75,9 @@ def test_smart_reset() -> None:
 
 
 def test_proactive_durable() -> None:
-    agent = JarvisAgent()
+    agent = AfonAgent()
     captured: list[str] = []
-    from jarvis.brain import memory as memmod
+    from afon.brain import memory as memmod
 
     orig = memmod.STORE.journal_append
     memmod.STORE.journal_append = lambda summary, when=None: captured.append(summary)  # type: ignore
@@ -91,8 +91,13 @@ def test_proactive_durable() -> None:
           any("[proactive]" in c and "standup" in c for c in captured))
 
 
+async def _none() -> None:
+    """`_face_second_factor` returns a refusal string or None; None = 'no reason to refuse'."""
+    return None
+
+
 async def test_confirm_gate() -> None:
-    agent = JarvisAgent()
+    agent = AfonAgent()
     sent: list[dict] = []
 
     async def spy(args: dict) -> str:
@@ -100,6 +105,15 @@ async def test_confirm_gate() -> None:
         return "sent"
 
     agent._registry["send_email"] = spy
+
+    # Stub the FACE second factor. It fires only for confirm-gated actions and takes a real camera
+    # burst, so this "hermetic" test was quietly dependent on whether a laptop webcam could see the
+    # owner at that moment: it passed on one full-suite run and failed the next with
+    # "REFUSED send_email — camera saw 0 face(s)", 14s apart, with no code change between them.
+    # An intermittent test is worse than a missing one, because a real regression here reads as
+    # "the camera again". What this function is testing is the GATE, not the camera; the camera
+    # path has its own coverage in test_camera.py.
+    agent._face_second_factor = lambda name, args: _none()
     calls = [{"id": "1", "name": "send_email", "arguments": '{"to":"anna","body":"late"}'}]
 
     agent._confirm_granted = False
@@ -122,7 +136,7 @@ async def test_confirm_gate() -> None:
 
 
 async def test_vault_write() -> None:
-    from jarvis.brain.tools.vault import write_vault
+    from afon.brain.tools.vault import write_vault
 
     settings.vault_writable = False
     r = await write_vault({"content": "hello"})
@@ -134,11 +148,11 @@ async def test_vault_write() -> None:
         settings.vault_writable = True
         try:
             await write_vault({"note": "Decisions", "content": "Chose MIT license.", "mode": "create"})
-            f = Path(d) / "Watari" / "Decisions.md"
+            f = Path(d) / "Afon" / "Decisions.md"
             check("vault write creates a note",
                   f.is_file() and "MIT" in f.read_text(encoding="utf-8"))
-            await write_vault({"note": "Decisions", "content": "Added OpenWatari rename."})
-            check("vault write appends to an existing note", "OpenWatari" in f.read_text(encoding="utf-8"))
+            await write_vault({"note": "Decisions", "content": "Added OpenAfon rename."})
+            check("vault write appends to an existing note", "OpenAfon" in f.read_text(encoding="utf-8"))
             await write_vault({"note": "../../escape", "content": "x"})
             check("vault write can't traverse outside the vault",
                   not (Path(d).parent / "escape.md").exists())
@@ -147,7 +161,7 @@ async def test_vault_write() -> None:
 
 
 def test_ack_for() -> None:
-    from jarvis.brain.agent import _ack_for
+    from afon.brain.agent import _ack_for
 
     check("ack is contextual (uses the query)", "BTC" in _ack_for("web_search", {"query": "BTC price"}))
     check("ack for delegate mentions the team lead", "team lead" in _ack_for("delegate_to_fleet", {"task": "x"}))
@@ -158,9 +172,9 @@ def test_ack_for() -> None:
 def test_immediate_ack() -> None:
     # G1: the immediate ack now ROTATES a phrase pool (no fixed line), and stays silent when a
     # specific per-tool ack is imminent (a zero-arg read). So assert POOL membership, not one phrase.
-    from jarvis.brain.agent import _WORK_ACKS, _CHAT_ACKS
+    from afon.brain.agent import _WORK_ACKS, _CHAT_ACKS
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     notes: list[str] = []
     agent._immediate_ack("set a reminder for 5pm", notes.append)   # arg-bearing command -> WORK pool
     check("immediate ack fires on a command", len(notes) == 1 and notes[0] in _WORK_ACKS)
@@ -171,7 +185,7 @@ def test_immediate_ack() -> None:
 
 
 async def test_progress_watchdog() -> None:
-    agent = JarvisAgent()
+    agent = AfonAgent()
     old_warn, old_every = settings.tool_slow_warn_seconds, settings.tool_long_update_seconds
     settings.tool_slow_warn_seconds = 0.08
     settings.tool_long_update_seconds = 0.08
@@ -210,13 +224,13 @@ def test_session_persistence() -> None:
     tmp = Path(tempfile.mkdtemp()) / "sess.json"
     settings.session_persist_path = str(tmp)
     try:
-        a = JarvisAgent()
+        a = AfonAgent()
         a._history = [{"role": "user", "content": "remember 42"},
                       {"role": "assistant", "content": "noted, sir"}]
         a._trim()  # persists
         check("snapshot file written on turn", tmp.exists())
 
-        b = JarvisAgent()  # simulates a brain restart
+        b = AfonAgent()  # simulates a brain restart
         check("new agent resumes the thread after restart",
               b._history == a._history and len(b._history) == 2)
 
@@ -225,13 +239,13 @@ def test_session_persistence() -> None:
         import time as _t
         tmp.write_text(_j.dumps({"saved_at": _t.time() - 4 * 3600,
                                  "history": [{"role": "user", "content": "stale"}]}), encoding="utf-8")
-        c = JarvisAgent()
+        c = AfonAgent()
         c._idle_reset_min = 180
         c._load_session()
         check("expired snapshot is dropped on load", c._history == [])
 
         # Manual reset clears the snapshot too.
-        d = JarvisAgent()
+        d = AfonAgent()
         d._history = [{"role": "user", "content": "x"}]
         d._trim()
         d.reset_session("manual")

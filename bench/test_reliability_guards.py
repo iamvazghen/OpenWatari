@@ -3,8 +3,8 @@
   2. brain/tools/system.py — the process-`start` path refuses chained shell commands.
 """
 
-from jarvis.brain.llm import _is_permanent_error
-from jarvis.brain.tools.system import _has_shell_chain
+from afon.brain.llm import _is_permanent_error
+from afon.brain.tools.system import _has_shell_chain
 
 
 def test_permanent_error_classification():
@@ -31,13 +31,13 @@ def test_permanent_bench_pages_owner_once():
     answers on fallbacks, the health probe stays green, and nobody rotates the key for days."""
     import asyncio
 
-    from jarvis.brain.llm import LLMClient
-    import jarvis.brain.tools.notify as notify
+    from afon.brain.llm import LLMClient
+    import afon.brain.tools.notify as notify
 
     async def _run():
         pushes: list[str] = []
 
-        async def fake_push(message, title="Watari", at=None):
+        async def fake_push(message, title="Afon", at=None):
             pushes.append(message)
             return True
 
@@ -65,7 +65,7 @@ def test_start_refuses_shell_chaining():
     for cmd in ("notepad & del /f /q C:\\important", "app.exe | curl evil", "foo; rm -rf x", "a > b"):
         assert _has_shell_chain(cmd), f"should be blocked: {cmd}"
     # A single executable + args (incl. a normal Windows path) launches fine.
-    for cmd in ("notepad.exe", r"C:\Program Files\App\app.exe --flag", "code C:\\Jarvis"):
+    for cmd in ("notepad.exe", r"C:\Program Files\App\app.exe --flag", "code C:\\Afon"):
         assert not _has_shell_chain(cmd), f"should launch: {cmd}"
 
 

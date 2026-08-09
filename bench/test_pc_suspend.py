@@ -12,9 +12,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import os
-os.environ["JARVIS_SYSTEM_TOOLS_ENABLED"] = "true"
+os.environ["AFON_SYSTEM_TOOLS_ENABLED"] = "true"
 
-from jarvis.brain.tools.system import SCHEMAS, _process_op_local  # noqa: E402
+from afon.brain.tools.system import SCHEMAS, _process_op_local  # noqa: E402
 
 _ok = _fail = 0
 

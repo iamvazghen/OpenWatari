@@ -127,10 +127,10 @@ def _record_baseline(device: str, p50: float, p95: float, vaqi: float) -> None:
 
 
 async def main(device: str = "laptop", record: bool = False) -> None:
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
     print("Live TTFW / VAQI battery — needs the brain LLM reachable (freellmapi tunnel / Groq key).\n")
-    agent = JarvisAgent()
+    agent = AfonAgent()
     try:
         await agent.warmup()
     except Exception:  # noqa: BLE001

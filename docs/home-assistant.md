@@ -1,6 +1,6 @@
 # Home Assistant control (Phase 11 / TODO 4.10)
 
-Watari controls a **local** Home Assistant instance over its REST API — the privacy-respecting smart-
+Afon controls a **local** Home Assistant instance over its REST API — the privacy-respecting smart-
 home choice (no cloud vendor in the loop). Two tools:
 
 | Tool | Purpose | Confirm? |
@@ -24,8 +24,8 @@ prompt suggestion a weak model could skip. Verified in `bench/test_phase11_integ
 1. In Home Assistant: **Profile → Long-Lived Access Tokens → Create Token**.
 2. Put these in the brain's `.env` (never commit them):
    ```
-   JARVIS_HA_URL=http://homeassistant.local:8123
-   JARVIS_HA_TOKEN=<long-lived token>
+   AFON_HA_URL=http://homeassistant.local:8123
+   AFON_HA_TOKEN=<long-lived token>
    ```
    Use the LAN URL — the brain and HA should share a trusted network (or the tailnet).
 

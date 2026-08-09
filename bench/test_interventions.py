@@ -1,7 +1,7 @@
 """Phase 4 companion — conflict-only interventions (pause media on a real, imminent commitment).
 
 Proves the single, narrow interrupt the owner asked for: WHEN he's watching/listening to something
-AND a real timed calendar event is about to start, Watari pauses the media and flags the concrete
+AND a real timed calendar event is about to start, Afon pauses the media and flags the concrete
 conflict — and NOTHING otherwise. It rides the same engine gates as every nudge (kind 'conflict'),
 but its urgency clears the context-override so it may interrupt media (which normally holds a nudge),
 while staying below the quiet-hours override. The media-pause side-effect travels on the Signal's
@@ -39,7 +39,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 async def test_media_detection() -> None:
     print("[1] media detection: browser video + player app yes; work/idle no")
-    from jarvis.brain import interventions as iv
+    from afon.brain import interventions as iv
 
     check("YouTube in a browser reads as media", iv._looks_like_media("chrome", "Lofi beats - YouTube", "browsing"))
     check("Netflix in a browser reads as media", iv._looks_like_media("msedge", "Stranger Things - Netflix", "browsing"))
@@ -59,9 +59,9 @@ async def test_media_detection() -> None:
 
 async def test_context_and_signal() -> None:
     print("\n[2] _media_context + conflict_signals (armed / off / gated)")
-    from jarvis.brain import interventions as iv
-    from jarvis.brain.presence import PRESENCE
-    from jarvis.config import settings
+    from afon.brain import interventions as iv
+    from afon.brain.presence import PRESENCE
+    from afon.config import settings
 
     # A fresh, active media sample -> _media_context sees it.
     PRESENCE.set_enabled(True)
@@ -105,7 +105,7 @@ def _fake_events(items):
 
 async def test_engine_interrupts_only_for_conflict() -> None:
     print("\n[3] the engine interrupts a BUSY owner for a conflict, holds a routine, runs the action")
-    from jarvis.brain.proactive import ProactiveEngine, Signal
+    from afon.brain.proactive import ProactiveEngine, Signal
 
     tz = ZoneInfo("Europe/Amsterdam")
     noon = datetime(2026, 7, 14, 12, 0, tzinfo=tz)  # outside quiet hours
@@ -159,14 +159,14 @@ async def test_engine_interrupts_only_for_conflict() -> None:
 
 async def test_media_pause_tool_wired() -> None:
     print("\n[4] media_pause is wired as a PC op + an LLM tool")
-    from jarvis.brain.tools import system
+    from afon.brain.tools import system
 
     check("media_pause in LOCAL_HANDLERS (runs on the laptop)", "media_pause" in system.LOCAL_HANDLERS)
     check("media_pause in HANDLERS (callable by the agent)", "media_pause" in system.HANDLERS)
     check("media_pause has a tool schema", any(s["function"]["name"] == "media_pause" for s in system.SCHEMAS))
 
-    from jarvis.brain.interventions import conflict_signals
-    from jarvis.brain.proactive import default_signal_sources
+    from afon.brain.interventions import conflict_signals
+    from afon.brain.proactive import default_signal_sources
     names = {getattr(s, "__name__", "") for s in default_signal_sources()}
     check("conflict_signals registered as a default source", "conflict_signals" in names, str(names))
 

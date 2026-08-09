@@ -6,8 +6,8 @@ interval. After ``--fails`` consecutive misses it fires ONE Telegram alert; when
 back it fires ONE recovery notice. It never spams — exactly one message per state transition.
 
 Config comes from the same ``.env`` the brain uses (so a fork configures it once):
-  * ``JARVIS_BRAIN_HOST`` / ``JARVIS_CLIENT_HTTP_PORT``  → the healthz URL (or pass ``--url``)
-  * ``JARVIS_TELEGRAM_BRIDGE_BOT_TOKEN`` (or ``JARVIS_TELEGRAM_BOT_TOKEN``) + ``JARVIS_TELEGRAM_DEFAULT_CHAT``
+  * ``AFON_BRAIN_HOST`` / ``AFON_CLIENT_HTTP_PORT``  → the healthz URL (or pass ``--url``)
+  * ``AFON_TELEGRAM_BRIDGE_BOT_TOKEN`` (or ``AFON_TELEGRAM_BOT_TOKEN``) + ``AFON_TELEGRAM_DEFAULT_CHAT``
 
 Run it under a laptop scheduler / a tiny systemd service on a second box:
     uv run python deploy/uptime_watch.py --url http://<vps>:8766/healthz --interval 120 --fails 2
@@ -68,7 +68,7 @@ def _alert(text: str) -> bool:
     """Send a Telegram message via the bridge/bot token. Returns True on success."""
     import httpx
 
-    from jarvis.config import settings
+    from afon.config import settings
 
     token = settings.telegram_bridge_bot_token or settings.telegram_bot_token
     chat = settings.telegram_default_chat
@@ -88,7 +88,7 @@ def _alert(text: str) -> bool:
 
 
 def _restart(cmd: str, timeout: float = 90.0) -> tuple[bool, str]:
-    """Run the remote-restart command (usually an ``ssh … systemctl --user restart jarvis-brain``).
+    """Run the remote-restart command (usually an ``ssh … systemctl --user restart afon-brain``).
 
     Returns (ok, short_output). Any failure is captured, never raised — a dead-man's switch that
     crashes is no switch at all.
@@ -113,7 +113,7 @@ def handle_edge(edge: str | None, url: str, fails: int, *, restart_cmd: str | No
     injected (``alert_fn`` / ``restart_fn``) so the whole reaction is unit-testable with no network.
     """
     if edge == "down":
-        msg = (f"🔴 Watari brain is DOWN — {url} failed {fails}x. The 24/7 assistant is unreachable.")
+        msg = (f"🔴 Afon brain is DOWN — {url} failed {fails}x. The 24/7 assistant is unreachable.")
         if restart_cmd:
             ok, out = restart_fn(restart_cmd)
             msg += f"\nRemote restart attempted: {'✓ ran' if ok else '✗ failed'}."
@@ -122,21 +122,21 @@ def handle_edge(edge: str | None, url: str, fails: int, *, restart_cmd: str | No
         alert_fn(msg)
         return msg
     if edge == "up":
-        msg = "🟢 Watari brain is back UP — healthz responding again."
+        msg = "🟢 Afon brain is back UP — healthz responding again."
         alert_fn(msg)
         return msg
     return None
 
 
 def _default_url() -> str:
-    from jarvis.config import settings
+    from afon.config import settings
 
     host = settings.brain_host if settings.brain_host not in ("0.0.0.0", "") else "127.0.0.1"
     return f"http://{host}:{settings.client_http_port}/healthz"
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Off-VPS uptime watcher for the Watari brain")
+    ap = argparse.ArgumentParser(description="Off-VPS uptime watcher for the Afon brain")
     ap.add_argument("--url", default=None, help="healthz URL (default from .env brain host/port)")
     ap.add_argument("--interval", type=float, default=120, help="seconds between probes")
     ap.add_argument("--fails", type=int, default=2, help="consecutive misses before alerting")
@@ -144,7 +144,7 @@ def main() -> None:
     ap.add_argument("--once", action="store_true", help="probe once and exit (for cron)")
     ap.add_argument("--restart-cmd", default=None,
                     help="shell command run ONCE when the brain goes down (dead-man's switch), e.g. "
-                         "\"ssh openclaw@<vps> 'systemctl --user restart jarvis-brain'\"")
+                         "\"ssh openclaw@<vps> 'systemctl --user restart afon-brain'\"")
     args = ap.parse_args()
 
     url = args.url or _default_url()

@@ -28,7 +28,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.cache import Cache, _InProcessTTL
+    from afon.brain.cache import Cache, _InProcessTTL
 
     print("[1] cached() returns the factory value, then serves it without re-running")
     cache = Cache(redis_url=None)

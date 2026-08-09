@@ -1,6 +1,6 @@
 """LIVE end-to-end test of the brain's voice I/O — the engines behind the phone voice path.
 
-Synthesizes a known phrase in Watari's voice (ElevenLabs), then transcribes that audio back
+Synthesizes a known phrase in Afon's voice (ElevenLabs), then transcribes that audio back
 (Deepgram). If the words survive the TTS->STT round-trip, both engines work for the Telegram /
 iPhone voice flow. Needs network + the real keys. Run:
 
@@ -18,9 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 async def main() -> None:
-    from jarvis.brain.voice_io import synthesize, transcribe_audio
+    from afon.brain.voice_io import synthesize, transcribe_audio
 
-    phrase = "Watari hears you clearly, sir."
+    phrase = "Afon hears you clearly, sir."
     print(f"TTS: synthesizing {phrase!r} …")
     t0 = time.perf_counter()
     audio = await synthesize(phrase)
@@ -33,7 +33,7 @@ async def main() -> None:
     text = await transcribe_audio(audio or b"", content_type="audio/mpeg")
     t_stt = time.perf_counter() - t0
     low = text.lower()
-    ok_stt = any(w in low for w in ("watari", "hears", "clearly"))
+    ok_stt = any(w in low for w in ("afon", "hears", "clearly"))
     print(f"  STT: {'OK' if ok_stt else 'FAIL'} — {text!r} in {t_stt:.2f}s")
 
     print(f"\n=== voice round-trip {'PASS' if (ok_tts and ok_stt) else 'FAIL'} "

@@ -1,6 +1,6 @@
-"""Live action demo — JARVIS performs every integration himself (not the script).
+"""Live action demo — AFON performs every integration himself (not the script).
 
-This drives the real `JarvisAgent`: each step is a natural-language command, and Jarvis's own
+This drives the real `AfonAgent`: each step is a natural-language command, and Afon's own
 brain decides which tool to call and runs it. Watch his spoken replies + the tool log.
 
     uv run python bench/demo_live_actions.py
@@ -20,20 +20,20 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.agent import JarvisAgent  # noqa: E402
+from afon.brain.agent import AfonAgent  # noqa: E402
 
 
 async def main() -> None:
     # A few extra tool iterations so multi-step turns (search -> open browser -> read) fit.
-    jarvis = JarvisAgent(max_tool_iters=6)
-    await jarvis.warmup()
+    afon = AfonAgent(max_tool_iters=6)
+    await afon.warmup()
 
     async def say(label: str, command: str, settle: float = 0.0) -> None:
         print("\n" + "=" * 78)
         print(f"  Vazghen: {command}")
         print("-" * 78)
-        reply = await jarvis.respond(command, on_progress=lambda n: print(f"   …{n}"))
-        print(f"  Jarvis : {reply}")
+        reply = await afon.respond(command, on_progress=lambda n: print(f"   …{n}"))
+        print(f"  Afon : {reply}")
         if settle:
             print(f"   (waiting {settle:.0f}s …)")
             await asyncio.sleep(settle)
@@ -47,7 +47,7 @@ async def main() -> None:
     # 2) Telegram Saved Messages text.
     await say("tg-text",
               "Send a message to my Telegram Saved Messages saying: "
-              "'Jarvis integration test — all systems go.' Send it now, no confirmation needed.")
+              "'Afon integration test — all systems go.' Send it now, no confirmation needed.")
 
     # 3) Telegram panda GIF to Saved Messages.
     await say("tg-gif",

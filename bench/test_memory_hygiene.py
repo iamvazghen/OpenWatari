@@ -31,8 +31,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.maintenance import cap_learned, compact_learned, rotate_journals
-    from jarvis.brain.memory import MemoryStore
+    from afon.brain.maintenance import cap_learned, compact_learned, rotate_journals
+    from afon.brain.memory import MemoryStore
 
     with tempfile.TemporaryDirectory() as d:
         store = MemoryStore(base_dir=d)

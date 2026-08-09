@@ -4,7 +4,7 @@ Repro of the 2026-07-24 -9999 outage: with AirPods gone, `prefer_private_output`
 'Headphones 1 (Realtek HD Audio 2nd output with SST)' — an always-listed WDM-KS jack that fails to
 open — instead of falling through to the OS default speakers.
 """
-from jarvis.edge.audio_devices import AudioDevice, prefer_private_output, find_headset_input
+from afon.edge.audio_devices import AudioDevice, prefer_private_output, find_headset_input
 
 _ok = _fail = 0
 

@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Cleanly restart Watari's laptop edge (pc_agent + voice assistant), force-killing stale instances.
+    Cleanly restart Afon's laptop edge (pc_agent + voice assistant), force-killing stale instances.
 
 .DESCRIPTION
     The edge runs as two Scheduled Tasks:
-        WatariPcAgent  -> pythonw -m jarvis.edge.pc_agent   (RunLevel Highest / ELEVATED)
-        JarvisEdge     -> pythonw -m jarvis.edge.assistant  (RunLevel Limited)
+        AfonPcAgent  -> pythonw -m afon.edge.pc_agent   (RunLevel Highest / ELEVATED)
+        AfonEdge     -> pythonw -m afon.edge.assistant  (RunLevel Limited)
 
     IMPORTANT lesson (why this script self-elevates): `Stop-ScheduledTask` does NOT reliably terminate
     the pc_agent PROCESS — it's ELEVATED and, once running since logon, a non-elevated stop just bounces
@@ -19,7 +19,7 @@
     (Approve the one UAC prompt.)
 #>
 [CmdletBinding()]
-param([string[]]$Tasks = @('WatariPcAgent', 'JarvisEdge'))
+param([string[]]$Tasks = @('AfonPcAgent', 'AfonEdge'))
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -34,11 +34,11 @@ if (-not $isAdmin) {
     return
 }
 
-Write-Host "== Watari edge restart (elevated) ==" -ForegroundColor Cyan
+Write-Host "== Afon edge restart (elevated) ==" -ForegroundColor Cyan
 
 # Any deliberate restart (phoenix, the daily refresh, a manual run) cancels a prior "goodnight":
-# clear the marker so WatariEdgeGuard resumes guarding the process from here on.
-Remove-Item 'C:\Jarvis\logs\edge_stopped_by_owner' -Force -ErrorAction SilentlyContinue
+# clear the marker so AfonEdgeGuard resumes guarding the process from here on.
+Remove-Item 'C:\Afon\logs\edge_stopped_by_owner' -Force -ErrorAction SilentlyContinue
 
 # 1. Stop the tasks (best effort) so the scheduler doesn't fight the kill.
 foreach ($t in $Tasks) { Stop-ScheduledTask -TaskName $t }
@@ -46,7 +46,7 @@ Start-Sleep -Seconds 2
 
 # 2. FORCE-KILL the edge python processes. Now that we're elevated their command lines + exe paths are
 #    readable, so we target PRECISELY: our own .venv interpreter, or any python whose command line is
-#    a jarvis.edge module (covers a system-python child too). We do NOT kill by a null/blank command
+#    a afon.edge module (covers a system-python child too). We do NOT kill by a null/blank command
 #    line — that would catch unrelated pythonw apps.
 #
 #    Any PowerShell they spawned is killed by PARENT (a child of an edge python), never by matching a
@@ -55,7 +55,7 @@ Start-Sleep -Seconds 2
 #    and can't hit an unrelated user PowerShell. (Note: activity_snapshot is pure ctypes now and spawns
 #    nothing — this stays only to sweep up legacy orphans.)
 $edge = @(Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" |
-          Where-Object { $_.CommandLine -match 'jarvis\.edge\.' -or $_.ExecutablePath -match 'Jarvis\\\.venv' })
+          Where-Object { $_.CommandLine -match 'afon\.edge\.' -or $_.ExecutablePath -match 'Afon\\\.venv' })
 $edgePids = @($edge.ProcessId)
 $killed = 0
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
@@ -71,13 +71,13 @@ Start-Sleep -Seconds 4
 
 # 4. Report. Verify a REAL process restart (not just a WebSocket bounce) via the fresh log marker.
 $now = @(Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" |
-         Where-Object { $_.CommandLine -match 'jarvis\.edge\.' -or $_.ExecutablePath -match 'Jarvis\\\.venv' })
+         Where-Object { $_.CommandLine -match 'afon\.edge\.' -or $_.ExecutablePath -match 'Afon\\\.venv' })
 Write-Host ("   edge pythonw running now: {0}" -f $now.Count)
 $pyPids = @((Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'").ProcessId)
 $leftoverPS = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $pyPids -contains $_.ParentProcessId })
 Write-Host ("   PowerShell spawned by edge python: {0} (want 0)" -f $leftoverPS.Count)
-$log = 'C:\Jarvis\logs\pc_agent.log'
+$log = 'C:\Afon\logs\pc_agent.log'
 if (Test-Path $log) {
     $marker = Get-Content $log -Tail 8 | Where-Object { $_ -match 'supervisor up|pc-agent starting' } | Select-Object -Last 1
     if ($marker) { Write-Host ("   restart confirmed: " + ($marker -replace '\x1b\[[0-9;]*m','')) }

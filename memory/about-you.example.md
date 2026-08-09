@@ -3,9 +3,9 @@
 > Copy this to `about-you.md` (gitignored) and fill it in — this is YOUR private profile, the core
 > context your assistant carries every turn. Keep it short and factual. «CONFIRM» = unverified.
 
-- **Name** and how the assistant should address you (also set `JARVIS_USER_NAME` / `JARVIS_USER_ADDRESS`).
+- **Name** and how the assistant should address you (also set `AFON_USER_NAME` / `AFON_USER_ADDRESS`).
 - **Where you are / timezone** — used for scheduling, greetings, and proactive timing.
-- **Languages** you may speak vs the one language to reply in (also `JARVIS_UNDERSTOOD_LANGUAGES` / `JARVIS_REPLY_LANGUAGE`).
+- **Languages** you may speak vs the one language to reply in (also `AFON_UNDERSTOOD_LANGUAGES` / `AFON_REPLY_LANGUAGE`).
 - **What you do** — your work, ventures, or focus, in a line or two (detail goes in `projects.md`).
 - **How you like to be helped** — fast vs thorough, proactive vs on-request, local-first vs cloud,
   honesty/evidence expectations, what to always confirm before doing.

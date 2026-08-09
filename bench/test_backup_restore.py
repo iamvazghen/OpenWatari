@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.protocols.backup import make_backup, restore_backup
+from afon.protocols.backup import make_backup, restore_backup
 
 
 def test_backup_restore_roundtrip() -> None:
@@ -38,3 +38,10 @@ def test_backup_restore_roundtrip() -> None:
             restore_backup(archive, memory)
         # …and proceed with it.
         restore_backup(archive, memory, force=True)
+
+
+# Runs as a script (see the note in test_pc_agent_refuse.py) — without this the roundtrip and the
+# no-clobber guard never executed, and the suite still went green.
+if __name__ == "__main__":
+    test_backup_restore_roundtrip()
+    print("=== 5/5 checks passed ===")

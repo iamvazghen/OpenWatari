@@ -1,7 +1,7 @@
 """A slow first handshake must not demote the edge to the LOCAL brain for the whole session.
 
 Production bug (2026-07-28): build_brain() gave RemoteBrain.start() a 3s gate, and on miss called
-rb.stop() and built an in-process JarvisBrain instead. A cold edge start contends with model
+rb.stop() and built an in-process AfonBrain instead. A cold edge start contends with model
 loading, so that gate was missed on EVERY restart — the laptop then answered from its own brain
 (weaker LLM chain, separate memory) until the next restart, even though the VPS was healthy a
 second later. RemoteBrain already routes PER TURN over a supervised link with a warm local standby,
@@ -60,13 +60,13 @@ class _FakeLocal:
 
 
 async def main() -> None:
-    from jarvis.config import settings
-    import jarvis.edge.assistant as A
-    import jarvis.edge.remote_brain as RB
+    from afon.config import settings
+    import afon.edge.assistant as A
+    import afon.edge.remote_brain as RB
 
-    orig_remote, orig_local = RB.RemoteBrain, A.JarvisBrain
+    orig_remote, orig_local = RB.RemoteBrain, A.AfonBrain
     orig_mode = settings.brain_mode
-    RB.RemoteBrain, A.JarvisBrain = _FakeRemote, _FakeLocal
+    RB.RemoteBrain, A.AfonBrain = _FakeRemote, _FakeLocal
     try:
         # 1) mode=remote, VPS answers in time -> remote, obviously.
         _FakeRemote.instances.clear(); _FakeRemote.connect_ok = True
@@ -95,7 +95,7 @@ async def main() -> None:
         check("auto + no VPS -> remote link released",
               _FakeRemote.instances and _FakeRemote.instances[0].stopped)
     finally:
-        RB.RemoteBrain, A.JarvisBrain = orig_remote, orig_local
+        RB.RemoteBrain, A.AfonBrain = orig_remote, orig_local
         settings.brain_mode = orig_mode
 
     print(f"\n{passed} passed, {failed} failed")

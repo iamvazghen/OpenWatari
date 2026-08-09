@@ -17,7 +17,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.config import settings  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 rows: list[tuple[str, str, str]] = []  # (status, name, detail)
 LIVE_TIMEOUT_S = max(30, settings.http_timeout_seconds + 15)
@@ -65,7 +65,7 @@ async def cancel_leftovers() -> None:
 
 
 async def main() -> int:
-    from jarvis.brain.tools import (
+    from afon.brain.tools import (
         calendar,
         gmail,
         notify,
@@ -128,7 +128,7 @@ async def main() -> int:
     await run_check(
         "ntfy push",
         bool(settings.ntfy_topic),
-        lambda: notify.send_push({"message": "Jarvis live-integration check ok", "title": "Jarvis"}),
+        lambda: notify.send_push({"message": "Afon live-integration check ok", "title": "Afon"}),
         lambda r: "Pushed" in r,
     )
 

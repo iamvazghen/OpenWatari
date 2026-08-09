@@ -70,7 +70,7 @@ class StatelessLLM:
 
 async def test_worker_defers_outward_actions() -> None:
     print("[1] worker runs safe tools, DEFERS outward ones, writes a result (4.1)")
-    from jarvis.brain.worker import TaskWorker
+    from afon.brain.worker import TaskWorker
 
     ran = {"web_search": 0, "send_email": 0}
 
@@ -100,7 +100,7 @@ async def test_worker_defers_outward_actions() -> None:
 
 async def test_worker_respects_step_budget() -> None:
     print("\n[2] worker stops at its step budget and forces a written result (4.1)")
-    from jarvis.brain.worker import TaskWorker
+    from afon.brain.worker import TaskWorker
 
     calls = {"n": 0}
 
@@ -123,10 +123,10 @@ async def test_worker_respects_step_budget() -> None:
 
 async def test_agent_backgrounds_the_work() -> None:
     print("\n[3] the agent's work_on_task tool backgrounds it and returns a task id (4.1)")
-    from jarvis.brain.agent import JarvisAgent
-    from jarvis.brain.tasks import TASKS
+    from afon.brain.agent import AfonAgent
+    from afon.brain.tasks import TASKS
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     check("work_on_task is registered", "work_on_task" in agent._registry)
     check("work_on_task is advertised in the core tool surface",
           any(s["function"]["name"] == "work_on_task" for s in agent._core_tools))
@@ -144,7 +144,7 @@ async def test_agent_backgrounds_the_work() -> None:
 
 async def test_backlog_attempts_and_comments() -> None:
     print("\n[4] backlog pass: pulls tasks, worker attempts each, posts a Notion comment (3.1)")
-    from jarvis.brain.backlog import attempt_backlog
+    from afon.brain.backlog import attempt_backlog
 
     tasks = [{"id": "p1", "title": "draft Q3 report"},
              {"id": "p2", "title": "research suppliers"},
@@ -171,7 +171,7 @@ async def test_backlog_attempts_and_comments() -> None:
 
 async def test_backlog_graceful_when_empty() -> None:
     print("\n[5] backlog pass is a clean no-op when there are no tasks (3.1)")
-    from jarvis.brain.backlog import attempt_backlog
+    from afon.brain.backlog import attempt_backlog
 
     async def fetch(limit=5):
         return []

@@ -43,7 +43,7 @@ mic (getUserMedia) → MediaRecorder (audio/mp4) → POST /talk  (Bearer token)
                                                      │
                                     handle_voice_request: Deepgram STT → agent turn → TTS (MP3)
                                                      │
-                          ← audio/mpeg (played inline)  + X-Watari-Reply / X-Watari-Transcript headers
+                          ← audio/mpeg (played inline)  + X-Afon-Reply / X-Afon-Transcript headers
 ```
 
 If TTS synthesis is unavailable the sidecar returns `{"reply","transcript"}` JSON instead, and the
@@ -53,6 +53,6 @@ page falls back to the browser's own `speechSynthesis` — so the client always 
 
 - [ ] `https://…ts.net/iphone/` loads with a valid cert (no warning) and shows the mic button.
 - [ ] First tap prompts for microphone permission; granting it starts the pulse animation.
-- [ ] A spoken sentence returns a transcript + Watari's reply, and the MP3 plays.
+- [ ] A spoken sentence returns a transcript + Afon's reply, and the MP3 plays.
 - [ ] With the brain's TTS disabled, the JSON fallback still shows text and speaks via the browser.
 - [ ] An invalid/missing token yields a clear "Unauthorized" message, not a silent failure.

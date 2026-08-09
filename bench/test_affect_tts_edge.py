@@ -14,8 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pipecat.frames.frames import TranscriptionFrame, TTSUpdateSettingsFrame  # noqa: E402
 from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
 
-from jarvis.brain.affect import affect_to_voice, infer_affect  # noqa: E402
-from jarvis.edge.affect_tts import AffectTTS  # noqa: E402
+from afon.brain.affect import affect_to_voice, infer_affect  # noqa: E402
+from afon.edge.affect_tts import AffectTTS  # noqa: E402
 
 _ok = _fail = 0
 

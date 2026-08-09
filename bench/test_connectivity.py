@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.world_model import WorldModel  # noqa: E402
+from afon.brain.world_model import WorldModel  # noqa: E402
 
 _ok = _fail = 0
 
@@ -47,11 +47,11 @@ capped = w.recent_events(now=now + timedelta(minutes=20), limit=3)
 check(len(capped) == 3 and capped[-1] == "event 4", f"capped, newest-last (got {capped})")
 
 # 4) agent._world_note reflects the world model (patched to our temp instance) and is None when empty
-import jarvis.brain.world_model as wm  # noqa: E402
-from jarvis.brain.agent import JarvisAgent  # noqa: E402
+import afon.brain.world_model as wm  # noqa: E402
+from afon.brain.agent import AfonAgent  # noqa: E402
 
 wm.WORLD = w  # the note reads module-level WORLD
-a = JarvisAgent()
+a = AfonAgent()
 a._self_improve = False
 # monkeypatch recent_events to a deterministic fresh list (avoid clock coupling)
 w.recent_events = lambda **_k: ["CI failed on party-map main"]

@@ -1,7 +1,7 @@
 """P1 #7 — security hardening of the high-power tools.
 
 Verifies the fixes from the security pass:
-  * system file ops refuse Jarvis's OWN secrets/state (.env, *.session, voiceprint.json, audit/),
+  * system file ops refuse Afon's OWN secrets/state (.env, *.session, voiceprint.json, audit/),
     in addition to the existing system-path / drive-root refusal — so "delete the .env" can't land;
   * the audit log scrubs secret VALUES (not just secret-shaped keys) from args AND results, so a
     secret echoed in a tool result never reaches disk;
@@ -37,15 +37,15 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    import jarvis.brain.tools.system as system
-    from jarvis.brain import audit
-    from jarvis.config import settings
+    import afon.brain.tools.system as system
+    from afon.brain import audit
+    from afon.config import settings
 
     repo = Path(__file__).resolve().parents[1]
 
-    print("[1] system file ops refuse Jarvis's own secrets/state")
+    print("[1] system file ops refuse Afon's own secrets/state")
     check(".env flagged sensitive", system._sensitive(repo / ".env"))
-    check("a *.session file flagged sensitive", system._sensitive(repo / "jarvis.session"))
+    check("a *.session file flagged sensitive", system._sensitive(repo / "afon.session"))
     check("voiceprint.json flagged sensitive", system._sensitive(repo / "voiceprint.json"))
     check("audit/ contents flagged sensitive", system._sensitive(repo / "audit" / "2026-06-12.jsonl"))
     check("a normal doc is NOT sensitive", not system._sensitive(repo / "README.md"))

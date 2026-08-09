@@ -34,7 +34,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 async def test_llm_failover() -> None:
     print("[1] LLM primary fails -> the chain answers via a fallback (no crash)")
-    from jarvis.brain.llm import LLMClient
+    from afon.brain.llm import LLMClient
 
     llm = LLMClient()
     # Two models in the chain; the first returns a choiceless 200 (proxy error), the second answers.
@@ -53,7 +53,7 @@ async def test_llm_failover() -> None:
 
 async def test_cache_without_redis() -> None:
     print("\n[2] Redis unreachable -> cache falls back to in-process, the lookup still works")
-    from jarvis.brain.cache import Cache
+    from afon.brain.cache import Cache
 
     cache = Cache(redis_url="redis://127.0.0.1:6399/0")  # nothing listening on 6399
 
@@ -73,7 +73,7 @@ def _should_not_run():  # pragma: no cover - only called if the cache failed to 
 
 async def test_scheduler_failure() -> None:
     print("\n[3] Scheduler backend fails -> set_reminder degrades to a spoken error, brain survives")
-    import jarvis.brain.tools.reminders as rem
+    import afon.brain.tools.reminders as rem
 
     class _BrokenScheduler:
         def add_reminder(self, *a, **kw):
@@ -94,9 +94,9 @@ async def test_scheduler_failure() -> None:
 
 async def test_tool_raises_in_turn() -> None:
     print("\n[4] A tool raises mid-turn -> the turn returns a safe reply (no crash)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
 
     async def boom(_args: dict) -> str:
         raise RuntimeError("kaboom")

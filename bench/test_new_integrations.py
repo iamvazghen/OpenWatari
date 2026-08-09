@@ -24,10 +24,10 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.proactive import confirm_required
-    from jarvis.brain.tools import groups_for_text, tool_handlers, tool_names
-    from jarvis.brain.tools import fitness, maps, phone, wolfram
-    from jarvis.config import settings
+    from afon.brain.proactive import confirm_required
+    from afon.brain.tools import groups_for_text, tool_handlers, tool_names
+    from afon.brain.tools import fitness, maps, phone, wolfram
+    from afon.config import settings
 
     # Force the unconfigured state regardless of a real .env.
     settings.twilio_account_sid = None
@@ -50,7 +50,7 @@ def main() -> None:
         return "isn't configured yet" in out
     check("place_call degrades", degrades(asyncio.run(phone.place_call({"to": "+491", "message": "x"}))))
     # travel_time never degrades: with no Google key it must DELEGATE to the keyless OSRM engine.
-    import jarvis.brain.tools.utility as util
+    import afon.brain.tools.utility as util
 
     async def _fake_osrm(args):
         return "osrm-fallback"
@@ -86,9 +86,9 @@ def main() -> None:
     from datetime import datetime, timedelta
     from pathlib import Path as P
 
-    import jarvis.brain.tools.reminders as rem
-    import jarvis.brain.tools.routines as routines_mod
-    import jarvis.brain.proactive_signals as ps
+    import afon.brain.tools.reminders as rem
+    import afon.brain.tools.routines as routines_mod
+    import afon.brain.proactive_signals as ps
 
     ps._ROUTINES_PATH = P(tempfile.gettempdir()) / "test_routines_plan.json"
     ps._ROUTINES_PATH.write_text(json.dumps([

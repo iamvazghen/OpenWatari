@@ -1,6 +1,6 @@
 # Debugging — finding and fixing what's wrong
 
-When something misbehaves, Jarvis, diagnose before you change. Guessing wastes commits.
+When something misbehaves, Afon, diagnose before you change. Guessing wastes commits.
 
 ## Process
 1. **Reproduce.** Get the exact failing case. For a tool, call it the way it failed. For a test, run

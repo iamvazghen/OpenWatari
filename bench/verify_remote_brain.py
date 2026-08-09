@@ -13,16 +13,16 @@ import os
 import sys
 import time
 
-# Your brain host. Set JARVIS_BRAIN_WS_URL (e.g. ws://<your-vps-or-tailscale-host>:8765/voice),
+# Your brain host. Set AFON_BRAIN_WS_URL (e.g. ws://<your-vps-or-tailscale-host>:8765/voice),
 # or it defaults to the local brain.
-VPS_WS = os.environ.get("JARVIS_BRAIN_WS_URL", "ws://127.0.0.1:8765/voice")
+VPS_WS = os.environ.get("AFON_BRAIN_WS_URL", "ws://127.0.0.1:8765/voice")
 
 
 async def main() -> None:
     import websockets
 
     sys.path.insert(0, "src")
-    from jarvis.config import settings
+    from afon.config import settings
 
     token = settings.api_auth_token or ""
     url = f"{VPS_WS}?token={token}"
@@ -35,7 +35,7 @@ async def main() -> None:
         ready = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
         print(f"  lifecycle: {ready.get('delta')}")
 
-        for prompt in ["How are you, Watari?", "What time is it?"]:
+        for prompt in ["How are you, Afon?", "What time is it?"]:
             await ws.send(json.dumps({"type": "utterance", "session_id": sid,
                                       "text": prompt, "device_id": "verify", "ts_user_stop_ms": 0}))
             print(f"\n>>> {prompt!r}")

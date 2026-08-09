@@ -15,8 +15,8 @@ import asyncio
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import jarvis.brain.tools.calendar as cal
-from jarvis.config import settings
+import afon.brain.tools.calendar as cal
+from afon.config import settings
 
 PASS = FAIL = 0
 

@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import jarvis.edge.pc_agent as pc  # noqa: E402
-from jarvis.edge.pc_agent import _run_op, _verify_effect  # noqa: E402
+import afon.edge.pc_agent as pc  # noqa: E402
+from afon.edge.pc_agent import _run_op, _verify_effect  # noqa: E402
 
 _ok = _fail = 0
 

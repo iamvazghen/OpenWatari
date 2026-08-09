@@ -1,22 +1,22 @@
-# Contributing to OpenWatari
+# Contributing to OpenAfon
 
-Thanks for your interest. OpenWatari is a from-scratch, local-first framework for building your own
-voice-first AI companion (**Watari**). Contributions — bug reports, fixes, new tools, docs — are
+Thanks for your interest. OpenAfon is a from-scratch, local-first framework for building your own
+voice-first AI companion (**Afon**). Contributions — bug reports, fixes, new tools, docs — are
 welcome.
 
 ## Ground rules
 
 - By contributing you agree your contribution is licensed under the project's [MIT License](LICENSE)
   and that you follow [ACCEPTABLE_USE.md](ACCEPTABLE_USE.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-- **Naming:** the project is *OpenWatari*, the assistant is *Watari*, *Jarvis* is only the
-  blueprint/inspiration. The Python package stays `jarvis` (code identifier). Keep user-facing
-  strings as Watari.
+- **Naming:** the project is *OpenAfon*, the assistant is *Afon*, *Afon* is only the
+  blueprint/inspiration. The Python package stays `afon` (code identifier). Keep user-facing
+  strings as Afon.
 
 ## Dev setup
 
 ```bash
 uv sync --extra edge --extra cloud-voice --extra brain --extra channels --extra identity --extra dev
-uv run jarvis-setup          # writes a .env for local testing
+uv run afon-setup          # writes a .env for local testing
 ```
 
 ## Before you open a PR
@@ -35,7 +35,7 @@ uv run jarvis-setup          # writes a .env for local testing
 
 ## Adding a tool
 
-Drop a module in `src/jarvis/brain/tools/` exposing `SCHEMAS` (OpenAI function schemas) and
+Drop a module in `src/afon/brain/tools/` exposing `SCHEMAS` (OpenAI function schemas) and
 `HANDLERS` (`name -> async handler(args) -> str`), list it in `tools/__init__.py::_MODULES`, and have
 it degrade gracefully when unconfigured (`tools/base.py::not_configured`). Put low-frequency tools in
 a lazy group so the per-turn surface stays lean. See `skills/adding-a-tool.md`.

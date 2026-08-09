@@ -26,7 +26,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.edge.device_profile import (
+    from afon.edge.device_profile import (
         SUPPORTED_DEVICES,
         OutputKind,
         resolve_device_route,
@@ -81,7 +81,7 @@ def main() -> None:
     check("unknown device falls back to laptop", resolve_device_route("toaster").device_id == "laptop")
 
     print("\n[5] laptop AirPods auto-route preference (prefer_private_output)")
-    from jarvis.edge.audio_devices import AudioDevice, prefer_private_output
+    from afon.edge.audio_devices import AudioDevice, prefer_private_output
 
     devs = [
         AudioDevice(0, "Speakers (Realtek(R) Audio)", 0, 2),
@@ -98,7 +98,7 @@ def main() -> None:
     check("no headphones -> None (falls back to default)", prefer_private_output(no_hp) is None)
 
     print("\n[6] edge<->brain protocol carries the device")
-    from jarvis.shared.protocol import EdgeToBrain, Hello, Utterance  # noqa: F401
+    from afon.shared.protocol import EdgeToBrain, Hello, Utterance  # noqa: F401
 
     h = Hello(session_id="s1", device_id="mentra", headphones_connected=False)
     check("Hello serialises device_id", h.model_dump()["device_id"] == "mentra")

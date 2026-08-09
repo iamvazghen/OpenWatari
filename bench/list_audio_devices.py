@@ -1,4 +1,4 @@
-"""List host audio devices and show how Jarvis resolves speaker/headphone targets.
+"""List host audio devices and show how Afon resolves speaker/headphone targets.
 
     uv run python bench/list_audio_devices.py
 """
@@ -10,7 +10,7 @@ import sys
 # Force UTF-8 so Windows cp1252 console can't choke on device names like "Realtek(R)".
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from jarvis.edge.audio_devices import (  # noqa: E402
+from afon.edge.audio_devices import (  # noqa: E402
     default_input_index,
     default_output_index,
     find_output_device,
@@ -30,7 +30,7 @@ for d in devs:
     flag = (" [" + ",".join(tags) + "]") if tags else ""
     print(f"  {d.index:>2} | in {d.max_input_channels} out {d.max_output_channels} | {d.name}{flag}")
 
-print("\n=== Jarvis output resolution ===")
+print("\n=== Afon output resolution ===")
 for q in ("speakers", "headphones", "airpods"):
     dev = find_output_device(q)
     print(f"  '{q}' -> {dev.name if dev else 'NOT CONNECTED'}")

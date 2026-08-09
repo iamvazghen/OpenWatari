@@ -9,7 +9,7 @@
 #   bash scripts/verify_vps_sync.sh
 # Exit 0 = identical. Exit 1 = drift (listed).
 #
-# REQUIRED: JARVIS_VPS (e.g. "openclaw@<host>"), from your shell or the gitignored
+# REQUIRED: AFON_VPS (e.g. "openclaw@<host>"), from your shell or the gitignored
 # `deploy_vps.env` next to this script — the same source deploy_vps.sh uses. The host is never
 # hardcoded here; that would leak the deployment topology into the repo.
 set -uo pipefail
@@ -18,10 +18,10 @@ if [[ -f "$(dirname "$0")/deploy_vps.env" ]]; then
   # shellcheck disable=SC1091
   source "$(dirname "$0")/deploy_vps.env"
 fi
-: "${JARVIS_VPS:?Set JARVIS_VPS (e.g. export JARVIS_VPS=openclaw@<your-host>) — see deploy_vps.env}"
-VPS="${VPS:-$JARVIS_VPS}"
-REMOTE="${REMOTE:-${JARVIS_VPS_DIR:-/home/openclaw/jarvis}}"
-TREES="src/jarvis skills clients personality"
+: "${AFON_VPS:?Set AFON_VPS (e.g. export AFON_VPS=openclaw@<your-host>) — see deploy_vps.env}"
+VPS="${VPS:-$AFON_VPS}"
+REMOTE="${REMOTE:-${AFON_VPS_DIR:-/home/openclaw/afon}}"
+TREES="src/afon skills clients personality"
 
 cd "$(dirname "$0")/.."
 

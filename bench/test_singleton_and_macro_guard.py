@@ -34,7 +34,7 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.shared import singleton as S
+    from afon.shared import singleton as S
 
     print("\n[1] one live process per role")
     S._RUN_DIR = Path(tempfile.mkdtemp())
@@ -55,7 +55,7 @@ async def main() -> None:
     check("start time is readable (so 'older' is decidable)", S._proc_start_time(os.getpid()))
 
     # The edge is launched by a system-Python parent that re-execs into the venv, so BOTH command
-    # lines contain 'jarvis.edge.assistant'. Treating a launcher parent (or a spawned child) as a
+    # lines contain 'afon.edge.assistant'. Treating a launcher parent (or a spawned child) as a
     # duplicate makes the process kill its own family — which took the live edge down once.
     rel = S._related_pids()
     check("ancestors/descendants are excluded from the duplicate scan", os.getpid() in rel)
@@ -99,19 +99,19 @@ async def main() -> None:
     # unrelated user processes, so the pattern is the full '-m <module>' invocation AND the process
     # must be a Python interpreter.
     S._ROLE_PATTERNS = _REAL_PATTERNS
-    for role, pats in {"edge": ("-m jarvis.edge.assistant",),
-                       "pc_agent": ("-m jarvis.edge.pc_agent",),
-                       "brain": ("-m jarvis.brain.server",)}.items():
+    for role, pats in {"edge": ("-m afon.edge.assistant",),
+                       "pc_agent": ("-m afon.edge.pc_agent",),
+                       "brain": ("-m afon.brain.server",)}.items():
         check(f"'{role}' matches the -m invocation, not the bare module name",
               S._ROLE_PATTERNS.get(role) == pats, str(S._ROLE_PATTERNS.get(role)))
     check("only python interpreters are considered",
           all(p in S._PY_EXE_PREFIXES for p in ("python", "pythonw")))
 
     fake = [
-        ("bash.exe", "bash -c 'tail logs | grep jarvis.edge.assistant'", False),
-        ("python.exe", "python -c \"print('jarvis.edge.assistant')\"", False),
-        ("pythonw.exe", r"C:\Jarvis\.venv\Scripts\pythonw.exe -m jarvis.edge.assistant", True),
-        ("code.exe", "code src/jarvis/edge/assistant.py", False),
+        ("bash.exe", "bash -c 'tail logs | grep afon.edge.assistant'", False),
+        ("python.exe", "python -c \"print('afon.edge.assistant')\"", False),
+        ("pythonw.exe", r"C:\Afon\.venv\Scripts\pythonw.exe -m afon.edge.assistant", True),
+        ("code.exe", "code src/afon/edge/assistant.py", False),
     ]
     for name, cmd, want in fake:
         is_py = any(name.lower().startswith(p) for p in S._PY_EXE_PREFIXES)
@@ -120,8 +120,8 @@ async def main() -> None:
               got is want, f"{cmd[:50]} -> {got}")
 
     print("\n[2] macros cannot perform unconfirmed actions")
-    import jarvis.brain.tools.macros as M
-    from jarvis.brain.proactive import confirm_required
+    import afon.brain.tools.macros as M
+    from afon.brain.proactive import confirm_required
 
     store = Path(tempfile.mkdtemp()) / "macros.json"
     store.write_text(json.dumps({
@@ -143,7 +143,7 @@ async def main() -> None:
         ran.append("git_push")
         return "pushed"
 
-    import jarvis.brain.tools as T
+    import afon.brain.tools as T
     real_handlers = T.tool_handlers
     T.tool_handlers = lambda: {**real_handlers(), "git_push": _spy}
     try:
@@ -161,7 +161,7 @@ async def main() -> None:
     check("...and that default is False", (M.run_steps.__kwdefaults__ or {}).get("authorized") is False)
 
     print("\n[3] macro steps are tracked and audited like any other tool call")
-    from jarvis.shared import errors as err
+    from afon.shared import errors as err
 
     err._DIR = Path(tempfile.mkdtemp())
     err.JOURNAL = err._DIR / "errors.jsonl"

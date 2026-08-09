@@ -37,12 +37,12 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    import jarvis.brain.tools.camera as CAM
-    from jarvis.brain.agent import JarvisAgent
-    from jarvis.brain.proactive import confirm_required
-    from jarvis.config import settings
+    import afon.brain.tools.camera as CAM
+    from afon.brain.agent import AfonAgent
+    from afon.brain.proactive import confirm_required
+    from afon.config import settings
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     calls: list[int] = []
 
     def stub(verdict: dict | None, boom: bool = False):

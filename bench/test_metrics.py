@@ -31,7 +31,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.metrics import Metrics
+    from afon.brain.metrics import Metrics
 
     print("[1] counters + latency summary + JSON snapshot")
     m = Metrics()
@@ -53,11 +53,11 @@ def main() -> None:
     check("empty metric summarises to zeros", m._summary([]) == {"count": 0, "p50": 0.0, "p95": 0.0, "mean": 0.0})
 
     print("\n[2] the agent tool path feeds the SHARED metrics singleton")
-    from jarvis.brain.metrics import METRICS
+    from afon.brain.metrics import METRICS
     before = METRICS.snapshot()["counters"]
 
-    from jarvis.brain.agent import JarvisAgent
-    agent = JarvisAgent()
+    from afon.brain.agent import AfonAgent
+    agent = AfonAgent()
 
     async def _one_tool() -> None:
         # get_time is a real, no-network tool — exercises _run_one_tool's metric increments.
@@ -77,7 +77,7 @@ def main() -> None:
     print("\n[3] /metrics route is auth-gated in the server")
     import inspect
 
-    from jarvis.brain import server
+    from afon.brain import server
     src = inspect.getsource(server._serve_client_http)
     check("server defines a /metrics route", '"/metrics"' in src)
     check("/metrics checks authorization", "_post_authorized" in src and "/metrics" in src)

@@ -17,8 +17,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain import fleet  # noqa: E402
-from jarvis.config import settings  # noqa: E402
+from afon.brain import fleet  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 passed = failed = 0
 
@@ -36,7 +36,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 async def main() -> None:
     # Isolate prefs for the WHOLE test: delegate_to_fleet calls _note_success on success, which would
     # otherwise write fake routing history into the owner's real prefs (and leak into the system prompt).
-    import jarvis.brain.prefs as prefs
+    import afon.brain.prefs as prefs
 
     store: dict = {}
     saved_get, saved_set = prefs.get, prefs.set

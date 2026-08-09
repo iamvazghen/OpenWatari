@@ -4,7 +4,7 @@ import time
 
 from openai import AsyncOpenAI
 
-from jarvis.config import settings
+from afon.config import settings
 
 PROMPT = "In one short sentence, what's the capital of France?"
 

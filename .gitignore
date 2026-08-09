@@ -8,8 +8,8 @@
 # was not, so a re-enrolment backup of the owner's voice embeddings sat untracked-but-committable.
 voiceprint.json*
 runtime_prefs.json
-jarvis_session.json
-jarvis_tasks.sqlite
+afon_session.json
+afon_tasks.sqlite
 
 # --- Python / tooling ---
 .venv/
@@ -27,12 +27,12 @@ models/
 
 # --- Runtime / generated state (machine-local, not source) ---
 # ALL runtime DBs (tasks/jobs/vectors/graph/coaching/presence — personal data)
-jarvis_*.sqlite
+afon_*.sqlite
 # runtime delivery state
 daily_digest_state.json
 audit/
 backups/
-.jarvis-browser/
+.afon-browser/
 
 # --- Private memory & profile (personal data — keep out of git; *.example.md templates ship) ---
 memory/learned/
@@ -46,7 +46,7 @@ memory/openclaw-fleet.md
 # --- Internal working docs (kept local, not published) ---
 fine-tuning.md
 TODO-NOW.md
-IPHONE-WATARI-CHECKLIST.md
+IPHONE-AFON-CHECKLIST.md
 
 # --- OS ---
 .DS_Store
@@ -61,15 +61,15 @@ _suite_out.txt
 logs/
 
 # Original logo/banner exports (clean copies tracked in assets/ + website/public/)
-/OpenWatari*.png
+/OpenAfon*.png
 
 # Docs site — deployed via Vercel CLI (vercel --cwd website --prod), kept out of the repo
 website/
 next-steps/
 # Personal finish-line checklist (this instance, not the framework)
-MY-WATARI-CHECKLIST.md
+MY-AFON-CHECKLIST.md
 # Production-readiness recommendations + behavioral run artifacts (local working docs)
-WATARI-PRODUCTION-RECOMMENDATIONS.md
+AFON-PRODUCTION-RECOMMENDATIONS.md
 bench/_behavioral_run.txt
 bench/_behavioral_scorecard.json
 bench/_artifacts/

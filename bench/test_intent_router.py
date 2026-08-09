@@ -4,9 +4,9 @@ Asserts that a high-precision intent narrows the turn's advertised tools to exac
 tool, that multi-intent turns are NOT narrowed (full surface preserved), and that free-form chat
 is left alone (regression guard for the already-strong categories).
 """
-from jarvis.brain.intent_router import forced_tools
-from jarvis.brain.tools import schemas_by_name, tool_names
-from jarvis.brain.agent import _narrowed_tools
+from afon.brain.intent_router import forced_tools
+from afon.brain.tools import schemas_by_name, tool_names
+from afon.brain.agent import _narrowed_tools
 
 _ok = 0
 _fail = 0
@@ -74,7 +74,7 @@ for chat in ("what do you think about this plan?", "what's two plus two",
     check(narrowed3 is False and len(tools3) == len(fake_surface), f"free-form left alone: {chat!r}")
 
 # --- 5b) B3 degrade scoping: live-data tools degrade on dodge, knowledge tools answer inline ---
-from jarvis.brain.agent import _should_degrade
+from afon.brain.agent import _should_degrade
 check(_should_degrade(True, set(), "check_telegram") is True, "live-data dodge degrades (telegram)")
 check(_should_degrade(True, set(), "read_email") is True, "live-data dodge degrades (email)")
 check(_should_degrade(True, set(), "define_word") is False, "knowledge dodge does NOT degrade (define)")
@@ -90,7 +90,7 @@ check(len(s) == 1 and s[0]["function"]["name"] == "read_email", "schemas_by_name
 # Fake model that REJECTS required (like a provider without forced choice) and narrates a made-up
 # number on auto — the classic "you have 5 unread" hallucination. B3 must replace it.
 import asyncio
-from jarvis.brain.agent import JarvisAgent, _FABRICATION_DEGRADE
+from afon.brain.agent import AfonAgent, _FABRICATION_DEGRADE
 
 
 class _FakeMsg:
@@ -110,7 +110,7 @@ class _DodgingLLM:
 
 
 async def _run_b3():
-    a = JarvisAgent()
+    a = AfonAgent()
     a._llm = _DodgingLLM()
     a._self_improve = False
     # narrowed LIVE-DATA intent that dodges -> honest degrade, no fabricated number. Uses a NON-zero-arg
@@ -122,20 +122,20 @@ async def _run_b3():
     check(any(c["skip_primary"] for c in a._llm.calls),
           "forced tool turn uses the fallback tool-caller (skip_primary=True)")
     # a KNOWLEDGE intent (define) that dodges -> inline answer passes through, NOT degraded
-    a2 = JarvisAgent()
+    a2 = AfonAgent()
     a2._llm = _DodgingLLM()
     a2._self_improve = False
     r2 = await a2.respond("define ephemeral")
     check(r2 != _FABRICATION_DEGRADE, f"B3 does NOT degrade a dodged knowledge intent (got {r2!r})")
     # free-form chat is NOT narrowed -> content passes through unchanged (guard is scoped)
-    a3 = JarvisAgent()
+    a3 = AfonAgent()
     a3._llm = _DodgingLLM()
     a3._self_improve = False
     r3 = await a3.respond("how are you today?")
     check(r3 != _FABRICATION_DEGRADE, f"B3 does NOT fire on free-form chat (got {r3!r})")
     # B4 (broadened): a MULTI-INTENT forced dodge (not narrowed) must ALSO retry on the fallback —
     # this is what rescues the get_time+remember combos when the primary answers one part inline.
-    a4 = JarvisAgent()
+    a4 = AfonAgent()
     a4._llm = _DodgingLLM()
     a4._self_improve = False
     await a4.respond("what's the time, and also remember that I prefer tea over coffee")
@@ -157,7 +157,7 @@ class _CountingLLM:
 
 
 async def _run_b5():
-    a = JarvisAgent()
+    a = AfonAgent()
     a._llm = _CountingLLM()
     a._self_improve = False
     fired: list[str] = []
@@ -196,10 +196,10 @@ class _ThinkingRescueLLM:
 
 
 async def _run_b5_thinking():
-    from jarvis.config import settings
+    from afon.config import settings
     check(bool(settings.llm_thinking_model), "a MiniMax thinking model is configured by default")
 
-    a = JarvisAgent()
+    a = AfonAgent()
     a._llm = _ThinkingRescueLLM()
     a._self_improve = False
     ran: list[str] = []
@@ -213,7 +213,7 @@ async def _run_b5_thinking():
     check(any(c["prepend_model"] for c in a._llm.calls), "B5 escalates to the thinking model on a dodge")
     check("set_reminder" in ran, "the thinking model's tool call actually executes")
     # a conversational turn must NOT trigger the thinking-tier (cost is only paid on forced dodges)
-    b = JarvisAgent()
+    b = AfonAgent()
     b._llm = _ThinkingRescueLLM()
     b._self_improve = False
     await b.respond("what do you think about that idea?")   # no tool trigger words

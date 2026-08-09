@@ -4,7 +4,7 @@
 > own deployment. Never put keys/tokens here — those belong in `.env`.
 
 - **Local machine(s)** — OS, GPU or CPU-only, where the project lives, what runs there (the voice edge).
-- **Brain host** — where `jarvis-brain` runs (a VPS or this machine) and how devices reach it
+- **Brain host** — where `afon-brain` runs (a VPS or this machine) and how devices reach it
   (Tailnet IP / port). Restart policy if it's a 24/7 host.
 - **LLM** — your provider/proxy and the primary model + fallback chain.
 - **Obsidian vault** — the local mirror path and which side is authoritative (write there).

@@ -1,6 +1,6 @@
 # Acceptable Use & Responsible-AI notice
 
-OpenWatari builds **Watari**, an autonomous, tool-using voice agent that can run shell commands,
+OpenAfon builds **Afon**, an autonomous, tool-using voice agent that can run shell commands,
 control a browser and a PC, send messages and email, control smart-home devices, and edit and commit
 code. With that power comes responsibility. This notice sets out how the project expects deployments
 to behave. It complements — and does not override — the [MIT License](LICENSE), which governs the
@@ -8,7 +8,7 @@ software grant and disclaims warranty.
 
 ## You are the operator
 
-When you deploy Watari, **you** are responsible for what it does on your behalf. The framework gives
+When you deploy Afon, **you** are responsible for what it does on your behalf. The framework gives
 you safety rails (see [SECURITY.md](SECURITY.md)); using them is your call. In particular:
 
 - **Deploy only on systems and accounts you own or are authorized to use.** The PC-control, browser,
@@ -25,7 +25,7 @@ you safety rails (see [SECURITY.md](SECURITY.md)); using them is your call. In p
 
 ## What this software is not
 
-- **Not professional advice.** Watari can be wrong, can hallucinate, and can misuse a tool. Do not
+- **Not professional advice.** Afon can be wrong, can hallucinate, and can misuse a tool. Do not
   rely on it for medical, legal, financial, or safety-critical decisions without independent review.
 - **Not a guarantee.** It is provided "as is," without warranty (see the LICENSE). The proactive and
   self-improvement features act on heuristics and an LLM; verify consequential actions.
@@ -41,6 +41,6 @@ is not.
 
 Tools that touch the physical world or money (smart-home **locks/alarms/covers**, PC control,
 outbound messaging) are confirm-gated by design. Keep them gated, and think before you arm the
-optional external fleet (`JARVIS_FLEET_AUTHORIZED`) — it reaches shared infrastructure.
+optional external fleet (`AFON_FLEET_AUTHORIZED`) — it reaches shared infrastructure.
 
-By deploying or distributing OpenWatari you agree to use it in line with this notice.
+By deploying or distributing OpenAfon you agree to use it in line with this notice.

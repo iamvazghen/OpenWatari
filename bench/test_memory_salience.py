@@ -1,4 +1,4 @@
-"""Memory-util — Watari proactively resurfaces durable commitments, not just recalls them when asked.
+"""Memory-util — Afon proactively resurfaces durable commitments, not just recalls them when asked.
 
 Hermetic: seed a temp L1 store with commitment-flavoured and mundane facts, then lock that salient_notes()
 ranks open commitments in the recency sweet spot above fresh/stale/mundane ones, and that the resurface
@@ -34,14 +34,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def _seed(store, text: str, created: datetime, tags=None) -> None:
     """Write an L1 note with an explicit created timestamp (remember() always stamps 'now')."""
     store.learned_dir.mkdir(parents=True, exist_ok=True)
-    from jarvis.brain.memory import _slug
+    from afon.brain.memory import _slug
     p = store.learned_dir / f"{created:%Y%m%d-%H%M%S}-{_slug(text)}.md"
     p.write_text(f"---\ncreated: {created.isoformat()}\ntags: {', '.join(tags or [])}\n---\n{text}\n",
                  encoding="utf-8")
 
 
 def main() -> None:
-    from jarvis.brain.memory import MemoryStore
+    from afon.brain.memory import MemoryStore
 
     now = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
     store = MemoryStore(base_dir=Path(tempfile.mkdtemp()))
@@ -69,8 +69,8 @@ def main() -> None:
     check("8-day commitment beats 60-day", score_of("piano") > score_of("passport"), str(sal))
 
     print("\n[3] resurface source raises the top one, then rotates")
-    import jarvis.brain.memory as memory_mod
-    import jarvis.brain.proactive_signals as ps
+    import afon.brain.memory as memory_mod
+    import afon.brain.proactive_signals as ps
 
     saved_store = memory_mod.STORE
     saved_path = ps._RESURFACED_PATH
@@ -100,7 +100,7 @@ def main() -> None:
         ps._RESURFACED_PATH = saved_path
 
     print("\n[4] the source is registered on the live proactive tick")
-    from jarvis.brain.proactive import default_signal_sources
+    from afon.brain.proactive import default_signal_sources
     names = {getattr(s, "__name__", "") for s in default_signal_sources()}
     check("memory_resurface_signals registered", "memory_resurface_signals" in names, str(sorted(names)))
 

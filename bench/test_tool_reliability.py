@@ -1,4 +1,4 @@
-"""Tools-util — Watari learns which of his own tools have been flaky from the audit trail.
+"""Tools-util — Afon learns which of his own tools have been flaky from the audit trail.
 
 Hermetic: seed a temp audit dir with real audit.record lines, then lock that reliability() aggregates
 per-tool success rates, _flaky_tools flags only tools with enough calls AND a low rate, flaky_note is
@@ -17,7 +17,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.config import settings  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 passed = failed = 0
 
@@ -36,8 +36,8 @@ def main() -> None:
     tmp = Path(tempfile.mkdtemp())
     settings.audit_log_dir = str(tmp)   # point audit + reliability at a clean dir
 
-    from jarvis.brain import audit
-    from jarvis.brain import tool_reliability as tr
+    from afon.brain import audit
+    from afon.brain import tool_reliability as tr
 
     print("[1] reliability() aggregates per-tool success from the audit trail")
     # a dependable tool: 6/6 ok. a flaky one: 2 ok / 4 fail. a rarely-used one: 1 fail (too few to judge).

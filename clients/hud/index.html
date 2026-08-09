@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Watari · HUD</title>
+<title>Afon · HUD</title>
 <style>
   :root {
     --ink:#05080a; --panel:#0d1418; --panel2:#111c22; --line:#1e2e37;
@@ -96,7 +96,7 @@
 <script>
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const token = window.JARVIS_TOKEN || new URLSearchParams(location.search).get("token") || "";
+  const token = window.AFON_TOKEN || new URLSearchParams(location.search).get("token") || "";
 
   function empty(el, msg) { el.innerHTML = '<div class="empty">' + msg + '</div>'; }
 
@@ -104,7 +104,7 @@
     $("err").textContent = "";
     $("presence").textContent = d.presence || "";
     $("stamp").textContent = "updated " + (d.generated || "").replace("T", " ").replace("+00:00", " UTC");
-    document.title = "Watari · HUD" + (d.awaiting_approval && d.awaiting_approval.length ? " (" + d.awaiting_approval.length + ")" : "");
+    document.title = "Afon · HUD" + (d.awaiting_approval && d.awaiting_approval.length ? " (" + d.awaiting_approval.length + ")" : "");
 
     const obj = d.objectives || [];
     $("c-obj").textContent = obj.length || "";

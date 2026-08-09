@@ -32,7 +32,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 class FakeAgent:
-    """Stand-in JarvisAgent: no LLM, deterministic reply, satisfies the server's contract."""
+    """Stand-in AfonAgent: no LLM, deterministic reply, satisfies the server's contract."""
 
     async def warmup(self) -> None:
         return None
@@ -52,9 +52,9 @@ async def _serve_once(server, host: str, port: int):
 
 
 async def main() -> None:
-    from jarvis.brain.server import BrainServer
-    from jarvis.config import settings
-    from jarvis.edge.brain_client import BrainClient
+    from afon.brain.server import BrainServer
+    from afon.config import settings
+    from afon.edge.brain_client import BrainClient
 
     host, port = "127.0.0.1", 8794
     settings.brain_ws_url = f"ws://{host}:{port}/voice"

@@ -30,7 +30,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.graph import GraphMemory
+    from afon.brain.graph import GraphMemory
 
     db = Path(tempfile.mkdtemp()) / "graph.sqlite"
     g = GraphMemory(db)
@@ -73,14 +73,14 @@ def main() -> None:
     check("graph now has 3 triples", len(g.all_triples()) == 3)
 
     print("\n[7] the lazy tools speak correctly (link_memory / recall_related)")
-    from jarvis.config import settings
+    from afon.config import settings
     settings.memory_enabled = True
     # Point the tools' shared GRAPH at our temp DB.
-    import jarvis.brain.graph as gmod
+    import afon.brain.graph as gmod
     saved = gmod.GRAPH
     gmod.GRAPH = g
     try:
-        from jarvis.brain.tools.graphmem import link_memory, recall_related
+        from afon.brain.tools.graphmem import link_memory, recall_related
 
         async def _run() -> tuple[str, str, str, str]:
             r_link = await link_memory({"subject": "Lpstrak", "predicate": "raises", "object": "rabbits"})
@@ -104,11 +104,33 @@ def main() -> None:
     check("neighbors on unwritable DB returns []", broken.neighbors("a") == [])
 
     print("\n[9] the graph tools live in a LAZY group (surface stays lean)")
-    from jarvis.brain.tools import core_tool_schemas, groups_for_text, tool_handlers
+    from afon.brain.tools import core_tool_schemas, groups_for_text, tool_handlers
     core_names = {s["function"]["name"] for s in core_tool_schemas()}
     check("link_memory not in the every-turn surface", "link_memory" not in core_names)
     check("'graph' group activates on 'related to'", "graph" in groups_for_text("what's related to Lpstrak"))
     check("handlers still resolve", {"link_memory", "recall_related"} <= set(tool_handlers()))
+
+    print("\n[10] the graph is reachable from fused_recall (J3.3b)")
+    # Until this landed, the graph was the one store no recall path could see: `recall_related`
+    # required the model to already know the entity name. L5b joins it to plain language.
+    import asyncio as _aio
+
+    from afon.brain.memory import STORE
+    saved = gmod.GRAPH
+    gmod.GRAPH = GraphMemory(Path(db.parent / "fused.sqlite"))
+    try:
+        gmod.GRAPH.add("Lpstrak", "is", "a rabbit farm")
+        got = _aio.run(STORE.fused_recall("tell me about Lpstrak", limit=8, layers=("L5b",)))
+        check("a graph fact surfaces from a natural-language query",
+              any("rabbit farm" in h["text"] for h in got), str(got[:2]))
+        check("...tagged L5b so the model can cite the layer",
+              all(h["layer"] == "L5b" for h in got), str({h["layer"] for h in got}))
+        # The per-turn path must NOT pay for this — that budget is the reason turns feel fast.
+        turn = _aio.run(STORE.fused_recall("tell me about Lpstrak", limit=8, layers=("L1", "L2")))
+        check("the per-turn L1+L2 path does not touch the graph",
+              not any(h["layer"] == "L5b" for h in turn))
+    finally:
+        gmod.GRAPH = saved
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

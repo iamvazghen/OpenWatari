@@ -17,9 +17,9 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import jarvis.brain.contacts as contacts_mod  # noqa: E402
-from jarvis.config import settings  # noqa: E402
-from jarvis.edge import proper_nouns  # noqa: E402
+import afon.brain.contacts as contacts_mod  # noqa: E402
+from afon.config import settings  # noqa: E402
+from afon.edge import proper_nouns  # noqa: E402
 
 passed = failed = 0
 
@@ -52,7 +52,7 @@ def main() -> None:
              settings.user_address, contacts_mod.BOOK)
     try:
         settings.stt_hotwords = "Yerevan, Cologne, Rently; Party Map"
-        settings.assistant_name = "Watari"
+        settings.assistant_name = "Afon"
         settings.user_name = "Alex"
         settings.user_address = "sir"
         contacts_mod.BOOK = _FakeBook(["Anush", "John Smith"])
@@ -61,17 +61,17 @@ def main() -> None:
         print("[1] list merges config + identity + contacts")
         lst = proper_nouns.hotwords_list()
         low = [t.lower() for t in lst]
-        for term in ["yerevan", "cologne", "rently", "party map", "watari", "alex", "sir",
+        for term in ["yerevan", "cologne", "rently", "party map", "afon", "alex", "sir",
                      "anush", "john smith"]:
             check(f"'{term}' present", term in low, repr(lst))
 
         print("\n[2] semicolons split, case-insensitive dedup")
-        settings.stt_hotwords = "Rently, rently, RENTLY, Watari"  # dupes + collides with assistant name
+        settings.stt_hotwords = "Rently, rently, RENTLY, Afon"  # dupes + collides with assistant name
         proper_nouns.hotwords_str.cache_clear()
         lst = proper_nouns.hotwords_list()
         low = [t.lower() for t in lst]
         check("'rently' appears exactly once", low.count("rently") == 1, repr(lst))
-        check("'watari' appears exactly once despite config+identity", low.count("watari") == 1, repr(lst))
+        check("'afon' appears exactly once despite config+identity", low.count("afon") == 1, repr(lst))
 
         print("\n[3] cap bounds the list")
         settings.stt_hotwords = ", ".join(f"term{i}" for i in range(200))
@@ -90,7 +90,7 @@ def main() -> None:
         proper_nouns.hotwords_str.cache_clear()
         if settings.deepgram_api_key:
             try:
-                from jarvis.edge.stt import _build_deepgram
+                from afon.edge.stt import _build_deepgram
                 svc = _build_deepgram()
                 check("Deepgram STT service built (keyterm applied or safely dropped)", svc is not None)
             except Exception as e:  # noqa: BLE001
@@ -100,13 +100,13 @@ def main() -> None:
 
         print("\n[6] empty config + no contacts -> just identity terms, never raises")
         settings.stt_hotwords = ""
-        settings.assistant_name = "Watari"
+        settings.assistant_name = "Afon"
         settings.user_name = ""
         settings.user_address = ""
         contacts_mod.BOOK = _FakeBook([])
         proper_nouns.hotwords_str.cache_clear()
         lst = proper_nouns.hotwords_list()
-        check("degrades to the assistant name alone", [t.lower() for t in lst] == ["watari"], repr(lst))
+        check("degrades to the assistant name alone", [t.lower() for t in lst] == ["afon"], repr(lst))
     finally:
         (settings.stt_hotwords, settings.assistant_name, settings.user_name,
          settings.user_address, contacts_mod.BOOK) = saved

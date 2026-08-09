@@ -4,8 +4,8 @@ import hashlib
 import hmac
 import json
 
-from jarvis.brain import webhooks
-from jarvis.config import settings
+from afon.brain import webhooks
+from afon.config import settings
 
 _ok = 0
 _fail = 0

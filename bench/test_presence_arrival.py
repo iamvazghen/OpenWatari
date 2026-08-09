@@ -17,8 +17,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain import presence as pmod  # noqa: E402
-from jarvis.brain.presence import Presence, _greeting  # noqa: E402
+from afon.brain import presence as pmod  # noqa: E402
+from afon.brain.presence import Presence, _greeting  # noqa: E402
 
 passed = failed = 0
 

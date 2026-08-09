@@ -1,11 +1,11 @@
-"""One command to verify Jarvis works end-to-end.
+"""One command to verify Afon works end-to-end.
 
     uv run python bench/run_all_tests.py
 
 Runs every check in order and prints a single PASS/FAIL summary. Tests are tagged:
 
   [offline]  — deterministic, no network (config, VAD, barge-in, wake-word perf)
-  [network]  — needs the freellmapi proxy reachable (Jarvis's brain LLM); reported as
+  [network]  — needs the freellmapi proxy reachable (Afon's brain LLM); reported as
                SKIP (not FAIL) if the proxy is unreachable, so an offline run still passes
   [gated]    — the OpenClaw fleet connect, intentionally blocked until a sanctioned path
                is enabled; reported as SKIP
@@ -62,12 +62,22 @@ TESTS = [
      "offline", ["checks passed ==="]),
     ("Graph memory (L5b): sqlite triple store + multi-hop recall + lazy tools", "test_graph_memory.py",
      "offline", ["checks passed ==="]),
+    ("weather: 'tomorrow'/'this week' answer the day asked for, not today (H2.11)",
+     "test_weather_when.py", "offline", ["checks passed ==="]),
+    ("if_then: the parsed comparison operator is actually applied (H2.12)",
+     "test_if_then_operator.py", "offline", ["checks passed ==="]),
+    ("Vault search (L3): body cache never serves stale text, never holds the loop",
+     "test_vault_search.py", "offline", ["checks passed ==="]),
     ("Phase 10: proactive engine (budget/quiet-hours/clarify-confirm)", "test_phase10_proactive.py",
      "offline", ["checks passed ==="]),
     ("Phase 0 companion: activity/presence tracking + persistent proactive state (no re-fire)",
      "test_presence.py", "offline", ["checks passed ==="]),
     ("Phase 1 companion: context-gated proactivity + dismissal-learning feedback loop",
      "test_proactive_learning.py", "offline", ["checks passed ==="]),
+    ("Tool usage: per-tool call counts survive a restart (input to catalogue tiering)",
+     "test_tool_usage.py", "offline", ["passed, 0 failed"]),
+    ("Proactive suppression counters: 'restrained' is distinguishable from 'never generated'",
+     "test_proactive_suppression.py", "offline", ["passed, 0 failed"]),
     ("Screenshot transport: capture on laptop, read on brain (VPS-split fix)",
      "test_screenshot_transport.py", "offline", ["checks passed ==="]),
     ("Phase 2 companion: field coaching (skill reviews/level/streak) + evening offer",
@@ -154,6 +164,25 @@ TESTS = [
      "test_memory_salience.py", "offline", ["checks passed ==="]),
     ("B1: intent router — high-precision intents narrow to the one right tool; multi-intent/chat untouched",
      "test_intent_router.py", "offline", ["checks passed ==="]),
+    ("B6: clause routing — each clause of a multi-intent turn asks for its own tool, not just the first",
+     "test_clause_routing.py", "offline", ["checks passed ==="]),
+    ("B6: clause completion — a compound request fires every tool its plan names, on BOTH response paths",
+     "test_clause_completion.py", "offline", ["checks passed ==="]),
+    ("J4.2/J4.3: PC-op routing — no tool module silently unrouted, no two modules claiming one op name",
+     "test_pc_agent_routing.py", "offline", ["checks passed ==="]),
+    # J6.2 — five files that were on disk and in NO registry, so they had silently stopped
+    # running. Verified passing before registration; three print nothing at all, so they are
+    # gated on exit code only until they grow a summary line.
+    ("Restore drill: a backup that has never been restored is not a backup (hermetic)",
+     "test_backup_restore.py", "offline", []),
+    ("Composio tool router: two-step router, hermetic, no network",
+     "test_composio_router.py", "offline", ["checks passed ==="]),
+    ("Fleet routing memory: repeated delegated domains surface as a system-prompt bias line",
+     "test_fleet_routing.py", "offline", []),
+    ("PC-agent refuse-list: catastrophic ops die at the elevated executor",
+     "test_pc_agent_refuse.py", "offline", []),
+    ("Proactive reporting: the autonomous backlog pass reports what it did, never acts silently",
+     "test_proactive_report.py", "offline", ["proactive report wiring OK"]),
     ("C7 Skills: skill runtime — invoke_skill runs built-in composable manifests step-by-step",
      "test_skill_runtime.py", "offline", ["checks passed ==="]),
     ("C6 Protocols: recovery drills — every protocol rehearses (gated) without launching the real script",
@@ -313,8 +342,8 @@ RUNNABLE_FAILURE = (
 #: instances and Chrome were holding ~72% CPU. The tests weren't hanging — they were finishing a few
 #: seconds late, and whichever one crossed the line got reported as a hang and blocked the deploy.
 #: Five consecutive deploys died on that, each on a different test, each passing in isolation.
-#: Override with JARVIS_TEST_TIMEOUT_S on a slower machine.
-TEST_TIMEOUT_S = int(os.environ.get("JARVIS_TEST_TIMEOUT_S", "420"))
+#: Override with AFON_TEST_TIMEOUT_S on a slower machine.
+TEST_TIMEOUT_S = int(os.environ.get("AFON_TEST_TIMEOUT_S", "420"))
 
 
 #: How long to wait between deadline checks. Also the suspend detector's resolution: ask for a slice
@@ -397,11 +426,56 @@ def classify_result(tag: str, code: int, out: str, needles: list[str]) -> str:
     return "FAIL"
 
 
+_NO_BASH = -99
+
+
+def _run_preflight():
+    """Run scripts/preflight.sh under GIT Bash specifically.
+
+    Not plain `bash`: on this machine that resolves to WSL, which mounts the drive at /mnt/c and
+    reports HOME=/home/<user>. Every path in the script then pointed at a filesystem the brain
+    does not use, so the checker confidently reported "state dir is missing" for a directory
+    sitting right there. A preflight that inspects the wrong machine is worse than no preflight —
+    it is the same failure it exists to catch, one level up.
+    """
+    candidates = [Path(r"C:\Program Files\Git\bin\bash.exe"),
+                  Path(r"C:\Program Files (x86)\Git\bin\bash.exe")]
+    git_bash = next((c for c in candidates if c.is_file()), None)
+    if git_bash is None:
+        return subprocess.CompletedProcess([], _NO_BASH, "", "")
+    return subprocess.run([str(git_bash), "scripts/preflight.sh"], cwd=str(ROOT),
+                          capture_output=True, text=True)
+
+
 def main() -> int:
     print("=" * 60)
-    print(" JARVIS — full verification")
+    print(" AFON — full verification")
     print("=" * 60)
     results: list[tuple[str, str]] = []  # (status, label)
+
+    # K7b — the environment invariants run FIRST, before any test.
+    #
+    # The rename produced three silent failures in one day (stranded face refs, wrong deploy path,
+    # wrong env prefix) and **118 passing tests caught none of them**, because none is a code
+    # defect: they are statements about the machine the code runs on. Waiting for a deploy to
+    # discover them means discovering them at the worst moment.
+    #
+    # Local checks only here (no --remote): the gate must stay runnable offline, and the remote
+    # assertions belong to the deploy, which is the thing they gate.
+    print("\n--- [ops] Preflight: environment invariants (K7b)\n    (scripts/preflight.sh)")
+    pre = _run_preflight()
+    print("    " + (pre.stdout or "").strip().replace("\n", "\n    "))
+    if pre.returncode == 0:
+        results.append(("PASS", "Preflight: environment invariants (K7b)"))
+    elif pre.returncode == _NO_BASH:
+        print("    -> SKIP (no Git Bash found; preflight still runs on deploy)")
+        results.append(("SKIP", "Preflight: environment invariants (K7b)"))
+    else:
+        # NOT fatal to the run. A broken invariant is real, but stopping here would hide every
+        # code result behind an environment problem — and a gate people cannot get past is a gate
+        # people learn to bypass. It fails the run at the end, where it is impossible to miss.
+        print("    -> FAIL (an environment invariant is broken; see the lines above)")
+        results.append(("FAIL", "Preflight: environment invariants (K7b)"))
 
     for label, script, tag, needles in TESTS:
         print(f"\n--- [{tag}] {label}\n    ({script})")

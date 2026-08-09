@@ -15,8 +15,8 @@ import asyncio
 import time
 from types import SimpleNamespace
 
-from jarvis.brain.llm import LLMClient
-from jarvis.config import settings
+from afon.brain.llm import LLMClient
+from afon.config import settings
 
 PASS = 0
 FAIL = 0

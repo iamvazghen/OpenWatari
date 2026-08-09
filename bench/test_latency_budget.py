@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from jarvis.config import settings
+from afon.config import settings
 
 BUDGET_S = 6.0  # first spoken sentence; typical ~1s, proxy-regression was 15.7s
 CONNECT_TIMEOUT_S = 8
@@ -51,3 +51,21 @@ def test_brain_first_sentence_within_budget() -> None:
         f"brain first-sentence latency {latency:.2f}s blew the {BUDGET_S}s budget — "
         "check the LLM primary/provider chain before deploying (see TODO.md #1)"
     )
+
+
+# Runnable as a script. The canonical runner is `bench/run_all_tests.py`, not pytest, and this file
+# is EXEMPT from it (it needs a reachable brain) — so without this block the guard had no way to be
+# executed by anything at all. Run it by hand, or from the deploy host, before shipping:
+#
+#     .venv/Scripts/python.exe bench/test_latency_budget.py
+if __name__ == "__main__":
+    import sys
+
+    try:
+        test_brain_first_sentence_within_budget()
+    except BaseException as e:  # noqa: BLE001 — pytest.skip raises Skipped, which is not an Exception
+        if type(e).__name__ != "Skipped":
+            raise
+        print(f"=== 0/1 checks passed (SKIPPED: {e}) ===")
+        sys.exit(0)
+    print(f"=== 1/1 checks passed (first sentence within {BUDGET_S}s) ===")

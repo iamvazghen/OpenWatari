@@ -1,7 +1,7 @@
-"""Behavioral & production-readiness suite — judges HOW WELL Watari works, not just that it works.
+"""Behavioral & production-readiness suite — judges HOW WELL Afon works, not just that it works.
 
 Unlike bench/run_all_tests.py (unit/integration pass-fail), this drives the REAL agent
-(``JarvisAgent.respond`` — live LLM via freellmapi + live tools + live memory) through realistic
+(``AfonAgent.respond`` — live LLM via freellmapi + live tools + live memory) through realistic
 spoken scenarios, captures for each turn:
 
   * which tools actually fired (by patching the audit trail),
@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from jarvis.brain import audit
+from afon.brain import audit
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -78,7 +78,7 @@ def scenarios() -> list[Scenario]:
     return [
         Scenario("identity", "Conversation", [
             Turn("Who are you, and who do you work for?",
-                 expect_text=("watari", "assistant"), max_latency_s=7,
+                 expect_text=("afon", "assistant"), max_latency_s=7,
                  note="states persona without a tool"),
             Turn("And what did I just ask you about?",
                  expect_text=("who", "you", "work", "are"), max_latency_s=7,
@@ -347,13 +347,13 @@ def _score_turn(t: Turn, reply: str, tools: list[dict], latency: float) -> tuple
 async def _cleanup() -> None:
     """Undo side effects: forget test facts; delete the one temp Notion task."""
     try:
-        from jarvis.brain.memory import STORE
+        from afon.brain.memory import STORE
         for q in ("tea over coffee", "next travel destination", "capital of Japan", "London flight"):
             STORE.forget(q)
     except Exception:
         pass
     try:
-        from jarvis.brain.tools.notion import notion_delete_task
+        from afon.brain.tools.notion import notion_delete_task
         await notion_delete_task({"title": "behavioral-suite-temp"})
     except Exception:
         pass
@@ -365,7 +365,7 @@ def _bar(score: float, width: int = 20) -> str:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Watari behavioral production-readiness checks.")
+    parser = argparse.ArgumentParser(description="Run Afon behavioral production-readiness checks.")
     parser.add_argument("--ci", action="store_true",
                         help="Exit non-zero when overall score is below --floor.")
     parser.add_argument("--floor", type=float, default=80.0,
@@ -379,10 +379,10 @@ def _parser() -> argparse.ArgumentParser:
 
 async def main(ci: bool = False, floor: float = 80.0, runs: int = 1, only: str = "") -> int:
     audit.record = _patched_record  # instrument
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
     runs = max(1, runs)
-    agent = JarvisAgent()
+    agent = AfonAgent()
     await agent.warmup()
 
     picks = [p.strip() for p in only.split(",") if p.strip()]
@@ -390,7 +390,7 @@ async def main(ci: bool = False, floor: float = 80.0, runs: int = 1, only: str =
 
     results: list[dict] = []
     print("=" * 74)
-    print(" WATARI — BEHAVIORAL & PRODUCTION-READINESS SUITE"
+    print(" AFON — BEHAVIORAL & PRODUCTION-READINESS SUITE"
           + (f"  (median of {runs} runs)" if runs > 1 else "")
           + (f"  [only: {only}]" if picks else ""))
     print("=" * 74)

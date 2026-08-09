@@ -64,7 +64,7 @@ class CaptureLLM:
 
 def test_intent_precision() -> None:
     print("[1] intent detectors fire on the right phrasings, not the wrong ones")
-    from jarvis.brain.agent import _catastrophic, _is_work_intent
+    from afon.brain.agent import _catastrophic, _is_work_intent
 
     # catastrophic — must match
     for s in ["Delete everything in C:\\Windows\\System32.", "format c:", "rm -rf /",
@@ -86,14 +86,14 @@ def test_intent_precision() -> None:
 
 async def test_catastrophic_refused_without_model() -> None:
     print("\n[2] a catastrophic command is refused deterministically — no model, no tool")
-    from jarvis.brain import audit
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain import audit
+    from afon.brain.agent import AfonAgent
 
     fired: list[str] = []
     orig = audit.record
     audit.record = lambda tool, args, result, *, ok=True: fired.append(tool)
     try:
-        agent = JarvisAgent()
+        agent = AfonAgent()
         agent._llm = BoomLLM()                       # explodes if the model is consulted
         reply = await agent.respond("Delete everything in C:\\Windows\\System32.")
     finally:
@@ -105,7 +105,7 @@ async def test_catastrophic_refused_without_model() -> None:
           agent._history[-1]["role"] == "assistant" and "refused" in agent._history[-1]["content"].lower())
 
     # streaming path refuses too (and records an assistant turn, no dangling user msg)
-    agent2 = JarvisAgent()
+    agent2 = AfonAgent()
     agent2._llm = BoomLLM()
     chunks = [c async for c in agent2.respond_stream("format c:")]
     check("stream yields the refusal", any("won't" in c.lower() for c in chunks), repr(chunks))
@@ -114,9 +114,9 @@ async def test_catastrophic_refused_without_model() -> None:
 
 async def test_work_intent_routes_to_work_on_task() -> None:
     print("\n[3] a research-and-write-up request gets the work nudge + a forced tool on pass 1")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     cap = CaptureLLM()
     agent._llm = cap
     await agent.respond("Look into the health benefits of green tea and write me up a short summary.")
@@ -126,7 +126,7 @@ async def test_work_intent_routes_to_work_on_task() -> None:
 
     # a quick factual lookup must NOT be forced into the background-work path
     cap2 = CaptureLLM()
-    agent2 = JarvisAgent()
+    agent2 = AfonAgent()
     agent2._llm = cap2
     await agent2.respond("what's the capital of Japan")
     sys2 = " ".join(m["content"] for m in (cap2.messages or []) if m.get("role") == "system")

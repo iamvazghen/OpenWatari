@@ -39,14 +39,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.config import settings
-    import jarvis.brain.tools.notion as nt
-    import jarvis.brain.tools.notify as notify
-    import jarvis.brain.scheduler as sch
-    from jarvis.brain.scheduler import SCHEDULER
+    from afon.config import settings
+    import afon.brain.tools.notion as nt
+    import afon.brain.tools.notify as notify
+    import afon.brain.scheduler as sch
+    from afon.brain.scheduler import SCHEDULER
 
     if not nt._configured() or not (settings.notion_tasks_db_id or "").strip():
-        print("Notion not configured (JARVIS_NOTION_TOKEN + JARVIS_NOTION_TASKS_DB_ID) — skipping.")
+        print("Notion not configured (AFON_NOTION_TOKEN + AFON_NOTION_TASKS_DB_ID) — skipping.")
         return
 
     tz = ZoneInfo(settings.user_tz)
@@ -56,7 +56,7 @@ async def main() -> None:
     spoke: list[str] = []
     sch._LIVE_SPEAK = lambda m: spoke.append(m)
 
-    async def fake_push(message: str, title: str = "Watari", at=None) -> bool:
+    async def fake_push(message: str, title: str = "Afon", at=None) -> bool:
         return True
     notify.push = fake_push
 
@@ -103,7 +103,7 @@ async def main() -> None:
     check("task removed from Notion (cleaned up)", not still, f"remaining={len(still)}")
 
     print("\n[5] live daily digest build (informational)")
-    from jarvis.brain import daily_digest
+    from afon.brain import daily_digest
     body = await daily_digest.build_body()
     print("   digest body:", (body or "<empty — nothing past due, no important mail>")[:300])
     check("digest build did not error", True)

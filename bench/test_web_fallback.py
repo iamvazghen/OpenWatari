@@ -30,9 +30,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    import jarvis.brain.tools.web as web
-    from jarvis.brain.cache import CACHE
-    from jarvis.config import settings
+    import afon.brain.tools.web as web
+    from afon.brain.cache import CACHE
+    from afon.config import settings
 
     async def boom(_q):
         raise RuntimeError("provider outage")
@@ -96,7 +96,7 @@ def main() -> None:
                                      or "error" in out3.lower() or "sir" in out3.lower()), out3)
 
     print("\n[5] read-only web tools are never confirm-gated; interactive browser IS (Phase 3.5)")
-    from jarvis.brain.proactive import confirm_required
+    from afon.brain.proactive import confirm_required
     check("scrape_url is not confirm-gated", confirm_required("scrape_url", {"url": "x"}) is False)
     check("web_search is not confirm-gated", confirm_required("web_search", {"query": "x"}) is False)
     check("browse_web (read-only fetch) is not confirm-gated",

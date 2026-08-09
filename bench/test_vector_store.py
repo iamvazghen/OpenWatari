@@ -45,7 +45,7 @@ def _stub():
 
 
 def main() -> None:
-    from jarvis.brain.semantic import SemanticIndex, VectorStore
+    from afon.brain.semantic import SemanticIndex, VectorStore
 
     tmp = Path(tempfile.mkdtemp())
     db = tmp / "vec.sqlite"

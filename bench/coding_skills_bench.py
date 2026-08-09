@@ -1,6 +1,6 @@
-"""Coding-skills benchmark for Watari's brain — run BEFORE arming self-improvement.
+"""Coding-skills benchmark for Afon's brain — run BEFORE arming self-improvement.
 
-Self-improvement means Watari edits his own source. Before trusting that, we verify he can actually
+Self-improvement means Afon edits his own source. Before trusting that, we verify he can actually
 reason about code across the three axes Vazghen named:
 
   A. FIND areas for architectural improvement (spot real flaws, rank by severity)
@@ -26,7 +26,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 SYSTEM = (
-    "You are Watari, a senior software engineer reviewing code. Be precise and technical. "
+    "You are Afon, a senior software engineer reviewing code. Be precise and technical. "
     "When asked to find problems, list them ranked by severity. When asked to improve code, give "
     "concrete corrected code. Prefer correctness, then clarity, then performance. Be concise."
 )
@@ -113,11 +113,11 @@ CHALLENGES = [
 
 
 async def main() -> None:
-    from jarvis.brain.llm import LLMClient
+    from afon.brain.llm import LLMClient
 
     llm = LLMClient()
     print("=" * 70)
-    print(" CODING-SKILLS BENCHMARK — Watari's brain")
+    print(" CODING-SKILLS BENCHMARK — Afon's brain")
     print(f" chain: {llm.chain}")
     print("=" * 70)
 

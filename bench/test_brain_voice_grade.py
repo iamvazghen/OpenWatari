@@ -66,9 +66,9 @@ class FakeCompleteLLM:
 
 async def test_single_tool_short_circuit() -> None:
     print("[1] single speakable tool short-circuits the summary pass (2.3)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
 
     async def fake_weather(_args: dict) -> str:
         return "In Paris, France it's 18°C (feels like 17°C), wind 9 km/h, sir."
@@ -88,9 +88,9 @@ async def test_single_tool_short_circuit() -> None:
 
 async def test_multi_tool_keeps_summary() -> None:
     print("\n[2] a multi-tool turn still summarises (no short-circuit) (2.3)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
 
     async def fake_weather(_args: dict) -> str:
         return "In Paris it's 18°C, sir."
@@ -113,7 +113,7 @@ async def test_multi_tool_keeps_summary() -> None:
 
 async def test_read_intents_force_tools() -> None:
     print("\n[3] data-read intents are recognised; chat/math are not (2.4)")
-    from jarvis.brain.agent import _wants_forced_tool
+    from afon.brain.agent import _wants_forced_tool
 
     should_force = [
         "what's the weather in Berlin",
@@ -151,9 +151,9 @@ async def test_read_intents_force_tools() -> None:
 
 async def test_parallel_independent_tools() -> None:
     print("\n[4] independent tool calls run concurrently, in order (2.5)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     order: list[str] = []
 
     span: dict[str, float] = {}
@@ -200,9 +200,9 @@ async def test_parallel_independent_tools() -> None:
 
 async def test_confirm_gated_not_run_in_parallel() -> None:
     print("\n[5] a confirm-gated tool is held (never run) even alongside a safe one (2.5)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     agent._confirm_granted = False
     ran = {"send_email": 0, "get_time": 0}
 
@@ -230,7 +230,7 @@ async def test_confirm_gated_not_run_in_parallel() -> None:
 
 async def test_multi_intent_detection() -> None:
     print("\n[6] multi-intent connectors are detected; single intents are not (4.2)")
-    from jarvis.brain.agent import _is_multi_intent
+    from afon.brain.agent import _is_multi_intent
 
     multi = [
         "look up the capital of Japan and remember it",
@@ -252,9 +252,9 @@ async def test_multi_intent_detection() -> None:
 
 async def test_multi_intent_no_short_circuit() -> None:
     print("\n[7] a multi-intent turn does BOTH parts (short-circuit suppressed) (4.2)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     ran = {"get_time": 0, "remember": 0}
 
     async def fake_time(_a):
@@ -281,9 +281,9 @@ async def test_multi_intent_no_short_circuit() -> None:
 
 async def test_multi_intent_completion_retry() -> None:
     print("\n[8] multi-intent: a premature stop after ONE tool triggers a forced completion pass (4.2)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     ran = {"web_search": 0, "remember": 0}
 
     async def fake_web(_a):
@@ -314,8 +314,8 @@ async def test_multi_intent_completion_retry() -> None:
 
 async def test_channel_read_short_circuit_flag() -> None:
     print("\n[9] channel-read direct-speak is flag-gated + length-capped (speed/UX A/B)")
-    from jarvis.brain.agent import _direct_speakable
-    from jarvis.config import settings
+    from afon.brain.agent import _direct_speakable
+    from afon.config import settings
 
     short = [{"name": "list_events", "result": "Nothing on your calendar today, sir.", "ok": True}]
     long = [{"name": "read_email", "result": "You have 9 messages, sir. " + "From X: subject. " * 30,

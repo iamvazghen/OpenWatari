@@ -1,4 +1,4 @@
-"""Benchmark freellmapi models for Jarvis's brain.
+"""Benchmark freellmapi models for Afon's brain.
 
 For a voice agent, Time-To-First-Token (TTFT) dominates perceived latency, so we
 stream and measure when the first token arrives, plus total time and whether the
@@ -16,8 +16,8 @@ from openai import OpenAI
 load_dotenv()
 
 client = OpenAI(
-    base_url=os.environ["JARVIS_FREELLMAPI_BASE_URL"],
-    api_key=os.environ["JARVIS_FREELLMAPI_API_KEY"],
+    base_url=os.environ["AFON_FREELLMAPI_BASE_URL"],
+    api_key=os.environ["AFON_FREELLMAPI_API_KEY"],
 )
 
 CANDIDATES = [
@@ -34,7 +34,7 @@ CANDIDATES = [
     "meta-llama/llama-3.3-70b-instruct:free",
 ]
 
-SYSTEM = "You are Jarvis, a concise voice assistant. Answer in one short sentence."
+SYSTEM = "You are Afon, a concise voice assistant. Answer in one short sentence."
 USER = "What is the capital of Armenia?"
 
 

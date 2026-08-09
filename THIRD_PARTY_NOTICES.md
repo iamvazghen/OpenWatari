@@ -1,6 +1,6 @@
 # Third-party notices
 
-OpenWatari itself is released under the **MIT License** (see [`LICENSE`](LICENSE)). It is a *framework*
+OpenAfon itself is released under the **MIT License** (see [`LICENSE`](LICENSE)). It is a *framework*
 that orchestrates a number of third-party libraries and cloud services. This file records the
 licenses of the **direct** dependencies and the obligations that come with them, so you can
 distribute a fork with confidence.
@@ -87,10 +87,10 @@ model card before redistributing any weights with your fork.
 
 ## Naming & trademark note
 
-This project is **OpenWatari** and the assistant is **Watari** — names chosen specifically so the
-public brand does **not** rely on a franchise-associated mark. *Jarvis* is referenced only as the
+This project is **OpenAfon** and the assistant is **Afon** — names chosen specifically so the
+public brand does **not** rely on a franchise-associated mark. *Afon* is referenced only as the
 blueprint/inspiration and is **not** used as the project's brand; the internal Python package keeps
-the short name `jarvis` (import paths/CLI) for stability, which is a code identifier, not a public
+the short name `afon` (import paths/CLI) for stability, which is a code identifier, not a public
 trademark. The MIT license grants **copyright** permissions, not **trademark** rights — if you fork
 under a different public name, pick one that's your own and update the persona file
-(`personality/jarvis.md`) and the wizard's display-name step accordingly.
+(`personality/afon.md`) and the wizard's display-name step accordingly.

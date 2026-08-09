@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.config import settings  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 THRESH = settings.proactive_relevance_threshold
 _ok = _fail = 0
@@ -31,8 +31,8 @@ def clears(sigs, label):
 
 
 # --- wellbeing: force a long unbroken session -----------------------------------------------
-import jarvis.brain.presence as presence_mod  # noqa: E402
-import jarvis.brain.proactive_signals as ps  # noqa: E402
+import afon.brain.presence as presence_mod  # noqa: E402
+import afon.brain.proactive_signals as ps  # noqa: E402
 
 
 class _FakePresence:
@@ -52,7 +52,7 @@ clears(ps.wellbeing_signals(datetime(2026, 7, 15, 2, tzinfo=timezone.utc)), "wel
 clears(presence_mod.presence_signals(), "presence (welcome back)")
 
 # --- memory_resurface: force one salient, un-resurfaced note --------------------------------
-import jarvis.brain.memory as memory_mod  # noqa: E402
+import afon.brain.memory as memory_mod  # noqa: E402
 import tempfile  # noqa: E402
 
 ps._RESURFACED_PATH = Path(tempfile.gettempdir()) / "test_resurfaced.json"
@@ -68,7 +68,7 @@ clears(ps.pattern_suggestion(), "pattern_suggestion")
 
 # --- anticipation: stub the LLM to return one useful line -----------------------------------
 import asyncio  # noqa: E402
-from jarvis.brain.anticipation import make_anticipation_source  # noqa: E402
+from afon.brain.anticipation import make_anticipation_source  # noqa: E402
 
 
 class _FakeLLM:
@@ -89,7 +89,7 @@ clears(asyncio.run(src()), "anticipation (LLM-reasoned)")
 import json  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
-import jarvis.brain.tools.routines as routines_mod  # noqa: E402
+import afon.brain.tools.routines as routines_mod  # noqa: E402
 
 ps._ROUTINES_PATH = Path(tempfile.gettempdir()) / "test_routines.json"
 ps._ROUTINES_PATH.write_text(json.dumps([

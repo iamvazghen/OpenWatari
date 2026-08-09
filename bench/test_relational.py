@@ -21,9 +21,9 @@ from zoneinfo import ZoneInfo
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.affect import infer_affect, manner_note  # noqa: E402
-from jarvis.brain.relationship import RelationshipMemory  # noqa: E402
-from jarvis.config import settings  # noqa: E402
+from afon.brain.affect import infer_affect, manner_note  # noqa: E402
+from afon.brain.relationship import RelationshipMemory  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 passed = failed = 0
 
@@ -81,7 +81,7 @@ def main() -> None:
     check("affect log capped at 60", len(rel2._r.affect_log) == 60, str(len(rel2._r.affect_log)))
 
     print("\n[5] 6.3 presence continuous-session accessor")
-    from jarvis.brain.presence import Presence
+    from afon.brain.presence import Presence
 
     poll = settings.presence_poll_seconds
     pres = Presence(db_path=Path(tempfile.mkdtemp()) / "activity.db")
@@ -96,8 +96,8 @@ def main() -> None:
     check("idle head -> zero", pres.continuous_active_minutes(now=now + 1) == 0.0)
 
     print("\n[6] 6.3 wellbeing pushback fires on a long session, quiet otherwise")
-    import jarvis.brain.presence as presence_mod
-    from jarvis.brain.proactive_signals import wellbeing_signals
+    import afon.brain.presence as presence_mod
+    from afon.brain.proactive_signals import wellbeing_signals
 
     class FakePresence:
         def __init__(self, m):
@@ -124,15 +124,15 @@ def main() -> None:
         presence_mod.PRESENCE = saved
 
     print("\n[7] the source is registered on the live proactive tick")
-    from jarvis.brain.proactive import default_signal_sources
+    from afon.brain.proactive import default_signal_sources
     names = {getattr(s, "__name__", "") for s in default_signal_sources()}
     check("wellbeing_signals registered", "wellbeing_signals" in names, str(sorted(names)))
 
     print("\n[8] the agent injects a relational note (no full init)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
     # A deterministically-stressed utterance (matches a real cue) so the manner directive is always
     # present — not leaning on whatever the on-disk relationship singleton happens to hold.
-    note = JarvisAgent._relational_note(object.__new__(JarvisAgent), "ugh this is still not working and I'm so annoyed")
+    note = AfonAgent._relational_note(object.__new__(AfonAgent), "ugh this is still not working and I'm so annoyed")
     check("stressed utterance -> a manner note", bool(note) and "concise" in note, repr(note))
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")

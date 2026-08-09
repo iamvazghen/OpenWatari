@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from loguru import logger  # noqa: E402
 
-from jarvis.shared import errors as err  # noqa: E402
+from afon.shared import errors as err  # noqa: E402
 
 PASS = FAIL = 0
 
@@ -151,14 +151,14 @@ async def main() -> None:
           all(json.loads(l) for l in journal.read_text(encoding="utf-8").splitlines() if l.strip()))
 
     print("\n[8] wired into the running system")
-    from jarvis.brain.tools import tool_names
-    from jarvis.shared.protocol import ErrorReport, Utterance
+    from afon.brain.tools import tool_names
+    from afon.shared.protocol import ErrorReport, Utterance
 
     check("the diagnose tool is registered", "diagnose" in tool_names())
     check("Utterance carries a turn id", "turn_id" in Utterance.model_fields)
     check("the wire has an ErrorReport message", ErrorReport(entry={"a": 1}).type == "error")
 
-    from jarvis.brain.tools.diagnose import diagnose
+    from afon.brain.tools.diagnose import diagnose
     said = await diagnose({"minutes": 60})
     check("diagnose speaks a real summary", "problem" in said.lower() and "sir" in said.lower(), said)
     clean = await diagnose({"minutes": 60, "turn": "nosuchturn"})
@@ -169,7 +169,7 @@ async def main() -> None:
     # so they must reach the brain's journal or half his experience stays invisible to it.
     import json as _json
 
-    from jarvis.brain import pc_link
+    from afon.brain import pc_link
 
     sent: list[dict] = []
 
@@ -226,9 +226,9 @@ async def main() -> None:
           not err.looks_failed("You have 3 events today, sir: standup at 09:00."))
 
     print("\n[11] every tool is covered by one wrapper")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     n_tools = len(agent._registry)
     before = len(err.read(limit=999))
     agent._registry["_boom"] = _raiser
@@ -253,7 +253,7 @@ async def main() -> None:
           any(e["subsystem"] == "tool/_nosuchtool" for e in err.read(limit=4)))
 
     print("\n[12] agentic + scheduled work")
-    from jarvis.brain.proactive import ProactiveEngine
+    from afon.brain.proactive import ProactiveEngine
 
     def _bad_source():
         raise RuntimeError("source exploded")
@@ -302,7 +302,7 @@ async def _ok(_args):
 def _accepts_sources() -> bool:
     import inspect as _i
 
-    from jarvis.brain.proactive import ProactiveEngine
+    from afon.brain.proactive import ProactiveEngine
 
     return "sources" in _i.signature(ProactiveEngine.__init__).parameters
 

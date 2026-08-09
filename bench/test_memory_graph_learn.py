@@ -55,9 +55,9 @@ CONVO = [
 
 
 async def main() -> None:
-    from jarvis.brain.background_review import _parse_facts, _parse_relations, review_and_learn
-    from jarvis.brain.graph import GraphMemory
-    from jarvis.brain.memory import MemoryStore
+    from afon.brain.background_review import _parse_facts, _parse_relations, review_and_learn
+    from afon.brain.graph import GraphMemory
+    from afon.brain.memory import MemoryStore
 
     print("[1] the reviewer extracts facts -> L1 AND relations -> L5b graph, in one call")
     obj = ('{"facts": ["the owner has a rabbit farm in Armavir.", '
@@ -96,7 +96,7 @@ async def main() -> None:
               set(_parse_facts(('{"facts":["x is y."],"relations":[]}'))) == {"x is y."})
 
     print("\n[5] Fix #3 — L5 semantic defaults ON (graceful)")
-    from jarvis.config import settings
+    from afon.config import settings
     check("memory_semantic_enabled defaults True", settings.memory_semantic_enabled is True)
     # Graceful: recall must not crash even if no embedder resolves (it degrades to keyword).
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:

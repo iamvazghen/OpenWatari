@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from types import SimpleNamespace  # noqa: E402
 
-from jarvis.brain.anticipation import make_anticipation_source  # noqa: E402
-from jarvis.brain.world_model import WorldModel  # noqa: E402
+from afon.brain.anticipation import make_anticipation_source  # noqa: E402
+from afon.brain.world_model import WorldModel  # noqa: E402
 
 passed = failed = 0
 

@@ -88,8 +88,8 @@ def _fake_registry(recorder: list) -> dict:
 
 
 async def main() -> None:
-    from jarvis.brain.code_improve import run_code_self_improve
-    from jarvis.config import settings
+    from afon.brain.code_improve import run_code_self_improve
+    from afon.config import settings
 
     print("[1] OFF by default — disarmed call is a no-op, no branch created")
     rec: list[str] = []
@@ -102,15 +102,15 @@ async def main() -> None:
     print("\n[2] armed run: branch -> edit -> test -> commit locally, NO push")
     rec.clear()
     script = [
-        ("read_source", '{"path": "src/jarvis/brain/agent.py"}'),
-        ("write_source", '{"path": "src/jarvis/brain/agent.py", "content": "..."}'),
+        ("read_source", '{"path": "src/afon/brain/agent.py"}'),
+        ("write_source", '{"path": "src/afon/brain/agent.py", "content": "..."}'),
         ("run_tests", '{}'),
         ("git_commit", '{"message": "warmer greeting"}'),
         None,   # final: model stops and writes its report
     ]
     llm = _ScriptedLLM(script)
     out = await run_code_self_improve("make the greeting warmer", llm, reg, enabled=True, max_steps=8)
-    check("run reports the branch", out.startswith("On branch 'watari/selfimprove-"), out[:60])
+    check("run reports the branch", out.startswith("On branch 'afon/selfimprove-"), out[:60])
     check("branch was created first", rec and rec[0] == "git_new_branch", str(rec[:1]))
     check("it edited source", "write_source" in rec)
     check("it ran tests before committing", rec.index("run_tests") < rec.index("git_commit"))
@@ -134,7 +134,7 @@ async def main() -> None:
     check("commit still happened locally", "git_commit" in rec)
 
     print("\n[4] the tool set handed to the loop excludes push/outward tools")
-    from jarvis.brain.code_improve import _ALLOWED_TOOLS
+    from afon.brain.code_improve import _ALLOWED_TOOLS
     check("git_push not offered to the model", "git_push" not in _ALLOWED_TOOLS)
     check("create_github_issue not offered", "create_github_issue" not in _ALLOWED_TOOLS)
 

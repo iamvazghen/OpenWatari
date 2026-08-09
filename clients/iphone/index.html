@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Watari</title>
-<!-- The brain injects <script>window.JARVIS_TOKEN="…"</script> here at serve time (server.py),
+<title>Afon</title>
+<!-- The brain injects <script>window.AFON_TOKEN="…"</script> here at serve time (server.py),
      so this page needs no manual token paste when opened over the tailnet. -->
 <style>
   :root { --bg:#0b0d12; --fg:#e7ecf3; --dim:#8b95a7; --accent:#4c8dff; --accent2:#8b5cff;
@@ -40,9 +40,9 @@
 </style>
 </head>
 <body>
-  <h1>Watari</h1>
+  <h1>Afon</h1>
   <div class="sub">tap to talk · over your private tailnet</div>
-  <button id="mic" aria-label="Talk to Watari">Tap&nbsp;to&nbsp;talk</button>
+  <button id="mic" aria-label="Talk to Afon">Tap&nbsp;to&nbsp;talk</button>
   <div id="status">Ready.</div>
 
   <div id="youCard" class="card hidden">
@@ -50,7 +50,7 @@
     <div id="you"></div>
   </div>
   <div id="replyCard" class="card hidden">
-    <div class="label">Watari</div>
+    <div class="label">Afon</div>
     <div id="reply"></div>
     <audio id="player" controls playsinline></audio>
   </div>
@@ -67,7 +67,7 @@
   const replyEl = document.getElementById('reply');
   const player = document.getElementById('player');
 
-  const TOKEN = window.JARVIS_TOKEN || '';
+  const TOKEN = window.AFON_TOKEN || '';
   let media = null, recorder = null, chunks = [], recording = false, busy = false;
 
   function setStatus(msg, isErr) {
@@ -141,8 +141,8 @@
       if (res.status === 401) { setStatus('Unauthorized — the brain rejected the token.', true); return resetMic(); }
       if (!res.ok) { setStatus('Brain error (' + res.status + ').', true); return resetMic(); }
 
-      const transcript = res.headers.get('X-Watari-Transcript') || '';
-      const replyHdr = res.headers.get('X-Watari-Reply') || '';
+      const transcript = res.headers.get('X-Afon-Transcript') || '';
+      const replyHdr = res.headers.get('X-Afon-Reply') || '';
       const ctype = (res.headers.get('Content-Type') || '').toLowerCase();
 
       if (ctype.indexOf('audio') === 0) {

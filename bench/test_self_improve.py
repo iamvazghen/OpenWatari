@@ -41,7 +41,7 @@ class FakeLLM:
 
 
 CONVO = [
-    {"role": "user", "content": "From now on keep your replies under two sentences, and call yourself Watari."},
+    {"role": "user", "content": "From now on keep your replies under two sentences, and call yourself Afon."},
     {"role": "assistant", "content": "Understood, sir."},
     {"role": "user", "content": "My rabbit farm is in Armavir and I train at 6am."},
     {"role": "assistant", "content": "Noted, sir."},
@@ -49,14 +49,14 @@ CONVO = [
 
 
 async def main() -> None:
-    from jarvis.brain.background_review import _parse_facts, review_and_learn
-    from jarvis.brain.memory import MemoryStore
+    from afon.brain.background_review import _parse_facts, review_and_learn
+    from afon.brain.memory import MemoryStore
 
     print("[1] facts are extracted from a conversation and written to L1")
     with tempfile.TemporaryDirectory() as d:
         store = MemoryStore(base_dir=d)
         llm = FakeLLM('["Vazghen wants replies under two sentences.", '
-                      '"Vazghen renamed his assistant to Watari.", '
+                      '"Vazghen renamed his assistant to Afon.", '
                       '"Vazghen has a rabbit farm in Armavir."]')
         learned = await review_and_learn(CONVO, llm, store=store)
         check("the reviewer called the model once", llm.calls == 1, str(llm.calls))

@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-SCRIPT_DIR = Path(__file__).resolve().parents[1] / "src" / "jarvis" / "protocols"
+SCRIPT_DIR = Path(__file__).resolve().parents[1] / "src" / "afon" / "protocols"
 passed = failed = 0
 
 
@@ -44,8 +44,8 @@ def _src(name: str) -> str:
 
 
 async def main() -> None:
-    import jarvis.brain.protocols as P
-    from jarvis.brain.tools import protocols as protocols_tool
+    import afon.brain.protocols as P
+    from afon.brain.tools import protocols as protocols_tool
 
     all_protos = P.protocol_names()
 
@@ -66,11 +66,11 @@ async def main() -> None:
     # The brain moved to the VPS and the scripts became landmines (taskkill against what is now the
     # brain's pid; `shutdown -r` aimed at the server), so the real commands moved into the registry as
     # `pc_command` and travel to the laptop. Asserting against the scripts would now pin the bug.
-    from jarvis.brain.protocols import _registry as _reg
+    from afon.brain.protocols import _registry as _reg
 
     _cmds = {n: (p.get("pc_command") or "") for n, p in _reg().items()}
-    check("phoenix RELAUNCHES the edge (WatariEdgeRefresh on the laptop)",
-          "WatariEdgeRefresh" in _cmds["phoenix"], _cmds["phoenix"][:70])
+    check("phoenix RELAUNCHES the edge (AfonEdgeRefresh on the laptop)",
+          "AfonEdgeRefresh" in _cmds["phoenix"], _cmds["phoenix"][:70])
     check("ragnarok REBOOTS the machine (shutdown /r on the laptop)",
           "shutdown" in _cmds["ragnarok"].lower() and "/r" in _cmds["ragnarok"], _cmds["ragnarok"][:70])
     check("goodnight STOPS the edge and marks the silence as ordered",
@@ -97,7 +97,7 @@ async def main() -> None:
         # Right password + a connected laptop -> the op travels to the LAPTOP, and NOTHING is launched
         # on the brain host. Before 2026-07-30 these ran wherever the brain was: on the VPS that meant
         # `shutdown` without sudo and `taskkill` on Linux — silent no-ops that still said "restarting".
-        from jarvis.brain import pc_link
+        from afon.brain import pc_link
 
         forwarded: list = []
 
@@ -111,7 +111,7 @@ async def main() -> None:
         real_link = pc_link.PC_LINK
         pc_link.PC_LINK = _FakeLink()
         try:
-            for name, needle in (("phoenix", "WatariEdgeRefresh"), ("ragnarok", "shutdown /r")):
+            for name, needle in (("phoenix", "AfonEdgeRefresh"), ("ragnarok", "shutdown /r")):
                 launched.clear()
                 forwarded.clear()
                 pw = P._registry()[name]["password"]
@@ -158,14 +158,14 @@ async def main() -> None:
           and "make_archive" in auditpack_src)
     # Distinct output names prove three different artifacts, not one operation thrice.
     check("three DISTINCT archive names (memory / checkpoint / audit)",
-          "jarvis-memory-" in backup_src and "jarvis-checkpoint-" in checkpoint_src
-          and "jarvis-audit-" in auditpack_src)
+          "afon-memory-" in backup_src and "afon-checkpoint-" in checkpoint_src
+          and "afon-audit-" in auditpack_src)
     # phoenix is a RESTART, not an archive — no overlap with the archive trio (audit conclusion).
     check("phoenix is a restart, not an archive (no backup/checkpoint overlap)",
           "zipfile" not in _src("phoenix") and "make_archive" not in _src("phoenix"))
 
     print("\n[H1.5] routed protocols cannot execute on the brain host")
-    from jarvis.brain.protocols import _registry, run_protocol
+    from afon.brain.protocols import _registry, run_protocol
 
     reg = _registry()
     routed = [n for n, p in reg.items() if p.get("pc_command")]

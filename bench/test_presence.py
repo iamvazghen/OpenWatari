@@ -39,13 +39,13 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
     settings.presence_poll_seconds = 60      # each active sample = 60s of screen time
     settings.presence_idle_threshold_seconds = 90
     settings.presence_retention_days = 30
 
-    from jarvis.brain.presence import Presence
-    import jarvis.brain.tools.activity as act
+    from afon.brain.presence import Presence
+    import afon.brain.tools.activity as act
 
     tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     p = Presence(db_path=Path(tmp.name) / "presence.sqlite")
@@ -57,7 +57,7 @@ async def main() -> None:
     for _ in range(3):
         p.record("chrome", "YouTube - something", 2.0, ts=now)     # active browsing
     for _ in range(2):
-        p.record("Code", "server.py - Watari", 4.0, ts=now)        # active coding
+        p.record("Code", "server.py - Afon", 4.0, ts=now)        # active coding
     p.record("chrome", "idle tab", 300.0, ts=now)                  # away -> not counted
     data = p.screen_time(0)
     check("chrome credited 3×60s", data["apps"].get("chrome") == 180, str(data["apps"]))
@@ -107,7 +107,7 @@ async def main() -> None:
     print("\n[7] proactive engine persists budget + suppression across a restart")
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
-    from jarvis.brain.proactive import ProactiveEngine, Signal
+    from afon.brain.proactive import ProactiveEngine, Signal
     tz = ZoneInfo(settings.user_tz)
     t0 = datetime(2026, 7, 13, 12, 0, tzinfo=tz)
     state_file = str(Path(tmp.name) / "proactive_state.json")

@@ -30,10 +30,10 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
 
     print("[1] speaker gate decision logic (pure)")
-    from jarvis.edge.speaker_id import cosine, should_accept
+    from afon.edge.speaker_id import cosine, should_accept
 
     check("accepts when feature OFF", should_accept(0.0, 0.25, True, False) is True)
     check("accepts when no profile", should_accept(0.0, 0.25, False, True) is True)
@@ -44,7 +44,7 @@ async def main() -> None:
     check("cosine orthogonal = 0.0", abs(cosine(v, np.array([0.0, 1.0, 0.0], dtype=np.float32))) < 1e-6)
 
     print("\n[2] SpeakerVerifier degradation (no backend / no profile)")
-    from jarvis.edge.speaker_id import SpeakerVerifier
+    from afon.edge.speaker_id import SpeakerVerifier
 
     # No profile enrolled, feature off -> always accept, score 1.0.
     settings.speaker_id_enabled = False
@@ -93,7 +93,7 @@ async def main() -> None:
     from pipecat.processors.frame_processor import FrameDirection
     from pipecat.utils.time import time_now_iso8601
 
-    from jarvis.edge.speaker_gate import SpeakerGate
+    from afon.edge.speaker_gate import SpeakerGate
 
     with tempfile.TemporaryDirectory() as d:
         settings.speaker_profile_path = str(Path(d) / "vp.json")

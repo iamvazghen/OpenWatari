@@ -1,4 +1,4 @@
-"""Verify Jarvis's STT understands you in any of the six languages — with your REAL voice.
+"""Verify Afon's STT understands you in any of the six languages — with your REAL voice.
 
 Records a few seconds from your mic and transcribes with faster-whisper (auto-detect), printing
 the DETECTED language + the transcript. Say a sentence in English, French, German, Armenian,

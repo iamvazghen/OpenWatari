@@ -32,8 +32,8 @@ def approx(a, b, tol=0.01) -> bool:
 
 
 def main() -> None:
-    import jarvis.brain.tools.utility as u
-    from jarvis.brain.tools import tool_names
+    import afon.brain.tools.utility as u
+    from afon.brain.tools import tool_names
 
     print("[1] unit conversion maths (length / mass / temperature)")
     km, err = u.convert_units(100, "km", "mi")

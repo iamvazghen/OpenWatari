@@ -46,9 +46,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    import jarvis.brain.tools.localplay as lp
-    from jarvis.brain.pc_link import PC_LINK
-    from jarvis.brain.tools import tool_names
+    import afon.brain.tools.localplay as lp
+    from afon.brain.pc_link import PC_LINK
+    from afon.brain.tools import tool_names
 
     print("[1] all three primitives go to the laptop when one is linked")
     seen: list[tuple[str, dict]] = []
@@ -117,7 +117,7 @@ def main() -> None:
     check("empty payload refused at the executor", bad["ok"] is False, str(bad))
 
     print("\n[5] pc_agent wires the audio ops up")
-    import jarvis.edge.pc_agent as agent
+    import afon.edge.pc_agent as agent
     for op in ("audio_play", "audio_stop", "audio_now"):
         check(f"pc_agent executes '{op}'", op in agent.LOCAL_HANDLERS, str(sorted(agent.LOCAL_HANDLERS)))
     check("executor never re-dispatches (would loop brain->laptop->brain)",

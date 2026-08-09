@@ -1,8 +1,8 @@
 """Enroll Vazghen's voice for speaker biometrics (Phase 5).
 
 Records a few short clips from the mic, averages their ECAPA embeddings into one voiceprint, and
-saves it to JARVIS_SPEAKER_PROFILE (default <repo>/voiceprint.json). After this, set
-JARVIS_SPEAKER_ID_ENABLED=true and Jarvis will obey only your voice.
+saves it to AFON_SPEAKER_PROFILE (default <repo>/voiceprint.json). After this, set
+AFON_SPEAKER_ID_ENABLED=true and Afon will obey only your voice.
 
 Needs the 'identity' extra:  uv sync --extra identity
 Run:  uv run python bench/enroll_voice.py
@@ -18,14 +18,14 @@ from pathlib import Path
 
 import numpy as np
 
-from jarvis.config import settings
-from jarvis.edge.speaker_id import SpeakerVerifier
+from afon.config import settings
+from afon.edge.speaker_id import SpeakerVerifier
 
 SR = 16000
 CLIP_S = 4
 N_CLIPS = 3
 PROMPTS = [
-    "Say: 'Hey Jarvis, this is Vazghen.'",
+    "Say: 'Hey Afon, this is Vazghen.'",
     "Say any sentence in your normal voice.",
     "Say one more sentence, a little longer.",
 ]
@@ -145,15 +145,15 @@ def main() -> None:
     print(f"\nVoiceprint {mode} {path} ({len(embeddings)} vector(s) from this session).")
 
     # Verification pass: prove the profile matches the LIVE mic before calling it done. Without
-    # this, a bad enrollment is only discovered when Watari goes deaf to the owner.
-    print("\n--- verification: say naturally, e.g. 'Hey Watari, how are you today?'")
+    # this, a bad enrollment is only discovered when Afon goes deaf to the owner.
+    print("\n--- verification: say naturally, e.g. 'Hey Afon, how are you today?'")
     for c in (3, 2, 1):
         print(f"  recording in {c}…", end="\r", flush=True)
         time.sleep(1)
     print("  ● recording 6s — speak now")
     pcm = _record(6)
     fresh = SpeakerVerifier()          # reload from disk — verifies what was actually saved
-    from jarvis.config import settings as _s
+    from afon.config import settings as _s
     _s.speaker_id_enabled = True       # force a real score even if the .env flag is off
     accept, score = fresh.verify(pcm, SR)
     print(f"  live score: {score:.2f} (threshold {_s.speaker_threshold})")

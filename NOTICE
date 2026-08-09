@@ -1,12 +1,12 @@
-OpenWatari
-Copyright (c) 2026 Vazghen and the OpenWatari contributors
+OpenAfon
+Copyright (c) 2026 Vazghen and the OpenAfon contributors
 
 This product is licensed under the MIT License (see LICENSE).
 
-"OpenWatari" is the project; "Watari" is the assistant persona. "Jarvis" — the fictional
+"OpenAfon" is the project; "Afon" is the assistant persona. "Afon" — the fictional
 assistant — is referenced only as the blueprint/inspiration and is NOT a brand of this project.
-The internal Python package keeps the short name "jarvis" as a code identifier (import paths and
-the `jarvis-setup` CLI), not as a public trademark.
+The internal Python package keeps the short name "afon" as a code identifier (import paths and
+the `afon-setup` CLI), not as a public trademark.
 
 This software incorporates third-party open-source components, each under its own license. A
 summary of those licenses and obligations — including the single weak-copyleft dependency

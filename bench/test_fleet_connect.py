@@ -1,7 +1,7 @@
 """Fleet live test (MASTER 3.10) — verify brain -> ispir end-to-end, GATED on authorization.
 
 The fleet touches shared VPS infra, so this only RUNS when the operator has armed it
-(``JARVIS_FLEET_AUTHORIZED=true``) and a gateway token is configured. Otherwise it self-skips with
+(``AFON_FLEET_AUTHORIZED=true``) and a gateway token is configured. Otherwise it self-skips with
 a clear sentinel — the aggregate runner treats that as SKIP, not FAIL, so a default checkout stays
 green without a live gateway.
 
@@ -9,7 +9,7 @@ When armed it does a real WS connect to the gateway, sends ``agents.list``, and 
 agent (``ispir``) is present — proving the brain can reach its team lead. Network failures (gateway
 down / tunnel closed) are reported as a skip condition, not a hard failure.
 
-    JARVIS_FLEET_AUTHORIZED=true uv run python bench/test_fleet_connect.py
+    AFON_FLEET_AUTHORIZED=true uv run python bench/test_fleet_connect.py
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from jarvis.config import settings
+from afon.config import settings
 
 # Sentinels the aggregate runner greps for.
 SKIP_SENTINEL = "fleet live test skipped"
@@ -31,7 +31,7 @@ def _skip(reason: str) -> None:
 
 async def main() -> None:
     if not settings.fleet_authorized:
-        _skip("JARVIS_FLEET_AUTHORIZED is not true (fleet consult disarmed by default)")
+        _skip("AFON_FLEET_AUTHORIZED is not true (fleet consult disarmed by default)")
     if not settings.openclaw_token or not settings.openclaw_gateway_url:
         _skip("no gateway token/url configured (CLI-only or unconfigured deployment)")
 
@@ -40,7 +40,7 @@ async def main() -> None:
     # rejected (e.g. the gateway's device-identity policy for non-localhost origins). That fallback
     # is exactly how the 24/7 deployment reaches ispir, so verifying it — not a raw WS handshake — is
     # what proves "brain -> ispir end-to-end".
-    from jarvis.brain.fleet import FleetUnavailable, delegate_to_fleet
+    from afon.brain.fleet import FleetUnavailable, delegate_to_fleet
 
     router = settings.openclaw_router_agent
     ping = "Reply with exactly the word PONG and nothing else."

@@ -36,24 +36,24 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    import jarvis.brain.tools.coding as coding
-    import jarvis.brain.tools.skills as skills
-    from jarvis.brain.proactive import confirm_required
-    from jarvis.brain.tools import tool_names
+    import afon.brain.tools.coding as coding
+    import afon.brain.tools.skills as skills
+    from afon.brain.proactive import confirm_required
+    from afon.brain.tools import tool_names
 
     print("[1] path safety — repo-relative only, secrets blocked")
-    check("a normal source path resolves", coding._safe_path("src/jarvis/config.py") is not None)
+    check("a normal source path resolves", coding._safe_path("src/afon/config.py") is not None)
     check("traversal outside repo is refused", coding._safe_path("../../etc/passwd") is None)
     check("absolute escape is refused", coding._safe_path("C:/Windows/system32") is None)
     check(".env is blocked", coding._safe_path(".env") is None)
-    check("a .session file is blocked", coding._safe_path("jarvis.session") is None)
+    check("a .session file is blocked", coding._safe_path("afon.session") is None)
     check("voiceprint.json is blocked", coding._safe_path("voiceprint.json") is None)
     check("the audit/ dir is blocked", coding._safe_path("audit/2026-06-12.jsonl") is None)
     check(".git internals are blocked", coding._safe_path(".git/config") is None)
 
     print("\n[2] the executor reads real code; the tool refuses secrets before they leave the brain")
     # The executor is where the file actually lives, so that is where the read is proven.
-    got = json.loads(asyncio.run(coding._pc_repo_read({"path": "src/jarvis/config.py"})))
+    got = json.loads(asyncio.run(coding._pc_repo_read({"path": "src/afon/config.py"})))
     check("reads config.py", got["ok"] and "Settings" in got["out"], str(got)[:60])
     secret = asyncio.run(coding.read_source({"path": ".env"}))
     check("refuses to read .env", "outside the project or a protected file" in secret, secret)
@@ -103,7 +103,7 @@ def main() -> None:
     check("create_github_issue is confirm-gated (outward-facing)",
           confirm_required("create_github_issue"))
     # With no PAT/repo it must degrade to a spoken 'not configured' note, never raise.
-    from jarvis.config import settings as _s
+    from afon.config import settings as _s
     _tok, _repo = _s.github_token, _s.github_repo
     _s.github_token = None
     _s.github_repo = None
@@ -115,7 +115,7 @@ def main() -> None:
 
     print("\n[7] skills library loads the coding playbooks")
     listing = asyncio.run(skills.list_skills({}))
-    for s in ("self-improvement", "jarvis-architecture", "python", "adding-a-tool", "task-cleanup"):
+    for s in ("self-improvement", "afon-architecture", "python", "adding-a-tool", "task-cleanup"):
         check(f"skill '{s}' listed", s in listing, listing[:80])
     doc = asyncio.run(skills.read_skill({"name": "self-improvement"}))
     check("read_skill returns the playbook", "reversible" in doc.lower(), doc[:80])

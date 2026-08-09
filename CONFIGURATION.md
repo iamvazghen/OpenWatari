@@ -1,16 +1,16 @@
-# Configuring OpenWatari for yourself
+# Configuring OpenAfon for yourself
 
-OpenWatari is designed to be **forked and customised**. Every personality trait, operating rule,
+OpenAfon is designed to be **forked and customised**. Every personality trait, operating rule,
 skill, and tool is either in a `.md` boilerplate file under `personality/` (loaded at every
-prompt) or wired through `.env`. Nothing about how Watari behaves is hardcoded in code that you
+prompt) or wired through `.env`. Nothing about how Afon behaves is hardcoded in code that you
 have to fork Python to edit.
 
 This guide walks through the four customisation surfaces, in order of frequency:
 
-1. **`.env`** — who Watari is, what he answers to, what devices he uses
+1. **`.env`** — who Afon is, what he answers to, what devices he uses
 2. **`personality/*.md`** — how he talks, what defaults he uses
 3. **`skills/*.md`** — domain-specific playbooks the LLM can read on demand
-4. **`memory/learned/`** — facts Watari has picked up about you (auto-curated)
+4. **`memory/learned/`** — facts Afon has picked up about you (auto-curated)
 
 ---
 
@@ -22,20 +22,20 @@ walks through the essentials; this section is for fine-tuning.
 
 | Variable | What it sets | Typical edit |
 |---|---|---|
-| `JARVIS_USER_NAME` | Calls you (default: from setup) | `JARVIS_USER_NAME=Vazghen` |
-| `JARVIS_USER_ADDRESS` | How he addresses you — "sir", "boss", "homie", your name | `JARVIS_USER_ADDRESS=sir` |
-| `JARVIS_UNDERSTOOD_LANGUAGES` | Comma-separated STT languages ("en,hy,ru") | `JARVIS_UNDERSTOOD_LANGUAGES=en,hy,ru,fr,de` |
-| `JARVIS_REPLY_LANGUAGE` | TTS language (always one of the understood set) | `JARVIS_REPLY_LANGUAGE=en` |
-| `JARVIS_PERSONA_FILE` | Which persona `.md` to load at brain startup | `JARVIS_PERSONA_FILE=personality/jarvis.md` |
-| `JARVIS_HOT_MIC_AFTER_WAKE` | After the first wake word, keep the mic open for N minutes instead of needing a re-wake every sentence | `JARVIS_HOT_MIC_AFTER_WAKE=true` |
-| `JARVIS_HOT_MIC_IDLE_MINUTES` | How many minutes of silence close the hot-mic window | `JARVIS_HOT_MIC_IDLE_MINUTES=30` |
-| `JARVIS_DEEPGRAM_ENDPOINTING_MS` | ms of trailing silence before STT hands the utterance to the LLM | `JARVIS_DEEPGRAM_ENDPOINTING_MS=700` |
-| `JARVIS_SPEAKER_ID_ENABLED` | True → only your enrolled voice gets obeyed | `JARVIS_SPEAKER_ID_ENABLED=true` |
-| `JARVIS_BARGE_IN_MODE` | `auto` enables barge-in only on private endpoints (headphones/AirPods); `on` always; `off` never | `JARVIS_BARGE_IN_MODE=auto` |
-| `JARVIS_OPENCLAW_DELEGATION_ENABLED` | If true, complex tasks are delegated to your OpenClaw fleet | `JARVIS_OPENCLAW_DELEGATION_ENABLED=true` |
-| `JARVIS_FLEET_AUTHORIZED` | Master switch for fleet delegation. Off by default. | `JARVIS_FLEET_AUTHORIZED=true` |
-| `JARVIS_COMPOSIO_API_KEY` | 250+ external apps via Composio | `JARVIS_COMPOSIO_API_KEY=ak_...` |
-| `JARVIS_PROACTIVE_*` | Proactive engine: budget, threshold, quiet hours | see `.env` defaults |
+| `AFON_USER_NAME` | Calls you (default: from setup) | `AFON_USER_NAME=Vazghen` |
+| `AFON_USER_ADDRESS` | How he addresses you — "sir", "boss", "homie", your name | `AFON_USER_ADDRESS=sir` |
+| `AFON_UNDERSTOOD_LANGUAGES` | Comma-separated STT languages ("en,hy,ru") | `AFON_UNDERSTOOD_LANGUAGES=en,hy,ru,fr,de` |
+| `AFON_REPLY_LANGUAGE` | TTS language (always one of the understood set) | `AFON_REPLY_LANGUAGE=en` |
+| `AFON_PERSONA_FILE` | Which persona `.md` to load at brain startup | `AFON_PERSONA_FILE=personality/afon.md` |
+| `AFON_HOT_MIC_AFTER_WAKE` | After the first wake word, keep the mic open for N minutes instead of needing a re-wake every sentence | `AFON_HOT_MIC_AFTER_WAKE=true` |
+| `AFON_HOT_MIC_IDLE_MINUTES` | How many minutes of silence close the hot-mic window | `AFON_HOT_MIC_IDLE_MINUTES=30` |
+| `AFON_DEEPGRAM_ENDPOINTING_MS` | ms of trailing silence before STT hands the utterance to the LLM | `AFON_DEEPGRAM_ENDPOINTING_MS=700` |
+| `AFON_SPEAKER_ID_ENABLED` | True → only your enrolled voice gets obeyed | `AFON_SPEAKER_ID_ENABLED=true` |
+| `AFON_BARGE_IN_MODE` | `auto` enables barge-in only on private endpoints (headphones/AirPods); `on` always; `off` never | `AFON_BARGE_IN_MODE=auto` |
+| `AFON_OPENCLAW_DELEGATION_ENABLED` | If true, complex tasks are delegated to your OpenClaw fleet | `AFON_OPENCLAW_DELEGATION_ENABLED=true` |
+| `AFON_FLEET_AUTHORIZED` | Master switch for fleet delegation. Off by default. | `AFON_FLEET_AUTHORIZED=true` |
+| `AFON_COMPOSIO_API_KEY` | 250+ external apps via Composio | `AFON_COMPOSIO_API_KEY=ak_...` |
+| `AFON_PROACTIVE_*` | Proactive engine: budget, threshold, quiet hours | see `.env` defaults |
 
 The setup wizard (`scripts/setup.sh`) writes most of these. Re-run it any time to update.
 
@@ -44,13 +44,13 @@ The setup wizard (`scripts/setup.sh`) writes most of these. Re-run it any time t
 ## 2 · Persona files — `personality/*.md`
 
 The persona is a **boilerplate Markdown file** with placeholders that get filled from `.env`
-at brain startup. The default is `personality/jarvis.md`.
+at brain startup. The default is `personality/afon.md`.
 
 ### Placeholders
 
 | Placeholder | Filled from |
 |---|---|
-| `{assistant_name}` | `JARVIS_USER_NAME` (with `assistant_name`-style default if blank) |
+| `{assistant_name}` | `AFON_USER_NAME` (with `assistant_name`-style default if blank) |
 | `{owner_possessive}` | `"<NAME>'s"` if a name is set, else `"your"` |
 | `{address_line}` | `"Address him as \"<ADDRESS>\""` when an address is set |
 | `{language_line}` | Single- or multi-language reply directive |
@@ -59,10 +59,10 @@ You can also drop the placeholders and write literals — the templating is opti
 
 ### How to roll your own
 
-1. Copy `personality/jarvis.md` → `personality/my_assistant.md`
+1. Copy `personality/afon.md` → `personality/my_assistant.md`
 2. Edit the voice, behaviour, boundaries sections
-3. Set `JARVIS_PERSONA_FILE=personality/my_assistant.md` in `.env`
-4. Restart the brain: `systemctl --user restart jarvis-brain`
+3. Set `AFON_PERSONA_FILE=personality/my_assistant.md` in `.env`
+4. Restart the brain: `systemctl --user restart afon-brain`
 
 That's it. Next system prompt is your custom voice.
 
@@ -70,7 +70,7 @@ That's it. Next system prompt is your custom voice.
 
 There is a second boilerplate, `personality/operating-rules.md`, that controls the **judgement
 calls** the LLM has to make: when to refuse, when to confirm, when to ask. It's loaded into
-every prompt as a separate section; edit that file (rather than `jarvis.md`) when you want to
+every prompt as a separate section; edit that file (rather than `afon.md`) when you want to
 change "should I do this or check first?" rules. See the comments at the top of that file for
 the pattern.
 
@@ -134,14 +134,14 @@ disk and appears in `list_skills` after the next brain start.
 
 ## 4 · Memory — `memory/learned/`
 
-Watari remembers across sessions in **five layers**:
+Afon remembers across sessions in **five layers**:
 
 | Layer | Where | What goes there | How it's written |
 |---|---|---|---|
 | **L0 Working** | session JSON in CWD | The rolling conversation thread | automatic |
 | **L1 Learned** | `memory/learned/*.md` | Durable facts: preferences, decisions, names | `remember(text, tags)`; or extracted by background_review every N turns |
 | **L2 Journal** | `memory/journal/YYYY-MM-DD.md` | A daily summary of what happened | `STORE.journal_append(summary)`; automated at session end |
-| **L3 Obsidian vault** | wherever `JARVIS_VAULT_PATH` points | Your own notes — anything you put there | you (or `write_vault` tool) |
+| **L3 Obsidian vault** | wherever `AFON_VAULT_PATH` points | Your own notes — anything you put there | you (or `write_vault` tool) |
 | **L5 Semantic** | SQLite / FAISS, lazily | Embedding-backed similarity | automatic when `sentence-transformers` is installed |
 
 ### What the LLM sees by default
@@ -172,11 +172,11 @@ A typical customisation:
 
 1. Fork the repo on GitHub.
 2. `cp .env.example .env`, run `scripts/setup.sh`, fill in your keys.
-3. `cp personality/jarvis.md personality/me.md`, edit to taste.
-4. `JARVIS_PERSONA_FILE=personality/me.md` in `.env`.
+3. `cp personality/afon.md personality/me.md`, edit to taste.
+4. `AFON_PERSONA_FILE=personality/me.md` in `.env`.
 5. `cp skills/research-method.md skills/my-research.md`, edit the procedure.
-6. `git add . && git commit -m "personalise watari" && git push`.
+6. `git add . && git commit -m "personalise afon" && git push`.
 7. `scripts/deploy_vps.sh` to redeploy.
 
-Watari now lives in your VPS, sounds like your voice, follows your rules, has your skills,
+Afon now lives in your VPS, sounds like your voice, follows your rules, has your skills,
 and remembers what you've taught him. Voice-first, 24/7.

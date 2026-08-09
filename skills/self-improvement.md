@@ -1,10 +1,10 @@
 # Self-improvement — how to change your own code safely
 
-This is the master playbook, Jarvis. You may edit your own source to get better over time, but the
+This is the master playbook, Afon. You may edit your own source to get better over time, but the
 golden rule is **every change must be reversible and verified**. Never skip a step.
 
 ## The loop (follow it every time)
-1. **Understand first.** `read_skill('jarvis-architecture')` to find the right file, then
+1. **Understand first.** `read_skill('afon-architecture')` to find the right file, then
    `read_source(path)` the file(s) you'll touch. Don't guess at structure — look.
 2. **Branch.** `git_new_branch('improve/<short-name>')` so `master` stays clean and the change is
    isolated. (For a tiny, obviously-safe fix you may stay on master, but branching is the default.)

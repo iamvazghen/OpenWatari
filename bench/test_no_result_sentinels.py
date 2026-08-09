@@ -39,7 +39,7 @@ def _is_complete_sentence(s: str) -> bool:
 
 
 def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
 
     # Unconfigure the credentialed integrations so each read tool takes its empty/degraded path.
     for attr in ("notion_token", "google_refresh_token", "google_client_id", "telegram_api_id",
@@ -51,8 +51,8 @@ def main() -> None:
     settings.jina_api_key = None
 
     print("[1] recall (memory) — all layers empty returns a complete negative")
-    from jarvis.brain.memory import MemoryStore
-    from jarvis.brain.tools import memory as mem_tools
+    from afon.brain.memory import MemoryStore
+    from afon.brain.tools import memory as mem_tools
     # recall is CROSS-LAYER (L1 store + L3 vault + …). Empty the L1 store AND point the vault at an
     # empty dir, else the real vault's fuzzy matches make "empty" impossible to test.
     _saved_vault = settings.vault_path
@@ -68,7 +68,7 @@ def main() -> None:
             settings.vault_path = _saved_vault
 
     print("\n[2] reminders — no reminders set returns a complete negative")
-    from jarvis.brain.tools import reminders
+    from afon.brain.tools import reminders
     r = asyncio.run(reminders.list_reminders({}))
     check("list_reminders: complete sentence", _is_complete_sentence(r), r)
     check("list_reminders: clearly negative", "no reminder" in r.lower(), r)
@@ -77,27 +77,27 @@ def main() -> None:
     check("cancel_reminder(unknown): says couldn't find", "couldn't find" in r.lower(), r)
 
     print("\n[3] calendar — unconfigured returns a complete note (not a blank)")
-    from jarvis.brain.tools import calendar
+    from afon.brain.tools import calendar
     r = asyncio.run(calendar.list_events({"days": 1}))
     check("list_events: complete sentence", _is_complete_sentence(r), r)
 
     print("\n[4] gmail — unconfigured read returns a complete note")
-    from jarvis.brain.tools import gmail
+    from afon.brain.tools import gmail
     r = asyncio.run(gmail.read_email({"query": "invoice"}))
     check("read_email: complete sentence", _is_complete_sentence(r), r)
 
     print("\n[5] tasks — no matching background task returns a complete negative")
-    from jarvis.brain.tools import tasks
+    from afon.brain.tools import tasks
     r = asyncio.run(tasks.task_status({"query": "zzz-nonexistent"}))
     check("task_status(none): complete sentence", _is_complete_sentence(r), r)
 
     print("\n[6] telegram — unconfigured check returns a complete note")
-    from jarvis.brain.tools import telegram
+    from afon.brain.tools import telegram
     r = asyncio.run(telegram.check_telegram({}))
     check("check_telegram: complete sentence", _is_complete_sentence(r), r)
 
     print("\n[7] vault — no match returns a complete negative")
-    from jarvis.brain.tools import vault
+    from afon.brain.tools import vault
     saved_vault = settings.vault_path
     try:
         with tempfile.TemporaryDirectory() as d:

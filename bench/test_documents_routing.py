@@ -44,9 +44,9 @@ def _tmpfile(data: bytes, suffix: str) -> Path:
 
 
 def main() -> None:
-    import jarvis.brain.tools.documents as docs
-    from jarvis.brain import docstore
-    from jarvis.brain.pc_link import PC_LINK
+    import afon.brain.tools.documents as docs
+    from afon.brain import docstore
+    from afon.brain.pc_link import PC_LINK
 
     print("[1] read_document goes to the laptop instead of the brain's filesystem")
     seen: list[tuple[str, dict]] = []
@@ -141,7 +141,7 @@ def main() -> None:
     docstore.STORE.clear()
 
     print("\n[6] pc_agent wires doc_read up")
-    import jarvis.edge.pc_agent as agent
+    import afon.edge.pc_agent as agent
     check("pc_agent executes 'doc_read'", "doc_read" in agent.LOCAL_HANDLERS,
           str(sorted(agent.LOCAL_HANDLERS)))
     check("executor is not the tool entry point (no brain->laptop->brain loop)",

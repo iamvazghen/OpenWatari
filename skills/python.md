@@ -1,6 +1,6 @@
 # Python conventions for this codebase
 
-Match what's already here, Jarvis — consistency matters more than personal taste.
+Match what's already here, Afon — consistency matters more than personal taste.
 
 ## Style
 - Python 3.11, `from __future__ import annotations` at the top of every module.
@@ -25,7 +25,7 @@ unconfigured.
 
 ## Settings
 - Every configurable value goes in `config.py` as a field with a sensible default and a comment.
-- Read it via `from jarvis.config import settings`. Never read `os.environ` directly in tools.
+- Read it via `from afon.config import settings`. Never read `os.environ` directly in tools.
 - New secrets: add the field, add a commented block to `.env.example`, never hard-code.
 
 ## Tests

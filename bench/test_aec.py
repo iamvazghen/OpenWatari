@@ -16,8 +16,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.edge.aec import aec_active, build_input_filter  # noqa: E402
-from jarvis.edge.device_profile import OutputKind, resolve_barge_in  # noqa: E402
+from afon.edge.aec import aec_active, build_input_filter  # noqa: E402
+from afon.edge.device_profile import OutputKind, resolve_barge_in  # noqa: E402
 
 passed = failed = 0
 

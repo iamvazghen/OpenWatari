@@ -11,10 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.config import settings
+from afon.config import settings
 settings.ack_before_tools = True  # make the behaviour deterministic regardless of env
 
-from jarvis.brain.agent import JarvisAgent, _WORK_ACKS, _CHAT_ACKS  # noqa: E402
+from afon.brain.agent import AfonAgent, _WORK_ACKS, _CHAT_ACKS  # noqa: E402
 
 _ok = _fail = 0
 
@@ -28,7 +28,7 @@ def check(cond, label):
         print(f"  FAIL: {label}")
 
 
-a = JarvisAgent()
+a = AfonAgent()
 a._self_improve = False
 
 # 1) zero-arg read -> generic ack SUPPRESSED (specific per-tool ack follows near-instantly)

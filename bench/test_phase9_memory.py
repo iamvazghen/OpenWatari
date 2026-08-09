@@ -27,9 +27,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.memory import MemoryStore
+    from afon.brain.memory import MemoryStore
 
-    tmp = Path(tempfile.mkdtemp(prefix="jarvis-mem-"))
+    tmp = Path(tempfile.mkdtemp(prefix="afon-mem-"))
     store = MemoryStore(base_dir=tmp)
 
     print("[1] remember + recall")
@@ -79,8 +79,8 @@ def main() -> None:
     check("remember('') -> None", store.remember("   ") is None)
 
     print("\n[8] recall tool degrades when memory disabled")
-    import jarvis.brain.tools.memory as memtool
-    import jarvis.config as cfg
+    import afon.brain.tools.memory as memtool
+    import afon.config as cfg
 
     old = cfg.settings.memory_enabled
     try:
@@ -91,7 +91,7 @@ def main() -> None:
         cfg.settings.memory_enabled = old
 
     print("\n[9] vault (L3) validation reports clearly")
-    from jarvis.brain.context import validate_vault
+    from afon.brain.context import validate_vault
 
     ok_v, msg_v = validate_vault()
     check("validate_vault returns (bool, message)", isinstance(ok_v, bool) and isinstance(msg_v, str), msg_v)

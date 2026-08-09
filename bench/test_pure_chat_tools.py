@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.agent import JarvisAgent, _is_pure_chat  # noqa: E402
+from afon.brain.agent import AfonAgent, _is_pure_chat  # noqa: E402
 
 _ok = _fail = 0
 
@@ -24,7 +24,7 @@ def check(cond, label):
 
 
 # 1) high-confidence chatter -> pure chat (no tools)
-for t in ["hi", "hey Watari", "hello there", "good morning", "how are you?", "how's it going",
+for t in ["hi", "hey Afon", "hello there", "good morning", "how are you?", "how's it going",
           "thanks", "thank you so much, sir", "cheers", "nice one", "well done", "good job",
           "tell me a joke", "you're the best", "goodnight", "see you later", "love you",
           "how do you feel?", "are you there?", "got it", "makes sense", "never mind", "lol"]:
@@ -42,10 +42,29 @@ for t in ["what's on my calendar today?", "do I have any new emails?", "any unre
     check(not _is_pure_chat(t), f"tool/knowledge turn NOT pure chat: {t!r}")
 
 # 3) end-to-end: _tools_for_turn carries zero tools on chatter, full surface on a tool turn
-a = JarvisAgent()
+a = AfonAgent()
 a._self_improve = False
 check(a._tools_for_turn("how are you?") == [], "chatter turn advertises zero tools")
 check(len(a._tools_for_turn("what's the weather in Paris?")) > 10, "a tool-ish turn keeps a real surface")
+
+
+# ── K2 · lazy-group triggers must not fire on unrelated common phrases ─────
+# "check my" was a COACHING trigger, so "check my email" / "check my calendar" / "check my tasks"
+# — three of the most common things the owner says — each loaded five German-quiz tools onto the
+# turn. Nothing failed; it just quietly cost ~565 prompt tokens every time. Measured, not guessed.
+from afon.brain.tools import groups_for_text  # noqa: E402
+
+# NB: this file's check() is check(cond, label) — cond FIRST, two args only. Written the other
+# way round it does not error, it PASSES, because a non-empty label string is truthy.
+for phrase in ("check my email", "check my calendar", "check my tasks", "check my messages"):
+    check("coaching" not in groups_for_text(phrase),
+          f"{phrase!r} must not load the coaching group -> {sorted(groups_for_text(phrase))}")
+
+# ...while the coaching group still activates when coaching is genuinely meant.
+for phrase in ("quiz me on German", "how's my German going", "check my level in German",
+               "test my French"):
+    check("coaching" in groups_for_text(phrase),
+          f"{phrase!r} must still load coaching -> {sorted(groups_for_text(phrase))}")
 
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")
 sys.exit(1 if _fail else 0)

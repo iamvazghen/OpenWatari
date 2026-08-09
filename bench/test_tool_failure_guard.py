@@ -3,7 +3,7 @@
 Every tool handler returns speakable prose and never raises (tools/base.py contract), so a caller
 that consumes a result as DATA cannot tell "here are your events" from "I couldn't do that". On
 2026-07-28 production proved the gap: with Google auth broken, `list_events` returned its failure
-note, `anticipatory_prep` accepted it as an event and Watari announced
+note, `anticipatory_prep` accepted it as an event and Afon announced
 
     Heads up: 'I couldn't complete the calendar read just now (RuntimeError...' is starting soon.
 
@@ -35,7 +35,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.brain.tools.base import not_configured, tool_error, tool_failed
+    from afon.brain.tools.base import not_configured, tool_error, tool_failed
 
     print("tool_failed() predicate")
     # The two real failure shapes, taken from the helpers themselves (not hand-copied prose, so a
@@ -50,8 +50,8 @@ async def main() -> None:
     check("'nothing scheduled' is DATA", not tool_failed("Nothing scheduled, sir."))
 
     print("\nanticipatory_prep() with a failing calendar")
-    import jarvis.brain.tools.calendar as cal
-    from jarvis.brain import proactive_signals as ps
+    import afon.brain.tools.calendar as cal
+    from afon.brain import proactive_signals as ps
 
     async def _boom(_args):
         return tool_error("calendar read", RuntimeError("google not authorized"))

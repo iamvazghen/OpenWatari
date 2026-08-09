@@ -41,7 +41,7 @@ def main() -> None:
 
     def restart_ok(cmd: str):
         restarts.append(cmd)
-        return True, "jarvis-brain restarted"
+        return True, "afon-brain restarted"
 
     def restart_fail(cmd: str):
         restarts.append(cmd)

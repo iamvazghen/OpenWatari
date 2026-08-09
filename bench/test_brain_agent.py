@@ -1,11 +1,11 @@
-"""End-to-end test of JarvisAgent: warmup, direct Q, time tool, session memory, fleet gate."""
+"""End-to-end test of AfonAgent: warmup, direct Q, time tool, session memory, fleet gate."""
 import asyncio
 import time
-from jarvis.brain.agent import JarvisAgent
+from afon.brain.agent import AfonAgent
 
 
 async def main():
-    a = JarvisAgent()
+    a = AfonAgent()
     t0 = time.perf_counter()
     await a.warmup()
     print(f"warmup: {(time.perf_counter()-t0)*1000:.0f}ms\n")
@@ -13,7 +13,7 @@ async def main():
     async def turn(text):
         t = time.perf_counter()
         r = await a.respond(text, on_progress=lambda n: print(f"   ~{n}"))
-        print(f"Vazghen: {text}\nJarvis : {r}  [{(time.perf_counter()-t)*1000:.0f}ms]\n")
+        print(f"Vazghen: {text}\nAfon : {r}  [{(time.perf_counter()-t)*1000:.0f}ms]\n")
         return r
 
     # 1) direct reasoning (no tool)

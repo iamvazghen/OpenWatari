@@ -1,15 +1,15 @@
 """One-time interactive Telegram login (creates the Telethon session file).
 
-Run this ONCE so Jarvis's `check_telegram` tool can read your unread DMs. It signs you in as
+Run this ONCE so Afon's `check_telegram` tool can read your unread DMs. It signs you in as
 your Telegram USER (the Bot API can't read DMs) and writes a session named
-`JARVIS_TELEGRAM_SESSION` (default 'jarvis') next to where you run it. After that, the tool
+`AFON_TELEGRAM_SESSION` (default 'afon') next to where you run it. After that, the tool
 works unattended.
 
     uv sync --extra channels
     uv run python bench/telegram_login.py
 
-You'll need your api id + hash from https://my.telegram.org (set JARVIS_TELEGRAM_API_ID /
-JARVIS_TELEGRAM_API_HASH in .env first), then enter your phone number and the code Telegram sends.
+You'll need your api id + hash from https://my.telegram.org (set AFON_TELEGRAM_API_ID /
+AFON_TELEGRAM_API_HASH in .env first), then enter your phone number and the code Telegram sends.
 """
 
 from __future__ import annotations
@@ -19,12 +19,12 @@ import sys
 
 sys.path.insert(0, "src")
 
-from jarvis.config import settings  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 
 async def main() -> None:
     if not (settings.telegram_api_id and settings.telegram_api_hash):
-        print("Set JARVIS_TELEGRAM_API_ID and JARVIS_TELEGRAM_API_HASH in .env first "
+        print("Set AFON_TELEGRAM_API_ID and AFON_TELEGRAM_API_HASH in .env first "
               "(get them at https://my.telegram.org).")
         sys.exit(1)
     try:
@@ -52,7 +52,7 @@ async def main() -> None:
     await client.start(phone=lambda: phone)
     me = await client.get_me()
     print(f"\nLogged in as {me.first_name} (@{me.username}). "
-          f"Session '{settings.telegram_session}' saved. Jarvis can now read your Telegram.")
+          f"Session '{settings.telegram_session}' saved. Afon can now read your Telegram.")
     await client.disconnect()
 
 

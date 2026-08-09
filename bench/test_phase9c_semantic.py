@@ -52,10 +52,10 @@ def _make_stub():
 
 
 def main() -> None:
-    from jarvis.brain.memory import MemoryStore
-    from jarvis.brain.semantic import SemanticIndex
+    from afon.brain.memory import MemoryStore
+    from afon.brain.semantic import SemanticIndex
 
-    tmp = Path(tempfile.mkdtemp(prefix="jarvis-sem-"))
+    tmp = Path(tempfile.mkdtemp(prefix="afon-sem-"))
     store = MemoryStore(base_dir=tmp)
     store.remember("Vazghen runs a rabbit farm called Lpstrak in Armenia.", tags=["rabbit-farm"])
     store.remember("Vazghen prefers short answers in the morning.", tags=["preference"])
@@ -83,10 +83,10 @@ def main() -> None:
 
     print("\n[4] graceful no-op when no embedder is installed")
     # A truly bare index = no injected stub, no local sentence-transformers, AND no Jina key to fall
-    # back on. The personal .env DOES set JARVIS_JINA_API_KEY (it powers the web reader), which would
+    # back on. The personal .env DOES set AFON_JINA_API_KEY (it powers the web reader), which would
     # otherwise let the index reach the Jina embeddings API and report available. Null it for this
     # check so we're testing the genuine "no embedder anywhere" path.
-    from jarvis.config import settings as _cfg
+    from afon.config import settings as _cfg
     _saved_jina = _cfg.jina_api_key
     _cfg.jina_api_key = None
     try:

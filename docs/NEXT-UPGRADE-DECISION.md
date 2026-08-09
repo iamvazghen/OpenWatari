@@ -1,8 +1,8 @@
 # Decision: docs website Next.js version (P6.3)
 
 **Date:** 2026-07-10
-**Scope:** the marketing/docs site at `website/` (deployed to openwatari.vercel.app via Vercel CLI;
-the dir is gitignored — NOT part of the OpenWatari runtime). This does not touch the Python assistant.
+**Scope:** the marketing/docs site at `website/` (deployed to openafon.vercel.app via Vercel CLI;
+the dir is gitignored — NOT part of the OpenAfon runtime). This does not touch the Python assistant.
 
 ## Decision
 

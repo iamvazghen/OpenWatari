@@ -19,9 +19,9 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain import tools  # noqa: E402
-from jarvis.brain.fleet import FLEET_TOOL_SCHEMA, delegate_to_fleet  # noqa: E402
-from jarvis.config import settings  # noqa: E402
+from afon.brain import tools  # noqa: E402
+from afon.brain.fleet import FLEET_TOOL_SCHEMA, delegate_to_fleet  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 passed = 0
 failed = 0
@@ -71,7 +71,7 @@ async def main() -> None:
     try:
         # web_search now has a KEYLESS tail (Jina Search), so it no longer has a 'not configured'
         # state — with no keys the provider chain is just the keyless Jina provider (Phase 4.5).
-        import jarvis.brain.tools.web as webmod
+        import afon.brain.tools.web as webmod
         chain = [n for n, _ in webmod._search_providers()]
         check("web_search w/o keys -> keyless Jina fallback only", chain == ["Jina"], str(chain))
         # scrape_url uses Jina Reader (keyless) so it has no 'not configured' state — not exercised here.
@@ -105,8 +105,8 @@ async def main() -> None:
             setattr(settings, k, v)
 
     print("\n[5] agent registers the Phase 3 tools")
-    from jarvis.brain.agent import JarvisAgent
-    a = JarvisAgent()
+    from afon.brain.agent import AfonAgent
+    a = AfonAgent()
     registered = {s["function"]["name"] for s in a._tools}
     check("agent exposes vault+web+telegram+fleet", expected <= registered)
     check("agent still has get_time + delegate_to_fleet",

@@ -1,6 +1,6 @@
 """Phase 3 companion — the task co-pilot (clarify -> plan -> confirm -> execute -> report).
 
-Proves Watari can PLAN a task with the owner (a dry-run: steps + clarifying questions + who does it +
+Proves Afon can PLAN a task with the owner (a dry-run: steps + clarifying questions + who does it +
 which steps need approval) and then EXECUTE it in the background via the bounded worker or the fleet,
 linking progress back to the to-do — while the defer-outward invariant stays sacred and auto-pilot is
 opt-in. Hermetic: fake LLMs, a temp SQLite task queue, no network, no real fleet.
@@ -78,7 +78,7 @@ _GOOD_JSON = (
 
 async def test_build_plan() -> None:
     print("[1] build_plan: parse, executor clamp, fallback")
-    from jarvis.brain.copilot import Plan, build_plan, execution_objective, plan_from_meta, plan_to_meta, spoken_plan
+    from afon.brain.copilot import Plan, build_plan, execution_objective, plan_from_meta, plan_to_meta, spoken_plan
 
     plan = await build_plan("write the Q3 report", "for the board", JsonLLM(_GOOD_JSON), fleet_available=True)
     check("steps parsed", plan.steps == ["Outline the sections", "Draft each section", "Proof-read"], str(plan.steps))
@@ -122,17 +122,17 @@ async def test_build_plan() -> None:
 
 async def test_agent_plan_and_execute() -> None:
     print("\n[3] agent.plan_task stores a plan on the to-do; execute_task runs + links back")
-    import jarvis.brain.tasks as tasks_mod
-    from jarvis.brain.tasks import TaskQueue
+    import afon.brain.tasks as tasks_mod
+    from afon.brain.tasks import TaskQueue
 
     tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     fresh = TaskQueue(db_path=Path(tmp.name) / "tasks.sqlite")
     tasks_mod.TASKS = fresh  # agent methods resolve the module global at call time
 
-    from jarvis.brain.agent import JarvisAgent
-    from jarvis.brain.copilot import plan_from_meta
+    from afon.brain.agent import AfonAgent
+    from afon.brain.copilot import plan_from_meta
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     check("plan_task + execute_task registered", "plan_task" in agent._registry and "execute_task" in agent._registry)
     check("both advertised in the core tool surface",
           {"plan_task", "execute_task"} <= {s["function"]["name"] for s in agent._core_tools})
@@ -158,7 +158,7 @@ async def test_agent_plan_and_execute() -> None:
           fresh.get(todo.id).last_progress)
 
     print("\n[4] execute_task asks first when the task is underspecified (no auto-pilot)")
-    from jarvis.brain.copilot import Plan, plan_to_meta
+    from afon.brain.copilot import Plan, plan_to_meta
 
     vague = fresh.add_todo("plan the offsite")
     vague.meta["plan"] = plan_to_meta(Plan(steps=["ask, then book"], questions=["Where and when?"],

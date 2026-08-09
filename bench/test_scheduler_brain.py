@@ -43,15 +43,15 @@ class FakeWS:
 
 
 async def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
 
-    # Isolate the jobstore so the test never touches the real jarvis_jobs.sqlite.
+    # Isolate the jobstore so the test never touches the real afon_jobs.sqlite.
     tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)  # sqlite file may linger on Win
     settings.scheduler_db_path = str(Path(tmp.name) / "jobs.sqlite")
 
-    import jarvis.brain.scheduler as sch
-    from jarvis.brain.scheduler import SCHEDULER
-    from jarvis.brain.server import BrainServer
+    import afon.brain.scheduler as sch
+    from afon.brain.scheduler import SCHEDULER
+    from afon.brain.server import BrainServer
 
     print("[1] brain speaks a fired reminder to connected clients (no push here)")
     server = BrainServer()
@@ -77,11 +77,11 @@ async def main() -> None:
     pushed: list[str] = []
     sch._LIVE_SPEAK = lambda m: spoke.append(m)
 
-    async def _fake_push(message: str, title: str = "Jarvis") -> bool:
+    async def _fake_push(message: str, title: str = "Afon") -> bool:
         pushed.append(message)
         return True
 
-    import jarvis.brain.tools.notify as notify
+    import afon.brain.tools.notify as notify
     notify.push = _fake_push  # _fire imports push lazily, so this patch is picked up
 
     print("\n[4] a real scheduled job fires within seconds (add_reminder -> _fire)")
@@ -115,7 +115,7 @@ async def main() -> None:
         captured.update(msg=msg, urgency=urgency, speak=speak)
         return "voice"
 
-    import jarvis.brain.daily_digest as dd
+    import afon.brain.daily_digest as dd
     SCHEDULER.set_briefing_emit(fake_emit)
 
     # Isolate the digest delivery-state file so this test never touches real state / re-fires.

@@ -3,7 +3,7 @@ model loads, gates wire, audio devices open, and STT/TTS connect — without a v
 
 import asyncio
 
-from jarvis.edge.assistant import build_worker
+from afon.edge.assistant import build_worker
 from pipecat.workers.runner import WorkerRunner
 
 
@@ -11,7 +11,7 @@ async def main() -> None:
     runner = WorkerRunner()
     await runner.add_workers(build_worker())
     run = asyncio.create_task(runner.run())
-    print(">>> assistant started; running 8s (mic gated by 'Hey Jarvis')…", flush=True)
+    print(">>> assistant started; running 8s (mic gated by 'Hey Afon')…", flush=True)
     await asyncio.sleep(8)
     print(">>> stopping…", flush=True)
     try:

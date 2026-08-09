@@ -31,10 +31,10 @@ def degrades(out: str) -> bool:
 
 
 def main() -> None:
-    import jarvis.brain.tools.notion as notion
-    from jarvis.brain.proactive import confirm_required
-    from jarvis.brain.tools import tool_names
-    from jarvis.config import settings
+    import afon.brain.tools.notion as notion
+    from afon.brain.proactive import confirm_required
+    from afon.brain.tools import tool_names
+    from afon.config import settings
 
     # Force the UNCONFIGURED state so this hermetic degradation test holds regardless of a real .env
     # (live Notion is checked by bench/test_live_integrations.py).

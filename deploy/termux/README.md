@@ -1,4 +1,4 @@
-# Watari edge-lite for Android (Termux) — TODO 8.5
+# Afon edge-lite for Android (Termux) — TODO 8.5
 
 A stripped voice edge for a phone: **push-to-talk → mic → speech-to-text → brain WS → phone TTS**,
 reusing the exact same brain protocol as the laptop edge and glasses. It registers as
@@ -16,7 +16,7 @@ reusing the exact same brain protocol as the laptop edge and glasses. It registe
 | Pipecat pipeline | one small `EdgeLite` loop over `BrainClient` |
 
 These are deliberate simplifications for a battery-powered phone — see the header of
-`src/jarvis/edge/edge_lite.py`. Everything (record / transcribe / speak / client) is injectable, so
+`src/afon/edge/edge_lite.py`. Everything (record / transcribe / speak / client) is injectable, so
 the loop is unit-tested off-device in `bench/test_edge_lite.py`.
 
 ## Install (on the phone)
@@ -24,14 +24,14 @@ the loop is unit-tested off-device in `bench/test_edge_lite.py`.
 1. Install **Termux** and **Termux:API** (both from F-Droid — the Play Store builds are outdated).
 2. In Termux:
    ```bash
-   export WATARI_GIT_URL=<private repo URL>
+   export AFON_GIT_URL=<private repo URL>
    bash deploy/termux/install.sh
    ```
-3. Put secrets in `$HOME/.watari.env`:
+3. Put secrets in `$HOME/.afon.env`:
    ```
-   JARVIS_BRAIN_WS_URL=wss://<brain-host>:8765
-   JARVIS_API_AUTH_TOKEN=<token>
-   JARVIS_GROQ_API_KEY=<groq key>
+   AFON_BRAIN_WS_URL=wss://<brain-host>:8765
+   AFON_API_AUTH_TOKEN=<token>
+   AFON_GROQ_API_KEY=<groq key>
    ```
 4. Grant Termux:API the **Microphone** permission (Android Settings → Apps → Termux:API).
 

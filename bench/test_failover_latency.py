@@ -78,7 +78,7 @@ async def _alive(**_kw):
 
 
 async def main() -> None:
-    from jarvis.brain.llm import LLMClient
+    from afon.brain.llm import LLMClient
 
     print("[1] cold failover — primary raises on the first call")
     lat_ms: list[float] = []

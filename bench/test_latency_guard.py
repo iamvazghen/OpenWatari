@@ -40,7 +40,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
 
     print("[1] config latency invariants (a regression here dooms every turn)")
     target = settings.ttfw_target_ms
@@ -85,7 +85,7 @@ def main() -> None:
     # A regression that silently flips the DEFAULT provider back to local whisper on a no-GPU CPU
     # (which added ~4s to short phrases) would gut latency. The personal deploy uses deepgram; the
     # framework default is deepgram too. Guard that the shipped default stays streaming-cloud.
-    from jarvis.config import STTProvider
+    from afon.config import STTProvider
     default_stt = type(settings)().stt_provider  # a fresh Settings() = the shipped default, not .env
     check("shipped default STT is deepgram (streaming, low-latency)",
           default_stt == STTProvider.deepgram, str(default_stt))

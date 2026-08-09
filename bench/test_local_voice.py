@@ -1,4 +1,4 @@
-"""Local voice (TTS) — build_tts honours JARVIS_TTS_PROVIDER so the stack can be 100% local.
+"""Local voice (TTS) — build_tts honours AFON_TTS_PROVIDER so the stack can be 100% local.
 
 Proves task #5: the pipeline is no longer hardwired to ElevenLabs (cloud). build_tts dispatches to
 ElevenLabs (cloud), Piper (local) or Kokoro (local) by provider, and ElevenLabs fails with a clear,
@@ -33,9 +33,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    import jarvis.edge.tts as tts_mod
-    from jarvis.config import TTSProvider, settings
-    from jarvis.edge import voice_health
+    import afon.edge.tts as tts_mod
+    from afon.config import TTSProvider, settings
+    from afon.edge import voice_health
 
     # Hermetic: a REAL cooldown marker (from live cloud-voice trouble on this machine) must not
     # leak in — build_tts would then correctly pick Piper and the provider checks would misfire.
@@ -118,8 +118,8 @@ def main() -> None:
         tts_mod._BUILDERS = real_builders
 
     # The same fallback wiring exists on the STT side (Deepgram -> Whisper).
-    import jarvis.edge.stt as stt_mod
-    from jarvis.config import STTProvider
+    import afon.edge.stt as stt_mod
+    from afon.config import STTProvider
     check("STT exposes a cloud->local fallback table", hasattr(stt_mod, "_BUILDERS") and bool(stt_mod._CLOUD))
 
     # All three STT providers dispatch to their OWN real builder — moonshine must NOT alias whisper

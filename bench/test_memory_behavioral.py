@@ -65,7 +65,7 @@ class CapturingLLM:
 
 
 async def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
     settings.memory_enabled = True
     settings.memory_autorecall_enabled = True
     settings.memory_semantic_enabled = True
@@ -73,12 +73,12 @@ async def main() -> None:
 
     tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     # Isolate the rolling-thread snapshot + disable idle-reset so the agent starts clean (not from a
-    # real leftover jarvis_session.json) and doesn't reset history mid-test.
+    # real leftover afon_session.json) and doesn't reset history mid-test.
     settings.session_persist_path = str(Path(tmp.name) / "session.json")
     settings.session_idle_reset_minutes = 0
-    import jarvis.brain.memory as mem
-    import jarvis.brain.graph as graphmod
-    import jarvis.brain.tools.graphmem as graphtools
+    import afon.brain.memory as mem
+    import afon.brain.graph as graphmod
+    import afon.brain.tools.graphmem as graphtools
 
     store = mem.MemoryStore(base_dir=Path(tmp.name))
     graph = graphmod.GraphMemory(path=Path(tmp.name) / "g.sqlite")
@@ -88,9 +88,9 @@ async def main() -> None:
     store.remember("the owner prefers replies under two sentences", tags=["preference"])
     store.journal_append("Reviewed the rabbit farm irrigation schedule for next week.")
 
-    from jarvis.brain.agent import JarvisAgent
-    from jarvis.brain.tools import groups_for_text
-    agent = JarvisAgent()
+    from afon.brain.agent import AfonAgent
+    from afon.brain.tools import groups_for_text
+    agent = AfonAgent()
     agent._llm = CapturingLLM()
 
     print("[L0] working memory — prior turns are carried forward")
@@ -132,7 +132,7 @@ async def main() -> None:
     # Inject a deterministic stub embedder so this stays hermetic (the REAL embedder — local model or
     # the Jina API — is verified separately; here we assert the wiring + the semantic floor). Concept
     # dims: [rabbit, submarine, cat]. A query and a fact score high only when they share a concept.
-    import jarvis.brain.semantic as semmod
+    import afon.brain.semantic as semmod
 
     def _stub_embed(texts):
         def vec(t):
@@ -145,7 +145,7 @@ async def main() -> None:
         return [vec(t) for t in texts]
 
     semmod.INDEX = semmod.SemanticIndex(embed_fn=_stub_embed, persist=False)
-    import jarvis.brain.tools.memory as memtool
+    import afon.brain.tools.memory as memtool
     res = await memtool.recall({"query": "what do you know about my bunnies", "layers": ["L1", "L5"]})
     check("recall surfaces the rabbit farm by MEANING (L5 semantic)", "rabbit farm" in res.lower(), res[:160])
     empty = await memtool.recall({"query": "submarine warfare tactics", "layers": ["L1", "L5"]})
@@ -155,7 +155,7 @@ async def main() -> None:
     print("\n[L5b] graph is READ on relational turns, WRITTEN by consolidation (Fix #4)")
     check("'what's connected to X' activates the graph tool group", "graph" in groups_for_text("what's connected to the rabbit farm"))
     check("a plain factual turn does NOT activate the graph group", "graph" not in groups_for_text("how's the rabbit farm"))
-    from jarvis.brain.background_review import review_and_learn
+    from afon.brain.background_review import review_and_learn
     convo = [{"role": "user", "content": "My rabbit farm is in Armavir, which is in Armenia."},
              {"role": "assistant", "content": "Noted, sir."}]
     obj = ('{"facts": ["the owner has a rabbit farm in Armavir."], '

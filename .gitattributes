@@ -1,0 +1,6 @@
+# core.autocrlf=true is set on this machine, and this repo has no attributes file, so git
+# rewrites LF -> CRLF on every checkout. For .sh that is not cosmetic: a CRLF script dies with
+# `$'\r': command not found` under any invocation that is not Git Bash — which is how the test
+# gate and the VPS run them. preflight.sh and deploy_vps.sh both had to be repaired for exactly
+# this reason on 2026-08-08; without this file the next checkout silently reintroduces it.
+*.sh text eol=lf

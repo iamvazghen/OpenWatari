@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from jarvis.brain import fleet, prefs
+from afon.brain import fleet, prefs
 
 
 def test_routing_memory(monkeypatch) -> None:
@@ -19,3 +19,31 @@ def test_routing_memory(monkeypatch) -> None:
 
     # A domain never delegated stays out of the hint.
     assert "real estate" not in hint
+
+
+class _Monkeypatch:
+    """Just enough of pytest's fixture to run this file as a script (see J6.5).
+
+    The fixture argument is why this one never ran outside pytest: the registry invoked the module,
+    nothing called the function, and exit 0 was read as a pass.
+    """
+
+    def __init__(self) -> None:
+        self._undo: list[tuple[object, str, object]] = []
+
+    def setattr(self, obj, name, value) -> None:  # noqa: A003
+        self._undo.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def undo(self) -> None:
+        for obj, name, old in reversed(self._undo):
+            setattr(obj, name, old)
+
+
+if __name__ == "__main__":
+    mp = _Monkeypatch()
+    try:
+        test_routing_memory(mp)
+    finally:
+        mp.undo()
+    print("=== 4/4 checks passed ===")

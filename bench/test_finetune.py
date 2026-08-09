@@ -32,14 +32,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.context import build_system_prompt, load_memory_files
-    from jarvis.brain.tools import (
+    from afon.brain.context import build_system_prompt, load_memory_files
+    from afon.brain.tools import (
         core_tool_schemas,
         groups_for_text,
         tool_handlers,
         tool_names,
     )
-    from jarvis.config import settings
+    from afon.config import settings
 
     print("[1] Item 1 — system prompt is lean but complete")
     sp = build_system_prompt()
@@ -50,14 +50,14 @@ def main() -> None:
     # (memory_digest_max facts, each capped at memory_digest_fact_chars + "- " + newline). This is the
     # honest bound: it holds even if every learned fact grows to the per-fact cap. The per-fact cap is
     # what makes this bound real (context._learned_digest truncates each line).
-    from jarvis.brain.context import _learned_digest
+    from afon.brain.context import _learned_digest
     digest = _learned_digest()
     base_no_digest_chars = len(sp) - len(digest)
     per_fact = settings.memory_digest_fact_chars + 3   # "- " prefix + newline
     worst = (base_no_digest_chars + settings.memory_digest_max * per_fact) // 4
     check(f"prompt stays <= 2000 tok with a full max-length digest (~{worst})", worst <= 2000, f"{worst} tok")
     # Still carries identity + principal + the proactive mandate.
-    check("persona present (Watari)", "Watari" in sp)
+    check("persona present (Afon)", "Afon" in sp)
     check("principal present (Vazghen)", "Vazghen" in sp)
     check("proactive mandate present", "proactive" in sp.lower() or "initiate" in sp.lower())
     check("delegation rule present (ispir)", "ispir" in sp.lower())
@@ -91,7 +91,7 @@ def main() -> None:
     # with no `required` key at all, so the model was left to guess; an omitted `required` reads as
     # "nothing is needed", which is right for a screenshot and wrong for approve_action. An explicit
     # empty list is fine — the point is that it's a decision, not an oversight.
-    from jarvis.brain.tools import tool_schemas
+    from afon.brain.tools import tool_schemas
     undeclared = [s["function"]["name"] for s in tool_schemas()
                   if (s["function"].get("parameters") or {}).get("properties")
                   and "required" not in (s["function"].get("parameters") or {})]
@@ -123,12 +123,12 @@ def main() -> None:
     # shared helpers, imported by the rest.
     import importlib
     from pathlib import Path
-    tools_dir = Path(__file__).resolve().parents[1] / "src" / "jarvis" / "brain" / "tools"
+    tools_dir = Path(__file__).resolve().parents[1] / "src" / "afon" / "brain" / "tools"
     strays = []
     for p in sorted(tools_dir.glob("*.py")):
         if p.stem in ("__init__", "base"):
             continue
-        m = importlib.import_module(f"jarvis.brain.tools.{p.stem}")
+        m = importlib.import_module(f"afon.brain.tools.{p.stem}")
         if not (getattr(m, "SCHEMAS", None) or getattr(m, "HANDLERS", None)
                 or getattr(m, "LOCAL_HANDLERS", None)):
             strays.append(p.stem)
@@ -137,14 +137,14 @@ def main() -> None:
     # H2.8 — the tools/__init__ <-> macros cycle. `__init__` imports macros at module level, and
     # macros needs tool_handlers() back out of `__init__`; it survives ONLY because every such
     # import sits inside a function. Promote one to the top of the file and `import
-    # jarvis.brain.tools` fails on a half-initialised module — brain startup dies, with a traceback
+    # afon.brain.tools` fails on a half-initialised module — brain startup dies, with a traceback
     # pointing at __init__ rather than at the line someone just moved. A comment can't stop that;
     # this can. AST, not grep, so an import inside a function is correctly ignored.
     import ast
     macros_src = (tools_dir / "macros.py").read_text(encoding="utf-8")
     top_level_cycle = [
         n.module for n in ast.parse(macros_src).body
-        if isinstance(n, ast.ImportFrom) and (n.module or "") == "jarvis.brain.tools"
+        if isinstance(n, ast.ImportFrom) and (n.module or "") == "afon.brain.tools"
     ]
     check("macros.py imports tools/__init__ only INSIDE functions", not top_level_cycle,
           f"top-level import of {top_level_cycle} would break brain startup")
@@ -158,9 +158,9 @@ def main() -> None:
     check("'what time is it' -> no lazy group", groups_for_text("what time is it") == set())
 
     print("\n[4] Item 2 — the agent advertises core by default, expands on a coding turn")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    a = JarvisAgent()
+    a = AfonAgent()
     default_names = {s["function"]["name"] for s in a._tools}
     check("default surface == core (no lazy tools yet)", "git_commit" not in default_names)
     check("default surface has everyday tools", {"search_vault", "web_search", "get_time"} <= default_names)
@@ -177,7 +177,7 @@ def main() -> None:
     # Policy change 2026-07-28 (owner's call, supersedes the 2026-06-14 latency-only pick):
     # llama-3.3-70b-versatile is still the FASTEST (0.23s TTFT vs MiniMax 0.77s), but it lives on
     # Groq's free daily quota — and when that quota and Gemini's rate limit landed together the
-    # WHOLE chain exhausted and Watari went mute mid-turn (40 x "brain turn failed" in 8 days).
+    # WHOLE chain exhausted and Afon went mute mid-turn (40 x "brain turn failed" in 8 days).
     # A paid, quota-independent primary is worth ~0.5s of TTFT. Ordering is therefore:
     #   MiniMax (paid, reliable)  ->  free/self-hosted tier  ->  Vercel AI Gateway (paid backstop).
     # The gateway must stay LAST so it is only ever billed when everything else has already failed.

@@ -5,9 +5,9 @@ skill fires its steps in sequence without touching real Notion/Gmail/Telegram.
 """
 import asyncio
 
-import jarvis.brain.tools as tools_pkg
-from jarvis.brain.tools import skills
-from jarvis.brain.tools.macros import run_steps
+import afon.brain.tools as tools_pkg
+from afon.brain.tools import skills
+from afon.brain.tools.macros import run_steps
 
 _ok = 0
 _fail = 0

@@ -4,7 +4,7 @@ Loads a .onnx wake model and scores it on WAV clips (e.g. the model's own positi
 test clips + a negative sample), reporting max score per clip so we can confirm the
 model actually fires on its phrase and stays quiet otherwise.
 
-    uv run python bench/verify_wakeword.py .wakewords/watari.onnx clip1.wav clip2.wav ...
+    uv run python bench/verify_wakeword.py .wakewords/afon.onnx clip1.wav clip2.wav ...
 """
 
 from __future__ import annotations

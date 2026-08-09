@@ -40,7 +40,7 @@ def check(cond: bool, label: str) -> None:
 
 def test_vad_builds() -> None:
     print("[1] Silero VAD processor builds")
-    from jarvis.edge.vad_bargein import build_vad_processor
+    from afon.edge.vad_bargein import build_vad_processor
 
     vad = build_vad_processor()
     check(vad is not None, "VADProcessor constructed")
@@ -48,7 +48,7 @@ def test_vad_builds() -> None:
 
 def test_bargein_logic() -> None:
     print("[2] BargeInProcessor decision logic")
-    from jarvis.edge.vad_bargein import BargeInProcessor
+    from afon.edge.vad_bargein import BargeInProcessor
 
     p = BargeInProcessor()
     # User speaks with no bot talking -> NOT an interruption (normal turn).
@@ -69,7 +69,7 @@ def test_bargein_logic() -> None:
 
 def test_pipeline_assembles() -> None:
     print("[3] Full pipeline assembles in both duplex modes")
-    from jarvis.config import settings
+    from afon.config import settings
 
     def stage_types(worker):
         # Drill into the worker's pipeline and collect processor class names.
@@ -87,7 +87,7 @@ def test_pipeline_assembles() -> None:
     settings.barge_in_mode = "off"
     import importlib
 
-    import jarvis.edge.assistant as a
+    import afon.edge.assistant as a
 
     importlib.reload(a)
     half = stage_types(a.build_worker())
@@ -108,7 +108,7 @@ def test_pipeline_assembles() -> None:
 
 def test_device_profile() -> None:
     print("[5] Smart barge-in device identifier")
-    from jarvis.edge.device_profile import (
+    from afon.edge.device_profile import (
         OutputKind,
         classify_output_name,
         resolve_barge_in,
@@ -148,11 +148,11 @@ def test_brain_cancels_on_interruption() -> None:
     print("[4] Brain bridge cancels in-flight turn on interruption")
     from pipecat.frames.frames import InterruptionFrame
 
-    from jarvis.edge.brain_bridge import JarvisBrain
+    from afon.edge.brain_bridge import AfonBrain
 
 
     async def run() -> bool:
-        brain = JarvisBrain.__new__(JarvisBrain)  # skip heavy __init__/agent build
+        brain = AfonBrain.__new__(AfonBrain)  # skip heavy __init__/agent build
         brain._busy = True
 
         # Stub the FrameProcessor I/O so we can drive process_frame without a live pipeline.
@@ -187,13 +187,13 @@ def test_brain_cancels_on_interruption() -> None:
 
 def test_brain_can_cancel_or_supersede_busy_turn() -> None:
     print("[6] Brain bridge accepts cancel/new speech while a task is busy")
-    from jarvis.edge.brain_bridge import JarvisBrain
+    from afon.edge.brain_bridge import AfonBrain
 
     async def long_turn():
         await asyncio.sleep(5)
 
     async def run_cancel() -> bool:
-        brain = JarvisBrain.__new__(JarvisBrain)
+        brain = AfonBrain.__new__(AfonBrain)
         brain._busy = True
         spoken: list[str] = []
 
@@ -207,7 +207,7 @@ def test_brain_can_cancel_or_supersede_busy_turn() -> None:
         return brain._turn_task.cancelled() and brain._busy is False and any("Cancelled" in s for s in spoken)
 
     async def run_supersede() -> bool:
-        brain = JarvisBrain.__new__(JarvisBrain)
+        brain = AfonBrain.__new__(AfonBrain)
         brain._busy = True
         spoken: list[str] = []
         handled: list[str] = []

@@ -31,9 +31,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.brain.contacts import ContactBook
+    from afon.brain.contacts import ContactBook
 
-    tmp = Path(tempfile.mkdtemp(prefix="jarvis-contacts-")) / "contacts.md"
+    tmp = Path(tempfile.mkdtemp(prefix="afon-contacts-")) / "contacts.md"
     tmp.write_text(
         "# My contacts\n"
         "- John Smith <john@example.com> tg:@johnsmith tel:+15551234567\n"
@@ -62,8 +62,8 @@ def main() -> None:
     check("unknown name resolves to none", book.resolve("Zaphod") == [])
 
     print("\n[3] the tool: targets / clarify / degrade")
-    import jarvis.brain.contacts as contacts_mod
-    from jarvis.brain.tools.contacts import resolve_contact
+    import afon.brain.contacts as contacts_mod
+    from afon.brain.tools.contacts import resolve_contact
 
     contacts_mod.BOOK = book  # point the tool at the temp book
     out_one = asyncio.run(resolve_contact({"name": "Anush"}))
@@ -81,7 +81,7 @@ def main() -> None:
     print("\n[4] saving people so they survive the session")
     # Until 2026-07-30 the book was read-only while resolve_contact told the owner to "say 'save it'
     # and I'll keep them" — so every new person had to be re-dictated next session.
-    from jarvis.brain.tools.contacts import save_contact
+    from afon.brain.tools.contacts import save_contact
 
     save_book = ContactBook(path=tmp.parent / "saved.md")
     contacts_mod.BOOK = save_book
@@ -97,8 +97,8 @@ def main() -> None:
     check("saving with no target at all is refused", "at least" in out_bare.lower(), out_bare)
 
     print("\n[5] registered + confirm posture (send stays the gated step)")
-    from jarvis.brain.proactive import confirm_required
-    from jarvis.brain.tools import tool_names
+    from afon.brain.proactive import confirm_required
+    from afon.brain.tools import tool_names
 
     check("resolve_contact is registered", "resolve_contact" in tool_names())
     check("save_contact is registered", "save_contact" in tool_names())

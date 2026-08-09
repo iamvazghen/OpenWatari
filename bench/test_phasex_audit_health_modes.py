@@ -29,11 +29,11 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    import jarvis.config as cfg
-    from jarvis.brain import audit
+    import afon.config as cfg
+    from afon.brain import audit
 
     print("[1] audit log writes a redacted trail (secrets never on disk)")
-    tmp = Path(tempfile.mkdtemp(prefix="jarvis-audit-"))
+    tmp = Path(tempfile.mkdtemp(prefix="afon-audit-"))
     old_dir = cfg.settings.audit_log_dir
     try:
         cfg.settings.audit_log_dir = str(tmp)
@@ -51,8 +51,8 @@ def main() -> None:
         cfg.settings.audit_log_dir = old_dir
 
     print("\n[2] self-health snapshot + summary")
-    from jarvis.brain.health import check as health_check
-    from jarvis.brain.health import health_signals, summarize
+    from afon.brain.health import check as health_check
+    from afon.brain.health import health_signals, summarize
 
     snap = asyncio.run(health_check())
     check("snapshot has vault/cache/ticker", {"vault", "cache", "ticker"} <= set(snap))
@@ -78,7 +78,7 @@ def main() -> None:
           "health-vault" not in {s.key for s in sigs_ok})
 
     print("\n[4] modes gate unprompted speech")
-    from jarvis.brain.modes import MODES
+    from afon.brain.modes import MODES
 
     MODES.clear()
     check("default not suppressed", not MODES.proactivity_suppressed())
@@ -92,7 +92,7 @@ def main() -> None:
     check("cleared -> normal", MODES.status() == "normal")
 
     print("\n[5] proactive engine honours lockdown")
-    from jarvis.brain.proactive import ProactiveEngine, Signal
+    from afon.brain.proactive import ProactiveEngine, Signal
 
     sent = []
 
@@ -110,7 +110,7 @@ def main() -> None:
     check("after clearing -> it speaks", len(sent) == 1, str(sent))
 
     print("\n[6] routine tool flips modes, backs up, and rejects unknowns")
-    import jarvis.brain.tools.routines as routines
+    import afon.brain.tools.routines as routines
 
     MODES.clear()
     out = asyncio.run(routines.routine({"name": "focus", "minutes": 15}))
@@ -123,7 +123,7 @@ def main() -> None:
     unknown = asyncio.run(routines.routine({"name": "flibbertigibbet"}))
     check("unknown routine is rejected cleanly", "don't have" in unknown.lower(), unknown)
     check("home-location tool is registered", "set_home_location" in routines.HANDLERS)
-    from jarvis.brain import prefs
+    from afon.brain import prefs
 
     original_home = routines.settings.home_location
     original_home_pref = prefs.get("home_location")
@@ -140,7 +140,7 @@ def main() -> None:
     print("\n[7] backup routine archives memory")
     out = asyncio.run(routines.routine({"name": "backup"}))
     backups = Path(__file__).resolve().parents[1] / "backups"
-    made = sorted(backups.glob("jarvis-memory-*.zip")) if backups.exists() else []
+    made = sorted(backups.glob("afon-memory-*.zip")) if backups.exists() else []
     check("a memory archive was created", "Backed up" in out and bool(made), out)
     for z in made:           # clean up the test artifact(s)
         z.unlink(missing_ok=True)

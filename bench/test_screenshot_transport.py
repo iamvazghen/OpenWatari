@@ -35,14 +35,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    import jarvis.brain.tools.system as system
-    import jarvis.brain.tools.multimodal as mm
+    import afon.brain.tools.system as system
+    import afon.brain.tools.multimodal as mm
 
     tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     shot = Path(tmp.name) / "sub" / "latest.jpg"   # note: parent doesn't exist yet
 
     # Minimal JPEG-shaped bytes (magic FF D8 … FF D9) — enough to exercise the transport + write.
-    fake_jpeg = b"\xff\xd8" + b"watari-fake-screenshot-bytes" + b"\xff\xd9"
+    fake_jpeg = b"\xff\xd8" + b"afon-fake-screenshot-bytes" + b"\xff\xd9"
 
     print("[1] capture returns bytes -> brain writes them locally + confirms")
     async def fake_cap(_args):

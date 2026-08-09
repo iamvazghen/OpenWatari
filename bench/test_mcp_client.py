@@ -1,6 +1,6 @@
 """MCP client — Phase 4.6 (hermetic: spawns a real local echo MCP server over stdio, no network).
 
-Verifies the acceptance directly: a local MCP server's tools appear in Watari's registry and are
+Verifies the acceptance directly: a local MCP server's tools appear in Afon's registry and are
 callable; schema conversion is correct; no config -> zero tools; a bad/missing server degrades cleanly
 without crashing startup.
 
@@ -64,8 +64,8 @@ for line in sys.stdin:
 
 
 async def run() -> None:
-    from jarvis.brain.mcp_client import MCPRegistry, to_openai_schema
-    from jarvis.config import settings
+    from afon.brain.mcp_client import MCPRegistry, to_openai_schema
+    from afon.config import settings
 
     print("[1] schema conversion (pure)")
     schema = to_openai_schema("demo", {"name": "echo", "description": "Echo text",
@@ -83,7 +83,7 @@ async def run() -> None:
     check("no MCP config -> 0 tools", n0 == 0 and reg0.handlers == {})
 
     print("\n[3] a real local MCP server exposes a callable tool through the registry")
-    tmp = Path(tempfile.mkdtemp(prefix="jarvis-mcp-")) / "echo_server.py"
+    tmp = Path(tempfile.mkdtemp(prefix="afon-mcp-")) / "echo_server.py"
     tmp.write_text(_ECHO_SERVER, encoding="utf-8")
     settings.mcp_servers = json.dumps({"demo": {"command": sys.executable, "args": [str(tmp)]}})
     reg = MCPRegistry()

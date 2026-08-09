@@ -17,8 +17,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.approvals import ApprovalQueue, describe  # noqa: E402
-import jarvis.brain.tools.approvals as atools  # noqa: E402
+from afon.brain.approvals import ApprovalQueue, describe  # noqa: E402
+import afon.brain.tools.approvals as atools  # noqa: E402
 
 passed = failed = 0
 
@@ -100,7 +100,7 @@ async def main() -> None:
     check("prune trims old resolved items", dropped > 0 and len([a for a in q3._items.values() if a.status != "pending"]) <= 50)
 
     print("\n[6] worker wiring: a deferred step is QUEUED with real tool+args")
-    from jarvis.brain.worker import TaskWorker
+    from afon.brain.worker import TaskWorker
 
     wq = tmp_queue()
 
@@ -130,9 +130,9 @@ async def main() -> None:
     check("queued with its origin", pend[0].origin == "objective:test")
 
     print("\n[7] SAFETY: the worker can never approve its own deferrals")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    names = {s["function"]["name"] for s in JarvisAgent._worker_tools(object.__new__(JarvisAgent))}
+    names = {s["function"]["name"] for s in AfonAgent._worker_tools(object.__new__(AfonAgent))}
     check("approve_action withheld from worker", "approve_action" not in names)
     check("reject_action withheld from worker", "reject_action" not in names)
     check("but a normal tool is present", "web_search" in names or len(names) > 20, str(len(names)))
@@ -150,7 +150,7 @@ async def main() -> None:
         called["hit"] = True
         return "Sent."
 
-    import jarvis.brain.tools as toolsmod
+    import afon.brain.tools as toolsmod
     orig = toolsmod.tool_handlers
     toolsmod.tool_handlers = lambda: {"send_email": ok_tool}
     try:

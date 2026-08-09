@@ -65,11 +65,11 @@ class StubAgent:
 
 
 async def main() -> None:
-    from jarvis.brain.server import BrainServer
-    from jarvis.shared.protocol import Hello, Utterance
+    from afon.brain.server import BrainServer
+    from afon.shared.protocol import Hello, Utterance
 
     # A first-of-day digest addendum would add a stray chunk; this test is about routing, so pin it off.
-    from jarvis.brain import daily_digest
+    from afon.brain import daily_digest
     daily_digest.due = lambda channel, now=None: False
 
     server = BrainServer(agent=StubAgent())

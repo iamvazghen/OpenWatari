@@ -12,6 +12,7 @@ runs. That was fine while the brain WAS the laptop. Since it moved to the VPS th
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import tempfile
 import time
@@ -42,8 +43,8 @@ async def _fake_send(args: dict) -> str:
 
 
 async def main() -> None:
-    import jarvis.brain.protocols as P
-    import jarvis.brain.tools.telegram as TG
+    import afon.brain.protocols as P
+    import afon.brain.tools.telegram as TG
 
     TG.send_telegram = _fake_send            # _deliver_report imports it at call time
 
@@ -65,7 +66,7 @@ async def main() -> None:
         print("\n[2] a fresh TEXT report is delivered, with its content inline")
         sent.clear()
         started = time.time()
-        rpt = root / "backups" / "jarvis-diagnostics-20260801-120000.txt"
+        rpt = root / "backups" / "afon-diagnostics-20260801-120000.txt"
         rpt.write_text("disk 41% used\nbrain uptime 6d\nall services active", encoding="utf-8")
         await P._deliver_report("diagnostics", started)
         check("exactly one message sent", len(sent) == 1, str(len(sent)))
@@ -75,13 +76,25 @@ async def main() -> None:
               sent and "brain uptime 6d" in sent[0]["message"], sent[0]["message"][:80] if sent else "")
         check("names the protocol", sent and "diagnostics" in sent[0]["message"])
 
+        print("\n[2b] a report whose mtime lands a hair BEFORE the run started is still fresh")
+        # This is what made this file flaky: green standalone, red in the gate. A file written
+        # strictly after a time.time() reading can carry an mtime just before it, because the
+        # filesystem's timestamp granularity is coarser than the clock and rounds down — measured
+        # at 292 of 3000 writes (~10%) on this machine. The old check called that stale, waited the
+        # full 90s and delivered nothing. Forced here rather than left to a 1-in-10 chance.
+        sent.clear()
+        rpt2 = root / "backups" / "afon-diagnostics-20260801-120500.txt"
+        rpt2.write_text("second run", encoding="utf-8")
+        await P._deliver_report("diagnostics", rpt2.stat().st_mtime + 0.5)  # start 0.5s AFTER mtime
+        check("a report 0.5s 'older' than the run start is still delivered", len(sent) == 1,
+              str(len(sent)))
+
         print("\n[3] a STALE report is never passed off as this run's")
         # The guard that matters: without it, a run that wrote nothing delivers last week's file and
         # looks like it worked.
         sent.clear()
-        old = root / "backups" / "jarvis-audit-20250101-000000.zip"
+        old = root / "backups" / "afon-audit-20250101-000000.zip"
         old.write_bytes(b"PK\x03\x04old")
-        import os
         os.utime(old, (time.time() - 86400, time.time() - 86400))   # a day old
         P._REPORT_WAIT_S = 3.0                                       # don't wait 90s to prove a negative
         await P._deliver_report("auditpack", time.time())
@@ -89,7 +102,7 @@ async def main() -> None:
 
         print("\n[4] a fresh ARCHIVE is delivered as a file, without inlining binary")
         sent.clear()
-        fresh = root / "backups" / "jarvis-checkpoint-20260801-130000.zip"
+        fresh = root / "backups" / "afon-checkpoint-20260801-130000.zip"
         fresh.write_bytes(b"PK\x03\x04" + b"x" * 2048)
         await P._deliver_report("checkpoint", time.time() - 5)
         check("archive delivered", len(sent) == 1, str(len(sent)))
@@ -99,7 +112,13 @@ async def main() -> None:
               sent[0]["message"][:80] if sent else "")
 
         print("\n[5] nothing written at all -> quiet, and never raises")
+        # Age the reports written above explicitly. Relying on wall-clock drift between the steps
+        # would leave this check ~1s from the _MTIME_SLOP_S boundary — i.e. it would be testing the
+        # tolerance by accident, which is how the flake this file just fixed got in.
         sent.clear()
+        day_ago = time.time() - 86400
+        for stale_txt in (root / "backups").glob("afon-diagnostics-*.txt"):
+            os.utime(stale_txt, (day_ago, day_ago))
         await P._deliver_report("diagnostics", time.time())    # no new .txt will appear
         check("no message when the script produced nothing", not sent, str(len(sent)))
 

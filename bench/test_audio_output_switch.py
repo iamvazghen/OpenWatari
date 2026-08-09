@@ -1,4 +1,4 @@
-"""H1.3 — "Watari, switch to my headphones" actually switches the output.
+"""H1.3 — "Afon, switch to my headphones" actually switches the output.
 
 `edge/switch_audio.py` claimed in its own docstring that "the brain registers it as a tool in
 Phase 2". It didn't: the module had ZERO references anywhere in the repo. The device machinery was
@@ -37,9 +37,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    import jarvis.brain.tools.audioout as ao
-    from jarvis.brain.pc_link import PC_LINK
-    from jarvis.brain.tools import core_tool_schemas, groups_for_text, tool_handlers, tool_names
+    import afon.brain.tools.audioout as ao
+    from afon.brain.pc_link import PC_LINK
+    from afon.brain.tools import core_tool_schemas, groups_for_text, tool_handlers, tool_names
 
     print("[1] the capability exists at all — it never did before")
     names = set(tool_names())
@@ -95,7 +95,7 @@ def main() -> None:
     check("no target asks which one", "Which output" in asyncio.run(ao.switch_audio_output({})))
 
     print("\n[3] the executor saves a REAL preference on the machine with the speakers")
-    from jarvis.edge.audio_devices import PREF_PATH, load_output_preference, save_output_preference
+    from afon.edge.audio_devices import PREF_PATH, load_output_preference, save_output_preference
     prev = load_output_preference()
     try:
         got = json.loads(asyncio.run(ao._pc_audio_output_set({"target": "speakers"})))
@@ -117,7 +117,7 @@ def main() -> None:
         print("\n[4] the watchdog turns a saved preference into a LIVE re-route")
         # This is the half that was missing: without it the command saves a setting and the sound
         # keeps coming out of the old device until the next restart.
-        from jarvis.edge.audio_watchdog import _pref_mtime
+        from afon.edge.audio_watchdog import _pref_mtime
 
         before = _pref_mtime()
         check("preference mtime is observable", before > 0, str(before))
@@ -128,7 +128,7 @@ def main() -> None:
 
         # ...and the loop must actually ACT on it. Watching the mtime is worthless if nothing
         # rebuilds the stream, which was exactly the state this task found the system in.
-        from jarvis.edge.audio_watchdog import AudioLivenessProbe, watch_audio_liveness
+        from afon.edge.audio_watchdog import AudioLivenessProbe, watch_audio_liveness
 
         async def drive(change: bool) -> bool:
             probe = AudioLivenessProbe()
@@ -170,7 +170,7 @@ def main() -> None:
     check("...but stop_music still is (no trigger needed to stop sound)", "stop_music" in core)
 
     print("\n[6] pc_agent wires the ops up")
-    import jarvis.edge.pc_agent as agent
+    import afon.edge.pc_agent as agent
     for op in ("audio_output_set", "audio_output_list"):
         check(f"pc_agent executes '{op}'", op in agent.LOCAL_HANDLERS)
 

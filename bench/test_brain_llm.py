@@ -1,7 +1,7 @@
 """Smoke-test the brain LLMClient against freellmapi: streaming + tool-calling + failover."""
 import asyncio
 import time
-from jarvis.brain.llm import LLMClient
+from afon.brain.llm import LLMClient
 
 
 async def main():
@@ -9,11 +9,11 @@ async def main():
     print("chain:", c.chain)
 
     # 1) streaming
-    print("\n[stream] 'say hello as Jarvis in one short sentence':")
+    print("\n[stream] 'say hello as Afon in one short sentence':")
     t0 = time.perf_counter()
     first = None
     out = []
-    async for d in c.stream([{"role": "user", "content": "Say hello as Jarvis in one short sentence."}]):
+    async for d in c.stream([{"role": "user", "content": "Say hello as Afon in one short sentence."}]):
         if first is None:
             first = time.perf_counter() - t0
         out.append(d)

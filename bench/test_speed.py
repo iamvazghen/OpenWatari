@@ -41,9 +41,9 @@ class _SlowTailLLM:
 
 
 async def main() -> None:
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     agent._self_improve = False
     agent._llm = _SlowTailLLM(gap=0.6)
 

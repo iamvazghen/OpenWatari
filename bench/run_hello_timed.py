@@ -4,7 +4,7 @@ human voice test. Surfaces any DeprecationWarning."""
 
 import asyncio
 
-from jarvis.edge.hello_voice import build_worker
+from afon.edge.hello_voice import build_worker
 from pipecat.workers.runner import WorkerRunner
 
 

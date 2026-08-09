@@ -45,9 +45,9 @@ class FakeLLM:
 
 async def test_plain_answer() -> None:
     print("[1] plain answer streams sentence-by-sentence")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     agent._llm = FakeLLM([[("text", "I am well, Sir. "), ("text", "All systems green.")]])
     out = [s async for s in agent.respond_stream("how are you")]
     check("yielded two sentences in order", out == ["I am well, Sir.", "All systems green."], repr(out))
@@ -58,9 +58,9 @@ async def test_plain_answer() -> None:
 
 async def test_tool_then_stream() -> None:
     print("\n[2] a NON-speakable tool call is resolved, then the final answer streams (two-pass)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     ran = {"n": 0}
 
     async def fake_tool(_args: dict) -> str:
@@ -82,7 +82,7 @@ async def test_tool_then_stream() -> None:
 
 async def test_no_double_failover_midstream() -> None:
     print("\n[3] mid-stream provider break does not double-speak (fails over only before 1st token)")
-    from jarvis.brain.llm import LLMClient
+    from afon.brain.llm import LLMClient
 
     llm = LLMClient()
     llm._chain = ["a", "b"]
@@ -116,9 +116,9 @@ def _chunk(content):
 
 async def test_cancelled_stream_no_dangling_user() -> None:
     print("\n[4] a cancelled stream still records an assistant turn (no dangling user msg, AUDIT #7)")
-    from jarvis.brain.agent import JarvisAgent
+    from afon.brain.agent import AfonAgent
 
-    agent = JarvisAgent()
+    agent = AfonAgent()
     agent._llm = FakeLLM([[("text", "First sentence. "), ("text", "Second. "), ("text", "Third.")]])
     gen = agent.respond_stream("tell me a long story")
     first = await gen.__anext__()      # consume one chunk…

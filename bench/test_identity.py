@@ -29,8 +29,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> None:
-    from jarvis.config import settings
-    from jarvis.brain import context
+    from afon.config import settings
+    from afon.brain import context
 
     saved = {k: getattr(settings, k) for k in
              ("assistant_name", "user_name", "user_address", "understood_languages", "reply_language")}
@@ -56,7 +56,7 @@ def main() -> None:
         check("rendered names the assistant + owner", "Aria" in rendered and "Dana's" in rendered)
 
         # 2. Anonymous profile: no name, no honorific -> graceful, neutral phrasing.
-        set_identity(assistant_name="Watari", user_name="", user_address="",
+        set_identity(assistant_name="Afon", user_name="", user_address="",
                      understood_languages="English", reply_language="English")
         tok = context._identity_tokens()
         check("no name -> owner possessive is 'your'", tok["{owner_possessive}"] == "your")

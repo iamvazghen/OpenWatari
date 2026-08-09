@@ -1,0 +1,17 @@
+[Unit]
+Description=Afon VPS ticker - always-on recurring-reminder scheduler (pushes via ntfy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User/paths to match your VPS layout. Created by deploy/vps/install.sh.
+User=openclaw
+WorkingDirectory=/home/openclaw/afon-ticker
+EnvironmentFile=/home/openclaw/afon-ticker/ticker.env
+ExecStart=/home/openclaw/afon-ticker/.venv/bin/python /home/openclaw/afon-ticker/afon_ticker.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

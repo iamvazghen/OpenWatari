@@ -11,14 +11,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.tools import CORE_MODULES, _LAZY_GROUPS, tool_schemas  # noqa: E402
+from afon.brain.tools import CORE_MODULES, _LAZY_GROUPS, tool_schemas  # noqa: E402
 
 
 def dump_json() -> None:
     """--json: [{name, description, module, group}] for the docs site's generated tool page."""
     import json
 
-    from jarvis.brain.tools import _MODULES
+    from afon.brain.tools import _MODULES
 
     module_group = {m.__name__.split(".")[-1]: g for g, mods in _LAZY_GROUPS.items() for m in mods}
     rows = []
@@ -43,7 +43,7 @@ def main() -> None:
     schemas = tool_schemas()
     core = {m.__name__.split(".")[-1] for m in CORE_MODULES}
     groups = {m.__name__.split(".")[-1]: g for g, mods in _LAZY_GROUPS.items() for m in mods}
-    print(f"# Watari tools ({len(schemas)} total)\n")
+    print(f"# Afon tools ({len(schemas)} total)\n")
     print("Generated from the live registry by `bench/dump_tools.py` — do not edit by hand.\n")
     for s in sorted(schemas, key=lambda x: x["function"]["name"]):
         fn = s["function"]

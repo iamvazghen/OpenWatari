@@ -44,15 +44,15 @@ print("silence score:", round(pred["hey_jarvis"], 4))
 # while the gate passes.
 realtime_ok = per_ms < 80
 
-# Wake acknowledgement: a detection must emit a spoken ack so you HEAR that Watari woke. Simulate a
+# Wake acknowledgement: a detection must emit a spoken ack so you HEAR that Afon woke. Simulate a
 # hit (no real audio) and assert the gate pushes an ack TTSSpeakFrame downstream toward the TTS.
 import asyncio  # noqa: E402
 
 from pipecat.frames.frames import InputAudioRawFrame, TTSSpeakFrame  # noqa: E402
 from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
 
-from jarvis.config import settings  # noqa: E402
-from jarvis.edge.wake_word import WakeWordGate  # noqa: E402
+from afon.config import settings  # noqa: E402
+from afon.edge.wake_word import WakeWordGate  # noqa: E402
 
 
 async def _check_wake_ack() -> bool:

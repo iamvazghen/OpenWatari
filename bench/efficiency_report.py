@@ -1,4 +1,4 @@
-"""Efficiency report — measure Jarvis's hot paths and compare them to efficient-operation targets.
+"""Efficiency report — measure Afon's hot paths and compare them to efficient-operation targets.
 
 For a voice companion, *perceived* speed is everything: how long after you stop speaking before he
 starts. This script measures the parts the brain controls and grades each against a target, so we
@@ -39,11 +39,11 @@ def add(metric: str, measured: str, target: str, verdict: str) -> None:
 
 
 async def main() -> None:
-    from jarvis.brain.cache import Cache
-    from jarvis.brain.context import build_system_prompt
-    from jarvis.brain.memory import STORE
-    from jarvis.brain.tools import core_tool_schemas, tool_names
-    from jarvis.config import settings
+    from afon.brain.cache import Cache
+    from afon.brain.context import build_system_prompt
+    from afon.brain.memory import STORE
+    from afon.brain.tools import core_tool_schemas, tool_names
+    from afon.config import settings
 
     print("Measuring… (the brain-latency rows need the freellmapi tunnel up)\n")
 
@@ -91,7 +91,7 @@ async def main() -> None:
 
     # --- 4. utility cold vs warm (real network; weather) -------------------------------
     try:
-        from jarvis.brain.tools.utility import weather
+        from afon.brain.tools.utility import weather
 
         t0 = time.perf_counter()
         await weather({"location": "Yerevan"})
@@ -106,7 +106,7 @@ async def main() -> None:
 
     # --- 5. brain TTFT + a full direct turn (real network) -----------------------------
     try:
-        from jarvis.brain.llm import LLMClient
+        from afon.brain.llm import LLMClient
 
         llm = LLMClient()
         # Production warms every provider connection at startup (agent.warmup -> llm.warmup), so a
@@ -119,7 +119,7 @@ async def main() -> None:
             got = False
             async for _delta in llm.stream(
                 [{"role": "system", "content": "Answer in one short sentence."},
-                 {"role": "user", "content": "Say hello, Jarvis."}],
+                 {"role": "user", "content": "Say hello, Afon."}],
             ):
                 if not got:
                     ttfts.append((time.perf_counter() - t0) * 1000)
@@ -132,9 +132,9 @@ async def main() -> None:
         add("Brain TTFT (stream)", f"network down ({type(e).__name__})", "<= 1200 ms", "SKIP")
 
     try:
-        from jarvis.brain.agent import JarvisAgent
+        from afon.brain.agent import AfonAgent
 
-        agent = JarvisAgent()
+        agent = AfonAgent()
         await agent.warmup()        # match production: connections primed before the first turn
         t0 = time.perf_counter()
         await agent.respond("What is two plus two?")

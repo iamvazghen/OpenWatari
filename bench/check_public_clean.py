@@ -1,6 +1,6 @@
 """Public-surface cleanliness guard — no private data leaks into tracked files (Phase 5.1 / 5.5).
 
-Before OpenWatari can be public, no real secret, private host, or personal email may sit in a TRACKED
+Before OpenAfon can be public, no real secret, private host, or personal email may sit in a TRACKED
 file. This greps every git-tracked file (so gitignored personal overlays — .env, real memory/*.md,
 contacts.md, voiceprint — are correctly ignored) for:
 
@@ -40,7 +40,7 @@ CHECKS: list[tuple[str, re.Pattern, set[str]]] = [
 
 # Checks applied ONLY to the product runtime surface — the installed assistant's own code and the
 # shipped persona/memory TEMPLATES. Tests (bench/) and planning docs (docs/) legitimately reference the
-# original owner as fixtures or project history, so they are out of scope. A stranger's installed Watari
+# original owner as fixtures or project history, so they are out of scope. A stranger's installed Afon
 # must never name the original owner or hardcode his timezone in what it runs or speaks.
 SCOPED_CHECKS: list[tuple[str, re.Pattern, set[str]]] = [
     ("owner name in runtime/template", re.compile(r"\bVazghen\b"), set()),

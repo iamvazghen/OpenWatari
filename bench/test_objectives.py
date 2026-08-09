@@ -1,4 +1,4 @@
-"""Phase 4.1 — multi-day objectives Watari owns and drives, hermetic.
+"""Phase 4.1 — multi-day objectives Afon owns and drives, hermetic.
 
 Locks the store (assign/dedup/status/progress/persistence), the daily driver (advance one safe step,
 capture deferred approvals, isolate failures) and the owner-facing tools — all with an injected fake
@@ -17,11 +17,11 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.brain.objectives import (  # noqa: E402
+from afon.brain.objectives import (  # noqa: E402
     ObjectiveBook, advance_objectives, spoken_objectives_report, _split_result,
 )
-import jarvis.brain.objectives as objmod  # noqa: E402
-import jarvis.brain.tools.objectives as otools  # noqa: E402
+import afon.brain.objectives as objmod  # noqa: E402
+import afon.brain.tools.objectives as otools  # noqa: E402
 
 passed = failed = 0
 

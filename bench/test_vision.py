@@ -36,7 +36,7 @@ def _msg(text):
 
 
 async def main() -> None:
-    from jarvis.brain.llm import LLMClient
+    from afon.brain.llm import LLMClient
 
     print("[1] see(): builds an image_url message + returns the vision model's answer")
     llm = LLMClient()
@@ -85,9 +85,9 @@ async def main() -> None:
         check("raised when all vision models fail", True)
 
     print("\n[4] describe_screen: captures + describes the screen")
-    import jarvis.brain.tools.system as system_mod
-    import jarvis.brain.llm as llm_mod
-    from jarvis.brain.tools import multimodal
+    import afon.brain.tools.system as system_mod
+    import afon.brain.llm as llm_mod
+    from afon.brain.tools import multimodal
 
     async def fake_shot(_args):
         return '{"dims":"1920x1080","b64":"ZmFrZQ=="}'

@@ -1,7 +1,7 @@
 [project]
-name = "jarvis"
+name = "afon"
 version = "0.0.1"
-description = "OpenWatari — an open-source framework for building your own 24/7, voice-first, multi-device AI companion (Watari)"
+description = "OpenAfon — an open-source framework for building your own 24/7, voice-first, multi-device AI companion (Afon)"
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-jarvis-setup = "jarvis.setup_wizard:main"
+afon-setup = "afon.setup_wizard:main"
 
 [project.optional-dependencies]
 # The real-time voice pipeline (edge). Pinned in Phase 0; providers added per-phase.
@@ -42,7 +42,7 @@ local-voice = [
 ]
 # The 24/7 orchestrator (brain): own LLM + FastAPI + OpenClaw bridge + scheduler + channels.
 brain = [
-    "openai>=1.40",            # OpenAI-compatible client -> freellmapi (Jarvis's own LLM)
+    "openai>=1.40",            # OpenAI-compatible client -> freellmapi (Afon's own LLM)
     "tzdata>=2024.1",          # IANA tz db (Windows has none) for Europe/Berlin scheduling
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -53,6 +53,21 @@ brain = [
     "yt-dlp>=2024.8",          # resolve a song -> YouTube video for free playback (no Premium)
     "ytmusicapi>=1.7",         # YouTube Music search (music-tuned, free) — the Spotify replacement
     "redis>=5.0",              # L4 hot-cache backend (Phase 9b); graceful no-op if unreachable
+]
+# Vision (LAPTOP-SIDE ONLY — the VPS is cameraless and pc_agent routes every camera op here).
+#
+# `opencv-python` was previously an UNDECLARED runtime dependency: camera.py imports cv2 and
+# logs a warning if it is absent, so a fresh install got a camera that silently did nothing.
+#
+# `uniface` supplies real face recognition. What it replaces was a hand-rolled 256-bin LBP
+# histogram compared by intersection — a texture signature, chosen to avoid a dependency, and
+# weak exactly where owner-identification needs strength: pose, expression and lighting change
+# it, and it cannot tell a face from a photograph of that face. uniface brings ArcFace/AdaFace
+# embeddings, RetinaFace/SCRFD detection and MiniFASNet anti-spoofing, on onnxruntime, which
+# was already installed. Kept optional: nothing on the brain needs it.
+vision = [
+    "opencv-python>=4.9",
+    "uniface>=3.7",
 ]
 # Phase 3 channels: Telethon user-client to READ unread Telegram DMs (Bot API can't).
 channels = [
@@ -83,7 +98,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/jarvis"]
+packages = ["src/afon"]
 
 [tool.ruff]
 line-length = 100

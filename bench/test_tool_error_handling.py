@@ -1,4 +1,4 @@
-"""H2.2 — every tool degrades in Watari's voice, never as a raw exception name.
+"""H2.2 — every tool degrades in Afon's voice, never as a raw exception name.
 
 `agent.py`'s blanket catch stops a bad tool crashing the brain, but what the owner then HEARS is
 "That tool hit an error: KeyError". These modules had no handling of their own: documents,
@@ -35,13 +35,13 @@ def _boom(*_a, **_k):
 
 
 def main() -> None:
-    import jarvis.brain.tools.channels as channels
-    import jarvis.brain.tools.documents as docs
-    import jarvis.brain.tools.protocols as protocols
-    import jarvis.brain.tools.relationship as rel
-    from jarvis.brain import docstore
-    from jarvis.brain.relationship import RELATIONSHIP
-    from jarvis.brain.tools.base import tool_failed
+    import afon.brain.tools.channels as channels
+    import afon.brain.tools.documents as docs
+    import afon.brain.tools.protocols as protocols
+    import afon.brain.tools.relationship as rel
+    from afon.brain import docstore
+    from afon.brain.relationship import RELATIONSHIP
+    from afon.brain.tools.base import tool_failed
 
     print("[1] relationship tools survive a broken store")
     for fn, args, patch in (
@@ -117,8 +117,8 @@ def main() -> None:
         channels._resolve_videos = real_resolve  # type: ignore[assignment]
 
     print("\n[6] contacts: an unexpected save failure is spoken, not raised")
-    import jarvis.brain.contacts as _c
-    import jarvis.brain.tools.contacts as ct
+    import afon.brain.contacts as _c
+    import afon.brain.tools.contacts as ct
     real_save = type(_c.BOOK).save
     type(_c.BOOK).save = _boom
     try:

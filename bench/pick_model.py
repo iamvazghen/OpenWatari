@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from jarvis.brain.agent import JarvisAgent
+from afon.brain.agent import AfonAgent
 
 CANDIDATES = [
     "groq/compound",
@@ -24,13 +24,13 @@ CANDIDATES = [
     "mistral-medium-latest",
 ]
 
-PROMPTS = ["How are you, Watari?", "Give me a two sentence summary of why the sky is blue."]
+PROMPTS = ["How are you, Afon?", "Give me a two sentence summary of why the sky is blue."]
 
 
 async def time_model(model: str) -> dict:
     out: dict = {"model": model}
     try:
-        agent = JarvisAgent()
+        agent = AfonAgent()
         agent._llm._chain = [model]  # force just this model
         await agent.warmup()
         firsts, totals, replies = [], [], []

@@ -1287,7 +1287,7 @@ wheels = [
 ]
 
 [[package]]
-name = "jarvis"
+name = "afon"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

@@ -2,7 +2,7 @@
 
 Lists every app account connected to your Composio project and its LIVE status (ACTIVE / INITIATED /
 EXPIRED / FAILED), plus how many tools each toolkit exposes — using the Composio v3 API with the key in
-``JARVIS_COMPOSIO_API_KEY`` (or ``COMPOSIO_API_KEY``).
+``AFON_COMPOSIO_API_KEY`` (or ``COMPOSIO_API_KEY``).
 
     uv run python bench/test_composio_accounts.py
 
@@ -21,12 +21,12 @@ API = "https://backend.composio.dev/api/v3"
 
 
 def _key() -> str | None:
-    k = os.environ.get("JARVIS_COMPOSIO_API_KEY") or os.environ.get("COMPOSIO_API_KEY")
+    k = os.environ.get("AFON_COMPOSIO_API_KEY") or os.environ.get("COMPOSIO_API_KEY")
     if k:
         return k
     try:
         sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
-        from jarvis.config import settings
+        from afon.config import settings
         return settings.composio_api_key
     except Exception:  # noqa: BLE001
         return None
@@ -36,7 +36,7 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     key = _key()
     if not key:
-        print("No Composio key set. Put JARVIS_COMPOSIO_API_KEY=ak_... in .env, then re-run.")
+        print("No Composio key set. Put AFON_COMPOSIO_API_KEY=ak_... in .env, then re-run.")
         return 0
     h = {"x-api-key": key}
     try:

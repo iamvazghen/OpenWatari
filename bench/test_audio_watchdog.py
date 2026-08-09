@@ -1,6 +1,6 @@
 """Audio watchdog: trips on a dead mic / vanished output device, stays quiet on a live stream.
 
-Guards the recurring "I say hey watari and nothing comes" bug: a device change (AirPods connect/
+Guards the recurring "I say hey afon and nothing comes" bug: a device change (AirPods connect/
 disconnect) stales the mic/speaker streams; the watchdog must detect that and trigger a fresh restart.
 """
 import asyncio
@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.edge.audio_watchdog import (  # noqa: E402
+from afon.edge.audio_watchdog import (  # noqa: E402
     AudioLivenessProbe, output_device_present, watch_audio_liveness,
 )
 
@@ -27,7 +27,7 @@ def check(cond, label):
 
 
 async def _run():
-    # A) a DEAD mic (gap past silence_limit) MUST trip a restart so Watari recovers from deafness.
+    # A) a DEAD mic (gap past silence_limit) MUST trip a restart so Afon recovers from deafness.
     # auto_route=False: this tests the MIC path only — otherwise real headphones on the dev machine
     # (AirPods connected) make route_should_change want to re-route, which is a different trip reason.
     dead = asyncio.Event()
@@ -65,7 +65,7 @@ async def _run():
     # suspended, so every audio stream and cloud socket we hold is stale. Windows gives no usable
     # resume event here (S0 standby emits none; Kernel-Power 507 fires ~8x/day for maintenance wakes),
     # so this in-process check is the detector. Regression guard for a full day spent silently deaf.
-    import jarvis.edge.audio_watchdog as _m
+    import afon.edge.audio_watchdog as _m
 
     dead4 = asyncio.Event()
     live3 = AudioLivenessProbe()

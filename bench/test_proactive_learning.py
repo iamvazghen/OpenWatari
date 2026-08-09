@@ -42,11 +42,11 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.config import settings
+    from afon.config import settings
     settings.presence_poll_seconds = 30
     settings.presence_engaged_idle_seconds = 25
-    from jarvis.brain.presence import Presence
-    from jarvis.brain.proactive import ProactiveEngine, Signal, classify_reaction
+    from afon.brain.presence import Presence
+    from afon.brain.proactive import ProactiveEngine, Signal, classify_reaction
 
     tz = ZoneInfo(settings.user_tz)
     t0 = datetime(2026, 7, 14, 14, 0, tzinfo=tz)

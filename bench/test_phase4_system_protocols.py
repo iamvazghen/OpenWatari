@@ -21,7 +21,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jarvis.config import settings  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 passed = 0
 failed = 0
@@ -38,14 +38,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 async def main() -> None:
-    from jarvis.brain.tools import system, browser
-    import jarvis.brain.protocols as P
-    from jarvis.brain.tools import protocols as protocols_tool
+    from afon.brain.tools import system, browser
+    import afon.brain.protocols as P
+    from afon.brain.tools import protocols as protocols_tool
 
     print("[1] system tools")
     with tempfile.TemporaryDirectory() as d:
         base = Path(d)
-        folder = base / "jarvis_test_dir"
+        folder = base / "afon_test_dir"
         f = folder / "note.txt"
         r = await system.file_op({"action": "create_folder", "path": str(folder)})
         check("create_folder", folder.is_dir(), r)
@@ -60,8 +60,8 @@ async def main() -> None:
     r = await system.file_op({"action": "delete_folder", "path": "C:\\Windows"})
     check("delete refuses protected path", "protected" in r, r)
 
-    r = await system.run_powershell({"command": "Write-Output JARVIS_OK"})
-    check("run_powershell returns output", "JARVIS_OK" in r, r)
+    r = await system.run_powershell({"command": "Write-Output AFON_OK"})
+    check("run_powershell returns output", "AFON_OK" in r, r)
     r = await system.process_op({"action": "list", "name": "python"})
     check("process_op list works", "process" in r.lower(), r)
     r = await system.process_op({"action": "kill"})
@@ -101,7 +101,7 @@ async def main() -> None:
     # goodnight acts on the OWNER'S MACHINE, so with a laptop connected it travels over PC_LINK
     # instead of launching a script on whatever host the brain happens to be running on (on the VPS
     # that was a silent no-op). A brain-side protocol still proves the local launch path.
-    from jarvis.brain import pc_link
+    from afon.brain import pc_link
 
     forwarded: list = []
 
@@ -138,8 +138,8 @@ async def main() -> None:
     # after shutdown; the assertions below are what matter, not the temp-dir teardown.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         settings.scheduler_db_path = str(Path(d) / "jobs.sqlite")
-        from jarvis.brain.scheduler import SCHEDULER
-        from jarvis.brain.tools import notify, reminders
+        from afon.brain.scheduler import SCHEDULER
+        from afon.brain.tools import notify, reminders
 
         # Keep this block hermetic: no real ntfy POST to the phone. (Phase 4b's ntfy path gets
         # its own monkeypatched check below.)
@@ -172,7 +172,7 @@ async def main() -> None:
             settings.ntfy_topic = "test-topic"
             captured: dict = {}
 
-            async def _fake_push(message, title="Jarvis", at=None):
+            async def _fake_push(message, title="Afon", at=None):
                 captured["message"], captured["at"] = message, at
                 return True
 

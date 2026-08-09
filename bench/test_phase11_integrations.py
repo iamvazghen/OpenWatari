@@ -33,13 +33,13 @@ def degrades(out: str) -> bool:
 
 
 def main() -> None:
-    import jarvis.brain.tools.calendar as cal
-    import jarvis.brain.tools.gmail as gmail
-    import jarvis.brain.tools.smarthome as ha
-    from jarvis.brain.google import access_token, configured
-    from jarvis.brain.proactive import confirm_required
-    from jarvis.brain.tools import tool_names
-    from jarvis.config import settings
+    import afon.brain.tools.calendar as cal
+    import afon.brain.tools.gmail as gmail
+    import afon.brain.tools.smarthome as ha
+    from afon.brain.google import access_token, configured
+    from afon.brain.proactive import confirm_required
+    from afon.brain.tools import tool_names
+    from afon.config import settings
 
     # Force the UNCONFIGURED state so the degradation contract is verified regardless of whether a
     # real .env has these set (this is a hermetic test of graceful-degradation, not of live creds —

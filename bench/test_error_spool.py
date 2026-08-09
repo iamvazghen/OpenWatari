@@ -47,13 +47,13 @@ class FakeWS:
 
 
 def _client():
-    from jarvis.edge.brain_client import BrainClient
+    from afon.edge.brain_client import BrainClient
 
     return BrainClient(session_id="s1", device_id="d1", url="ws://127.0.0.1:1/ws", token="")
 
 
 async def main() -> None:
-    from jarvis.edge.brain_client import _SPOOL_MAX
+    from afon.edge.brain_client import _SPOOL_MAX
 
     print("[1] link DOWN — entries are spooled, not dropped")
     c = _client()
