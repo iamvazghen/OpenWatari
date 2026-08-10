@@ -13,6 +13,30 @@ from afon.brain.tools.base import tool_error
 from afon.config import settings
 
 
+def _arg(args: dict, *names: str) -> str:
+    """First non-empty value among ``names``, joining a dict/list value into one string.
+
+    Weak models get argument NAMES wrong far more often than they get intent wrong. Observed in
+    production traces: ``recall({'entity': …, 'key': …})`` and ``recall({'text': …})`` where the
+    schema says ``query``. The old code read only ``query``, found nothing, and returned the
+    conversational string "What should I recall, sir?" — which the model then narrated back as its
+    ANSWER. An independent audit scored several of those echoes as Afon failing to describe his own
+    governance; the intent had been right every time and only the key was wrong.
+
+    So: accept the obvious synonyms, and never let a missing argument produce a sentence that reads
+    like a reply (see the callers, which now return a tool_error instead).
+    """
+    for n in names:
+        v = args.get(n)
+        if isinstance(v, dict):
+            v = " ".join(str(x) for x in v.values() if x)
+        elif isinstance(v, (list, tuple)):
+            v = " ".join(str(x) for x in v if x)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
 async def remember(args: dict) -> str:
     if not settings.memory_enabled:
         return "My long-term memory is switched off right now, sir."
@@ -33,9 +57,11 @@ async def recall(args: dict) -> str:
     """Cross-layer recall — searches L1 (learned) + L2 (journal) + L3 (vault) + L5 (semantic)."""
     if not settings.memory_enabled:
         return "My long-term memory is switched off right now, sir."
-    query = (args.get("query") or "").strip()
+    query = _arg(args, "query", "text", "q", "topic", "entity", "key", "subject")
     if not query:
-        return "What should I recall, sir?"
+        # NOT a question. A tool that answers a bad call with "What should I recall, sir?" hands the
+        # model a plausible sentence, and the model speaks it as the reply.
+        return tool_error("recall", ValueError("no search text (expected a 'query' argument)"))
     layers = args.get("layers")  # optional: ['L1','L2','L3','L5'] to narrow
     try:
         # fused_recall returns tagged dicts; tag each hit with its layer so the LLM can cite.
@@ -56,9 +82,13 @@ async def recall(args: dict) -> str:
 async def forget(args: dict) -> str:
     if not settings.memory_enabled:
         return "My long-term memory is switched off right now, sir."
+    # Deliberately NOT using _arg's synonym list here, unlike `recall`. This one DELETES. Guessing
+    # which mistyped field held the owner's intent is fine when the worst case is an unhelpful
+    # search; it is not fine when the worst case is dropping the wrong memory. A wrong key here
+    # should fail loudly and let him say it again.
     query = (args.get("query") or "").strip()
     if not query:
-        return "What should I forget, sir?"
+        return tool_error("forget", ValueError("no target (expected a 'query' argument)"))
     try:
         gone = STORE.forget(query)
         return f"Forgotten, sir — I've dropped the note about '{query}'." if gone else (

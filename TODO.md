@@ -1809,8 +1809,70 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       touch the model. Everything judged swings: B25 by 33 points on no code change at all.
       **Never quote a single run.** Anything cited needs ≥3 runs and a range, not a point. The
       honest current statement is "72–80% strategic, structural governance 100%".
-- [ ] **Decide how many runs a citable number needs, and write it into the SOP.** Three is a guess;
-      the spread above suggests more for B25. Cheap to measure: the structural half is free.
+- [x] **Measured how many runs a citable number needs. (2026-08-10)** Every judged sample so far:
+
+      | | samples | range |
+      |---|---|---|
+      | B06 Uncertainty, mixed code | 65, 79, 35, 69 | 35–79 |
+      | B06 Uncertainty, **final code** | 59, 60 | **59–60** |
+      | B25 Regulatory, mixed code | 17, 50, 50, 25 | 17–50 |
+      | B25 Regulatory, **final code** | 42, INCONCLUSIVE | unstable |
+
+      **The nuance matters and I nearly missed it.** I was about to conclude "all judged inspections
+      are hopelessly noisy". But once the code stopped moving, B06 came back 59 and 60 — tight. Much
+      of the apparent 35–79 "noise" was me changing Afon between runs and comparing anyway. B25 is
+      genuinely unstable (42, then INCONCLUSIVE on identical code).
+      **Rule for the SOP: never quote a judged inspection from fewer than 3 runs on unchanged code,
+      quote a range not a point, and treat any run spanning a code change as a different
+      experiment.** B01–B04 need one run — they never touch the model. n is still only 2 here, so
+      the rule is the floor, not the finding.
+
+### L3d · A test that fails two days in seven (found 2026-08-10)
+
+- [x] **`test_calendar_dates.py` was date-dependent. (FIXED)** The check "no spoken time is ever a
+      truncated ISO string" asserted `"T" not in s`, meaning to catch an ISO separator. The all-day
+      format is `"on Tue 11 August"` — the **T in "Tue"** tripped it. So the suite went red whenever
+      tomorrow was a Tuesday or a Thursday, and green the other five days, with nothing wrong in the
+      product. Now matches `\dT\d`, verified to still flag `2026-08-11T14:00:00` while accepting
+      "Tue"/"Thu". 16/16.
+      *This is the second measurement bug this week that produced a confident wrong signal. A
+      date-dependent test is worse than no test: it trains you to expect a red run instead of
+      reading it.*
+- [ ] **Sweep the suite for other date/time-dependent checks. (P2)** This one only surfaced because
+      a run happened to straddle midnight into a Tuesday. Anything comparing against `date.today()`
+      or a weekday name is a candidate; a cheap first pass is to run the whole suite under a few
+      faked dates (a Tuesday, a Thursday, a month end, a DST boundary) and see what moves.
+
+### L3c · The "echo" had TWO causes, and the second one was the real bug (2026-08-10)
+
+- [x] **A tool answering a bad call with a QUESTION becomes a fake answer. (P1, FIXED)** I blamed
+      the echoed replies entirely on the concurrency race. The race was real, but it was not the
+      whole story: an echo reproduced with **no concurrency at all**, on a single request.
+      The trace shows what actually happens. The turn is narrowed to `read_skill`, the weak primary
+      **ignores the narrowing** and calls `recall` anyway — with the wrong argument names,
+      `recall({'entity': …, 'key': …})` and `recall({'text': …})` where the schema says `query` —
+      `recall` reads only `query`, finds nothing, and returns **"What should I recall, sir?"**.
+      That is a fluent sentence, so the model narrates it as the reply. The audit then scored
+      "Recall the information about GDPR Art. 5…" as Afon failing to describe his own governance.
+      **The intent was right every time; only the key was wrong.**
+      Fix: `recall` accepts the obvious synonyms (`query`/`text`/`q`/`topic`/`entity`/`key`/
+      `subject`, joining dict and list values) and an argument-less call returns a `tool_error`
+      instead of a sentence. `forget` gets the error half but **deliberately not the synonyms** —
+      guessing which mistyped field held the intent is fine when the worst case is an unhelpful
+      search, not when it is dropping the wrong memory. Checks in `bench/test_phase9_memory.py`
+      (27/27).
+- [ ] **The same shape exists in ~23 other tools. (P2, deliberately NOT swept)** `grep` finds
+      `return "Which URL, sir?"`, `"What should I play, sir?"`, `"Who should I look up, sir?"` and
+      twenty more. For an OWNER who genuinely left a detail out, asking is the right behaviour —
+      which is why this is not a blanket bug and why I did not rewrite all of them. It only turns
+      harmful when the MODEL supplies a wrong key. A safe sweep would need to distinguish those two
+      callers; the cheap version is to route argument-less tool calls through `tool_error` while
+      keeping the question for turns where the owner's own utterance lacked the detail.
+- [ ] **`tool_choice`/name-forcing is not honoured by the primary. (P2, known, now measured)** The
+      B1 router logged `narrowing turn to ['read_skill'] (forcing read_skill by name)` and the model
+      called `recall` regardless. The code already documents MiniMax honouring `required`
+      inconsistently; this is the same defect reaching a different tool. The narrowing is still
+      worth keeping (it fixed B25's fabrication) but it cannot be relied on as a guarantee.
 - [ ] **The connection banner lies about capabilities, in both directions.** It reports the
       CLI-wrapped provider; the inspections use the fixture-wrapped one. Run 8 printed
       `tools=no, audit=no, auth=no, governance=no` while B01–B04 all scored 100%. Ignore the banner.

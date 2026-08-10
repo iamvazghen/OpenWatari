@@ -12,6 +12,7 @@ Offline: the Google call is stubbed, so this asserts OUR request-building and ph
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -100,8 +101,16 @@ async def main() -> None:
     said_allday = cal._fmt_when({"start": {"date": tomorrow.isoformat()}})
     check("an all-day event speaks no clock",
           "at" not in said_allday.replace("at ", "", 0) or ":" not in said_allday, said_allday)
+    # Look for the ISO separator specifically: a bare `"T" not in s` also matches the T in the
+    # weekday names "Tue" and "Thu", so this check failed on two days out of every seven and
+    # passed on the other five. Caught on 2026-08-10, when tomorrow was a Tuesday and the all-day
+    # format was the entirely correct "on Tue 11 August". A date-dependent test is worse than no
+    # test: it teaches you to expect a red run rather than to read it.
+    iso_sep = re.compile(r"\dT\d")
     check("no spoken time is ever a truncated ISO string",
-          all("T" not in s and not s.endswith(" at 14") for s in (said, said_today, said_allday)))
+          all(not iso_sep.search(s) and not s.endswith(" at 14")
+              for s in (said, said_today, said_allday)),
+          f"{said!r} {said_today!r} {said_allday!r}")
 
     print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
     raise SystemExit(1 if FAIL else 0)

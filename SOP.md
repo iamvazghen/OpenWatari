@@ -479,7 +479,50 @@ and a broken hook fails **silently**. Do not remove those rules.
 Tool → hermetic test → register in `TESTS` → add a live check to `TESTING_GUIDE.md` → decide whether
 it belongs in a lazy group (default: yes) → run the gate → commit (the hook rebuilds the graph).
 
-### 9.4 Backlog
+### 9.4 The independent audit (iFixAi) — and how to quote a number from it
+
+An external agent auditor lives at `C:\Projects\iFixAi`. Afon is driven through
+`bench/ifixai_shim.py`, an OpenAI-compatible front end onto `AfonAgent` — **never point it at
+`/talk`**: that path synthesises speech for every reply, holds the same lock as live voice, and
+writes every probe into Afon's memory of his owner.
+
+```bash
+# 1. start the shim (leave it running; it snapshots memory and discards writes)
+uv run python bench/ifixai_shim.py --port 8799
+
+# 2. run. --concurrency 1 is REQUIRED, see below.
+IFIXAI_HTTP_ENDPOINT="https://ai-gateway.vercel.sh/v1" uv run ifixai run \
+  --provider http --endpoint http://127.0.0.1:8799/v1 --api-key local-shim-no-auth \
+  --grounding sut --suite strategic --timeout 120 --concurrency 1 \
+  --fixture C:/Afon/bench/ifixai_fixture_afon.yaml \
+  --eval-mode single --judge-provider http --judge-api-key "$KEY" \
+  --judge-model anthropic/claude-sonnet-4.6
+```
+
+Five things that each produced a confident wrong result before being understood:
+
+- **Governance must be EMBEDDED in the fixture**, under a top-level `governance:` key. The
+  `--governance FILE` flag wraps only the connection-test provider; inspections re-resolve a fresh
+  one from `fixture.governance`. Miss this and every structural inspection reports "insufficient
+  evidence" while the banner cheerfully says `governance=yes`.
+- **The connection banner is not evidence.** It describes a different provider than the inspections
+  use, and has printed `tools=no, auth=no, governance=no` on a run where B01–B04 all scored 100%.
+- **`--concurrency 1`.** There is one `AfonAgent` behind the shim; parallel probes corrupt each
+  other's conversation. The symptom is not an error but a fluent non-answer.
+- **`--timeout 120`.** Afon runs real tools; the 30s default times out and scores as hallucination.
+- **The judge must be a different vendor** from Afon's own chain, and Sonnet not Haiku — Haiku
+  returned "zero claims" twice and invented INCONCLUSIVEs.
+
+**Quoting a result.** B01–B04 are structural: one run is enough, they never touch the model.
+Everything judged (B05/B06/B07/B25) varies run to run — **use at least 3 runs on unchanged code and
+quote a range, never a point.** A run that straddles a code change is a different experiment; do not
+compare it with the one before. Measured spreads are in `TODO.md` Part L.
+
+**Do not tune the fixture to raise a score.** `b02_non_llm_layer` *fails* a system that declares an
+insufficient architecture while merely *excluding* one that declares nothing — overclaiming scores
+worse than silence, and produces a grade that measures the YAML instead of Afon.
+
+### 9.5 Backlog
 
 `TODO.md` is the single backlog: done items keep their reasoning, open items state what blocks them.
 Items blocked on the owner (credentials, a live listen-check, a hardware purchase) are marked as

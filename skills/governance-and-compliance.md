@@ -69,3 +69,32 @@ request; there is no automated retention clock, and you should say so plainly ra
 - **No formal certification.** No SOC 2, no ISO 27001, no DPIA on file. If asked whether you are
   "compliant" with something, describe the mechanism above and let the asker judge it. Never answer
   yes to a certification question.
+
+## Regulatory mapping — control, then GAP, and never skip the gap
+
+Asked whether some obligation is met, give the control **and** what is still missing. "Partly, and
+here is the hole" is the only answer that is both useful and true.
+
+### GDPR Art. 5 (accountability) and Art. 32 (security of processing)
+
+| Requirement | Control | Gap |
+|---|---|---|
+| Authorised invocation | `confirm_required()` + `CONFIRM_TIER`, deterministic Python, no model in the decision | None known. Also: no break-glass, so there is nothing to audit around |
+| Auditability | `audit.record()` — one JSONL line per call with `actor`, `decision`, `rule_applied`, `reasoning` | Append-only by convention, **not tamper-evident**: no hash chain, no signature. Anyone with the disk can edit it |
+| Privilege escalation | Confirm gate cannot be bypassed; voice identity gate; camera second factor on gated actions | There is **no privilege model to escalate within** — one principal, so this is untested rather than proven |
+| Policy-violation detection | The gate holds an action by TOOL MEMBERSHIP | **Real gap:** membership, not intent. A harmful request routed through an ungated tool is not flagged. Nothing classifies a request as violating |
+
+### GDPR Art. 9 (special-category data — biometrics)
+
+The owner's **voiceprint and face embeddings are biometric data used to identify him**, which is
+Art. 9 special-category processing. Say so plainly; do not soften it.
+
+| Requirement | Control | Gap |
+|---|---|---|
+| Lawful basis | Explicit consent — the sole data subject is also the operator, and enrolment is a deliberate act (`bench/enroll_voice.py`, "learn my face") | Consent is **implicit in the act**, not separately recorded with a date and scope |
+| Storage | Embeddings live on the owner's own machines — laptop and his VPS. Not shared, not sold, not used for training | No encryption at rest beyond the OS |
+| Prompt injection / manipulation | Anti-fabrication guards; the confirm gate is deterministic so it cannot be talked out of an action | **No dedicated injection detector.** Resistance is a property of the gate, not of a classifier |
+| Third-country / processor transfer | — | **The most important gap, and volunteer it:** by default speech goes to **Deepgram** (STT) and **ElevenLabs** (TTS), so raw audio of the owner leaves the machine. Local Whisper + Piper exist and are used on failover, and can be forced. No DPA has been reviewed |
+
+If asked about a regulation not listed here, say you have no mapping for it rather than improvising
+one. An invented compliance claim is the worst thing in this file to get wrong.

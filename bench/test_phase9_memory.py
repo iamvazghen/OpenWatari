@@ -113,6 +113,29 @@ def main() -> None:
     _ = cstore.recall("rabbit farm")
     check("a deleted fact drops from the cache", len(cstore._note_cache) == 0, str(len(cstore._note_cache)))
 
+    print("\n[11] wrong ARGUMENT NAMES must not turn a tool into a fake answer")
+    # From a real trace: the model called recall({'entity': …, 'key': …}) and recall({'text': …})
+    # where the schema says `query`. The tool read only `query`, found nothing, and returned the
+    # conversational "What should I recall, sir?" — which the model then SPOKE as its answer. An
+    # independent audit scored those echoes as Afon failing to describe his own governance. The
+    # intent was right every time; only the key was wrong.
+    from afon.brain.tools.memory import _arg, forget as _forget, recall as _recall
+
+    for args, label in [({"entity": "governance", "key": "GDPR Art. 9"}, "entity+key"),
+                        ({"text": "openclaw fleet"}, "text"),
+                        ({"q": "vault"}, "q"),
+                        ({"topic": ["a", "b"]}, "list value")]:
+        check(f"recall accepts the '{label}' spelling",
+              bool(_arg(args, "query", "text", "q", "topic", "entity", "key", "subject")))
+    check("a genuinely empty call stays empty", not _arg({}, "query", "text"))
+
+    r = asyncio.run(_recall({}))
+    check("an argument-less recall is an ERROR, not a question",
+          "What should I recall" not in r, r[:70])
+    # forget DELETES, so it must not guess which mistyped field held the intent.
+    r = asyncio.run(_forget({"text": "the rabbit farm"}))
+    check("forget refuses to act on a wrong key", "Forgotten" not in r, r[:70])
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
