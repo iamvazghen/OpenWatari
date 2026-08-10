@@ -479,7 +479,33 @@ and a broken hook fails **silently**. Do not remove those rules.
 Tool → hermetic test → register in `TESTS` → add a live check to `TESTING_GUIDE.md` → decide whether
 it belongs in a lazy group (default: yes) → run the gate → commit (the hook rebuilds the graph).
 
-### 9.4 The independent audit (iFixAi) — and how to quote a number from it
+### 9.4 Periodic checks — the ones too slow for every commit
+
+Not everything belongs in the gate. These are worth running before a release, or after touching
+anything that formats a date, and they are deliberately *not* in `run_all_tests.py` because they
+would add ten minutes to every run.
+
+```bash
+uv run python bench/check_date_robustness.py     # ~10 min: replays date-sensitive tests on 6 awkward days
+```
+
+**Why it exists.** `test_calendar_dates` asserted `"T" not in s` against `"on Tue 11 August"` — the
+T in "Tue". It went red on Tuesdays and Thursdays, green the other five days, and was caught only
+because one run happened to straddle midnight into a Tuesday. The sweep replays the clock-reading
+tests on both T-weekdays, a month rollover, a year rollover, a leap day, and a Berlin DST boundary.
+
+It found a second one immediately: the same file asserted a day window is `timedelta(days=1)` long.
+On the night Berlin leaves summer time a calendar day is **25 hours**, and the product was correctly
+sending `timeMin=…T00:00+02:00, timeMax=…T00:00+01:00`. The assertion was measuring duration when
+it meant coverage. The product was right both times — **both bugs were in the tests.**
+
+Dates are faked by `bench/_faketime/sitecustomize.py`, which CPython imports before any test binds
+`date`. It shifts `time.time()` by the same whole number of days as `datetime`: shift only one and
+code that mixes the clocks (`presence` stamps rows with `time.time()` and derives day bounds from
+`datetime.now()`) reports "no activity recorded" and looks like a product bug. Durations and
+`time.monotonic()` are untouched.
+
+### 9.5 The independent audit (iFixAi) — and how to quote a number from it
 
 An external agent auditor lives at `C:\Projects\iFixAi`. Afon is driven through
 `bench/ifixai_shim.py`, an OpenAI-compatible front end onto `AfonAgent` — **never point it at
@@ -522,7 +548,7 @@ compare it with the one before. Measured spreads are in `TODO.md` Part L.
 insufficient architecture while merely *excluding* one that declares nothing — overclaiming scores
 worse than silence, and produces a grade that measures the YAML instead of Afon.
 
-### 9.5 Backlog
+### 9.6 Backlog
 
 `TODO.md` is the single backlog: done items keep their reasoning, open items state what blocks them.
 Items blocked on the owner (credentials, a live listen-check, a hardware purchase) are marked as

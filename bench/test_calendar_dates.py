@@ -60,7 +60,17 @@ async def main() -> None:
     check("window starts at local midnight of that day",
           start.date() == tomorrow and start.hour == 0 and start.utcoffset() == tz.utcoffset(start),
           str(start))
-    check("window is exactly one day long", end - start == timedelta(days=1), str(end - start))
+    # COVERAGE, not duration. A calendar day is not always 24 hours: on the night Europe/Berlin
+    # leaves summer time it is 25, and the correct window is still midnight-to-midnight local
+    # (timeMin=…T00:00+02:00, timeMax=…T00:00+01:00). Asserting `end - start == timedelta(days=1)`
+    # failed there — and only there — because fromisoformat yields FIXED-OFFSET datetimes, whose
+    # subtraction is absolute rather than wall-clock. The product was right; the assertion was
+    # measuring the wrong thing. Found by bench/check_date_robustness.py on 2026-10-24.
+    check("window runs local midnight to local midnight of the next day",
+          start.hour == 0 and start.minute == 0
+          and end.hour == 0 and end.minute == 0
+          and (end.date() - start.date()) == timedelta(days=1),
+          f"{start.isoformat()} -> {end.isoformat()} ({end - start} elapsed)")
 
     out = await cal.list_events({"date": (today + timedelta(days=4)).isoformat()})
     check("a further-out day is named by weekday, not 'today'",

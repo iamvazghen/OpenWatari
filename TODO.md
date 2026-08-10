@@ -1838,10 +1838,31 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       *This is the second measurement bug this week that produced a confident wrong signal. A
       date-dependent test is worse than no test: it trains you to expect a red run instead of
       reading it.*
-- [ ] **Sweep the suite for other date/time-dependent checks. (P2)** This one only surfaced because
-      a run happened to straddle midnight into a Tuesday. Anything comparing against `date.today()`
-      or a weekday name is a candidate; a cheap first pass is to run the whole suite under a few
-      faked dates (a Tuesday, a Thursday, a month end, a DST boundary) and see what moves.
+- [x] **Swept the suite for other date/time-dependent checks. (DONE 2026-08-10)** Built
+      `bench/check_date_robustness.py` + `bench/_faketime/sitecustomize.py`, which CPython imports
+      at startup — before any test binds `date` — so no test needs to know it exists. Replays the
+      10 clock-reading tests across 6 deliberately awkward days: both weekdays whose abbreviation
+      contains a capital T, a month rollover, a year rollover, a leap day, and a Berlin DST
+      boundary. **Validated against the known bug first**: under a faked 2026-08-12 the old
+      assertion fails and the new one passes, deterministically.
+      **It found a second one immediately.** `test_calendar_dates` asserted the day window is
+      `timedelta(days=1)` long. On the night Berlin leaves summer time a calendar day is **25
+      hours**, and the product was correctly sending `timeMin=…T00:00+02:00, timeMax=…T00:00+01:00`.
+      The assertion measured *duration* where it meant *coverage* — and only broke there because
+      `fromisoformat` yields fixed-offset datetimes, whose subtraction is absolute rather than
+      wall-clock. Now asserts midnight→midnight of the next date. **Both date bugs were in the
+      tests; the product was right both times.**
+      Now 60/60 green (10 tests × 6 days). Documented in SOP §9.4 as a periodic check, deliberately
+      NOT in the commit gate — it costs ~10 minutes.
+- [ ] **Extend the sweep's test list as clock-reading tests are added. (P2)** It covers 10 of the
+      ~31 bench files that touch `today`/`now()`. The other 21 mostly read the clock without
+      formatting or comparing it, but that is a judgement I made by reading, not a measurement.
+- [ ] **A harness caveat worth remembering: faking one clock is worse than faking none.** The first
+      sweep showed `test_presence` failing on every faked day — `presence` stamps rows with
+      `time.time()` but derives day bounds from `datetime.now()`, so shifting only the latter put
+      every row outside every window and it reported "no activity recorded for today". That reads
+      exactly like a product bug and is not one. The shim now moves both clocks by the same whole
+      number of days, leaving durations and `time.monotonic()` alone.
 
 ### L3c · The "echo" had TWO causes, and the second one was the real bug (2026-08-10)
 
