@@ -1924,6 +1924,80 @@ creative-research · dev-systems · personal) on the OpenClaw VPS. Host and cred
 memory index, deliberately not here — `check_public_clean.py` scans tracked files and this one is
 tracked.
 
+### M0 · Prerequisite findings (2026-08-10) — read before planning any run
+
+Gathered read-only over SSH. Nothing was sent to any agent.
+
+- **The fleet is 8 agents**: `business`, `creative-research`, `dev-systems`, `finance`, `ispir`,
+  `personal`, `realty`, `security`. Note the last one is **`security`**, not `crypto-security` as
+  the memory index says — minor drift, but fix the index rather than trust it.
+- **There is NO live CLI provider in iFixAi.** `providers/bridge.py` is record/replay for offline
+  rehearsal only. Driving `openclaw agent --agent X -m … --json` needs a shim like Afon's; the
+  agent id maps naturally onto the OpenAI `model` field, so ONE shim covers all eight.
+- **The shipped fixtures do not describe this fleet.** `openclaw_strict` / `openclaw_moderate` /
+  `openclaw_consolidated` use generic tool ids (`browser_navigate`, `file_write`, `memory_search`)
+  and invented users (`alice_owner`, `bob_deployer`). The real profile is different (below). They
+  are a starting shape, not a fixture. **Good news:** strict and moderate already carry an inline
+  `governance:` block, which is the arrangement Afon's run proved is the only one that works.
+- **BLAST RADIUS — this is the finding that governs everything else.** From `openclaw.json`:
+
+  | Setting | Value | What a hostile probe could reach |
+  |---|---|---|
+  | `tools.profile` | `full` | the whole tool surface |
+  | `tools.exec` | `mode: full` | arbitrary command execution |
+  | `tools.fs` | `workspaceOnly: false` | the filesystem beyond the workspace |
+  | `tools.elevated` | `enabled: true`, `allowFrom.cli: ["*"]` | **elevated host actions from a CLI-driven probe** |
+  | `tools.agentToAgent` | `enabled: true`, `allow: ["*"]` | fan-out to the other seven agents |
+  | `sandbox.docker.binds` | `obsidian-vault:/memory-vault:**rw**` | **write access to the canonical vault** |
+  | `bindings` | telegram direct `5585548324` + a group | **messages to the owner's real Telegram** |
+
+  A ~450-probe hostile suite per agent, times eight, against that surface could execute commands,
+  write into the canonical vault, and message real contacts. **Nothing may be sent to this fleet
+  until containment is chosen — see M1.4, which is now a blocking decision rather than a task.**
+- **Vault damage would be the expensive one.** The vault is the canonical memory and the laptop copy
+  is a one-way replica, so a bad write propagates to the replica and the local copy cannot restore
+  it.
+
+### M0b · The isolated audit profile EXISTS and works (2026-08-10)
+
+Containment decision: **isolated clone** (owner's call, from the four options). Built and verified.
+`~/.openclaw-audit/` on the VPS, driven with `openclaw --profile audit …` — a built-in flag that
+isolates `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH`. **The live fleet config was never
+modified**; asserted explicitly, and the live gateway stayed `active` throughout.
+
+What is neutralised, and the assertion that proves each:
+
+| Removed | Verified by |
+|---|---|
+| `secrets`, `auth`, `env` (all tool credentials) | resolver returns `no pass entry` for notion / brave / telegram |
+| `channels`, `bindings`, `talk` | no telegram config in the clone; `--deliver` also defaults to false |
+| `tools.elevated` | `enabled: false` |
+| `tools.agentToAgent` | `enabled: false` — one probe cannot fan out to seven agents |
+| canonical vault `rw` bind | repointed at `~/.openclaw-audit/scratch-vault`; no `obsidian-vault` bind remains |
+| cron jobs | own state dir, so it inherits none |
+
+**The credential boundary is exact, not approximate.** A filtered pass store holds **2 of 93**
+entries — `apis/minimax/key` and `apis/freellmapi/key` — so the models work and nothing else does.
+Proven by calling the resolver directly: the two model keys return values; notion, brave and the
+telegram bot token return `no pass entry`.
+
+**Smoke probe passed:** `finance` answered `READY` through the isolated gateway.
+
+Four things cost time and are worth not rediscovering:
+- **Secret references are OBJECTS, not strings** — `{"source":"exec","provider":"pass","id":…}`.
+  A regex over string values reports "0 neutralised" while the reference sits in plain sight. This
+  also corrects an earlier note of mine claiming the model keys were literals: they were refs, and
+  I had read a dict as a literal.
+- **The pass resolver hard-codes `~/.password-store`** and ignores `PASSWORD_STORE_DIR`, so the
+  env-var approach silently resolved nothing. The clone needs its own copy with the constant
+  rewritten.
+- **`--local` still requires a gateway** for the profile. Start one on `loopback:19555` (a port the
+  live gateway does not use) and stop it after the run.
+- **A stale migration lock** blocks a restart for ~4 minutes after a failed start. Wait it out.
+
+**Stop the audit gateway when not running a suite.** `memory-core` creates a managed *dreaming*
+cron job on startup, which would otherwise burn model credits unattended. It is stopped now.
+
 ### M1 · Prerequisites (do first, in order)
 - [ ] **Finish Part L §L4 for Afon.** Specifically: B06/B25 re-measured, and a `--suite core` run
       that completes without harness-attributable failures. The fleet inherits every harness fix.
