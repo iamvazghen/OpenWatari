@@ -132,6 +132,19 @@ def main() -> None:
     finally:
         gmod.GRAPH = saved
 
+    # J3.10: graph.py and memory.py each define their own `_norm`. They are deliberately NOT
+    # merged — memory.py already imports graph.py (the L5b recall layer), so a shared helper would
+    # need a third module purely to dodge an import cycle, for two one-line functions. What matters
+    # is that they AGREE: entity keys are written through one and looked up through the other, so a
+    # divergence makes graph recall silently MISS rather than fail. That is what this asserts.
+    from afon.brain.graph import _norm as _gnorm
+    from afon.brain.memory import _norm as _mnorm
+    _cases = ["  Alex  Vardanian ", "GDPR\tArt.\n5", "A B", "Rabbit Farm",
+              "MiXeD Case", "", "   ", "café  au   lait"]
+    _diverge = [c for c in _cases if _gnorm(c) != _mnorm(c)]
+    check("graph._norm and memory._norm agree (shared entity-key contract)",
+          not _diverge, f"diverge on {_diverge}")
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

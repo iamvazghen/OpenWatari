@@ -90,6 +90,26 @@ def main() -> None:
     check("shipped default STT is deepgram (streaming, low-latency)",
           default_stt == STTProvider.deepgram, str(default_stt))
 
+    print("\n[4] The first turn of the day must not pay the turn path's import cost")
+    # The brain restarts daily at 01:00, so a lazy import on the turn path is paid by the owner's
+    # first sentence each morning — measured at ~90ms cold vs ~9ms warm, ~64ms of it compiling
+    # intent_router's 27 regexes. warmup() must pre-pay it.
+    import sys as _sys
+
+    from afon.brain.agent import AfonAgent
+    for _m in ("afon.brain.intent_router",):
+        _sys.modules.pop(_m, None)
+    _agent = AfonAgent()
+    check("intent_router is NOT imported merely by constructing the agent",
+          "afon.brain.intent_router" not in _sys.modules,
+          "already imported — this check can no longer prove the warm does anything")
+    _agent._warm_turn_path()
+    check("_warm_turn_path imports the turn path's lazy modules",
+          "afon.brain.intent_router" in _sys.modules)
+    check("warmup() actually calls it (not just defined)",
+          "_warm_turn_path" in AfonAgent.warmup.__code__.co_names,
+          str(AfonAgent.warmup.__code__.co_names))
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

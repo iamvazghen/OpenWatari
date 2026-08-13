@@ -811,6 +811,7 @@ class AfonAgent:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"brain warmup skipped: {e}")
         self._warm_vault_cache()
+        self._warm_turn_path()
         await self._load_mcp_tools()
 
     def _warm_vault_cache(self) -> None:
@@ -836,6 +837,30 @@ class AfonAgent:
             asyncio.get_running_loop().create_task(_run())
         except RuntimeError:
             pass   # no loop (tests constructing the agent synchronously) — nothing to warm
+
+    def _warm_turn_path(self) -> None:
+        """Pay the turn path's one-off import cost at startup, not on the owner's first sentence.
+
+        Measured, not assumed: a cold `_prepare_turn` costs ~90ms against ~9ms warm, and a profile
+        puts ~64ms of that in `_narrowed_tools`'s lazy `import intent_router`, which compiles 27
+        module-level regexes. The brain restarts daily at 01:00, so without this the first thing
+        said each morning pays it — the one turn where a delay is most noticeable, because there is
+        no conversation in flight to hide it.
+
+        Synchronous and cheap (it is CPU-bound import work, ~90ms once). The lazy imports themselves
+        stay lazy: they keep the module import graph acyclic, and this only pre-populates
+        `sys.modules` so the first turn finds them already there.
+        """
+        t0 = time.monotonic()
+        try:
+            from afon.brain import intent_router  # noqa: F401 — imported for the side effect
+            from afon.brain.tools import schemas_by_name
+
+            schemas_by_name()   # builds the name->schema dict the router narrows against
+            intent_router.forced_tools("warm")   # forces the regex compile, not just the import
+            logger.debug(f"turn path warm in {(time.monotonic() - t0) * 1000:.0f}ms")
+        except Exception as e:  # noqa: BLE001 — a cold first turn is slower, never broken
+            logger.debug(f"turn path warm skipped: {type(e).__name__}: {e}")
 
     async def _load_mcp_tools(self) -> None:
         """Start any configured MCP servers and fold their tools into the registry + core surface, so
@@ -1783,8 +1808,17 @@ class AfonAgent:
             if last_user:
                 from afon.brain.patterns import record
                 record(last_user["content"])
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — pattern logging must never delay or break a reply
+            # ...but a silent `pass` here is how `pattern_suggestion` would go dormant without a
+            # symptom: this JSONL append is its ONLY input, so a broken write means the capability
+            # simply stops having anything to suggest, which is indistinguishable from "no pattern
+            # matched today". Same shape as the coaching-store scare in K4a.
+            try:
+                from afon.shared import errors as _err
+
+                _err.swallowed("agent.pattern_record", e)
+            except Exception:  # noqa: BLE001
+                pass
         if not self._self_improve:
             return
         self._turns_since_review += 1

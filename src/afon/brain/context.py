@@ -258,7 +258,13 @@ def build_system_prompt() -> str:
                 parts.append(rules_text)
         else:
             parts.append(_DEFAULT_OPERATING_RULES)
-    except Exception:
+    except Exception as e:  # noqa: BLE001 — a brain with no operating rules is worse than defaults
+        # Falling back is right; falling back SILENTLY is not. These rules are how the owner
+        # customises behaviour, so an unreadable file means Afon quietly ignores every rule the
+        # owner wrote and behaves like a fresh install — a behaviour change with no symptom to
+        # notice. Log it loudly enough that "he stopped following my rules" is diagnosable.
+        logger.warning(f"operating rules unreadable at {_OPERATING_RULES_PATH} "
+                       f"({type(e).__name__}: {e}) — falling back to built-in defaults")
         parts.append(_DEFAULT_OPERATING_RULES)
     return "\n\n".join(parts)
 
