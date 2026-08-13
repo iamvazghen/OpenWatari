@@ -58,7 +58,12 @@ def main() -> None:
     bash = shutil.which("bash")
     check(bool(bash), "bash is available to syntax-check with", "cannot verify shell syntax")
     for p in sh:
-        r = subprocess.run([bash, "-n", str(p)], capture_output=True, text=True)
+        # Relative POSIX path from the repo root, NOT str(p). Git Bash on Windows receives
+        # "C:\Afon\scripts\deploy_vps.sh" and eats the backslashes as escapes — it reported
+        # "C:Afonscriptsdeploy_vps.sh: No such file or directory", which reads exactly like the
+        # deploy script having been deleted. Four red checks, none of them about the scripts.
+        rel = p.relative_to(ROOT).as_posix()
+        r = subprocess.run([bash, "-n", rel], cwd=str(ROOT), capture_output=True, text=True)
         check(r.returncode == 0, f"{p.name} parses", (r.stderr or "").strip()[:120])
 
     pwsh = shutil.which("powershell") or shutil.which("pwsh")
