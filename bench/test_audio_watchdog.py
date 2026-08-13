@@ -107,5 +107,40 @@ async def _run():
 
 
 asyncio.run(_run())
+print("\n[+] output preference: re-route on a real device CHANGE, not on a rewrite")
+# The watchdog restarts the whole edge when the saved output preference changes — mic stream,
+# Deepgram socket and ElevenLabs websocket all rebuilt, several seconds during which Afon is deaf
+# and mute. It compared the file's MTIME, so a rewrite with the identical device cost a full
+# teardown; 27 such restarts are in the shipped edge log. It compares the VALUE now.
+import json as _json  # noqa: E402
+import os as _os  # noqa: E402
+
+from afon.edge.audio_devices import PREF_PATH as _PREF  # noqa: E402
+from afon.edge.audio_watchdog import _pref_value  # noqa: E402
+
+_saved = _PREF.read_text(encoding="utf-8") if _PREF.exists() else None
+try:
+    _PREF.parent.mkdir(parents=True, exist_ok=True)
+    _PREF.write_text(_json.dumps({"output": "AirPods"}), encoding="utf-8")
+    _before = _pref_value()
+    check(_before == "AirPods", "a saved preference is read back")
+
+    _os.utime(_PREF, None)   # rewrite the mtime, same device
+    check(_pref_value() == _before, "a rewrite with the SAME device is not a change (no restart)")
+
+    _PREF.write_text(_json.dumps({"output": "Speakers"}), encoding="utf-8")
+    check(_pref_value() != _before, "a REAL device change is detected")
+
+    # A broad `except Exception` here once swallowed a missing `import json`, so this returned None
+    # on every call and no device change would ever have re-routed. Corrupt input must give None,
+    # but a coding error must NOT be able to hide behind the same handler.
+    _PREF.write_text("{ not json", encoding="utf-8")
+    check(_pref_value() is None, "corrupt preference degrades to 'no preference'")
+finally:
+    if _saved is None:
+        _PREF.unlink(missing_ok=True)
+    else:
+        _PREF.write_text(_saved, encoding="utf-8")
+
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")
 sys.exit(1 if _fail else 0)

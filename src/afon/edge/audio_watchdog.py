@@ -20,6 +20,7 @@ the edge with FRESH device resolution (mic → whatever's live, output → AirPo
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 from loguru import logger
@@ -27,17 +28,29 @@ from pipecat.frames.frames import Frame, InputAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-def _pref_mtime() -> float:
-    """Modification time of the saved output preference, or 0.0 when it has never been written.
+def _pref_value() -> str | None:
+    """The saved output preference itself, or None when it has never been written.
 
-    Cheap enough to stat every poll (~5s) — no device enumeration, unlike route_should_change.
+    Reads the VALUE, not the mtime. It was the mtime, and that restarted the whole edge — mic
+    stream, Deepgram socket, ElevenLabs websocket — whenever the file was merely rewritten, even
+    with the identical device. Every one of those teardowns is a window where Afon is deaf and
+    mute, and the next utterance pays cold-start on all three legs. The owner hears that as lag.
+
+    Comparing the value means a no-op write costs nothing and only a REAL device change re-routes.
+    Still cheap enough to read every poll (~5s): one small file, no device enumeration (unlike
+    route_should_change, which blocks for seconds on Bluetooth init).
     """
     from afon.edge.audio_devices import PREF_PATH
 
     try:
-        return PREF_PATH.stat().st_mtime
-    except OSError:
-        return 0.0
+        return json.loads(PREF_PATH.read_text(encoding="utf-8")).get("output")
+    except (OSError, ValueError, AttributeError):
+        # Deliberately NOT `except Exception`. The first version of this function was missing its
+        # `import json`, and a broad catch swallowed the NameError silently — it returned None on
+        # every call, so a real device change would never have re-routed and nothing would have said
+        # so. Narrow it to the three things that legitimately mean "no usable preference":
+        # missing/unreadable file, bad JSON, non-dict JSON.
+        return None
 
 
 class AudioLivenessProbe(FrameProcessor):
@@ -131,8 +144,9 @@ async def watch_audio_liveness(
     # "Switch to my headphones" writes the output preference and nothing else — resolve_output_index
     # is only read when the worker is BUILT, and route_should_change watches devices appearing and
     # vanishing, not the preference. So the command used to save a setting and change nothing the
-    # owner could hear until the next restart. Track the file's mtime and rebuild when it moves.
-    last_pref = _pref_mtime()
+    # owner could hear until the next restart. Track the preference VALUE and rebuild when it
+    # actually changes device (not when the file is merely rewritten — see _pref_value).
+    last_pref = _pref_value()
     while not dead.is_set():
         gap = time.monotonic() - probe.last_input
         # Sleep/resume: after modern standby every audio stream and cloud WebSocket this process holds
@@ -182,10 +196,13 @@ async def watch_audio_liveness(
             logger.error(f"audio watchdog: mic gap {gap:.0f}s (frames={probe.count}) — stream dead, restarting edge")
             dead.set()
             return
-        pref_mtime = _pref_mtime()
-        if pref_mtime != last_pref:
-            last_pref = pref_mtime
-            logger.info("audio watchdog: output preference changed — re-routing (restarting edge)")
+        pref_now = _pref_value()
+        if pref_now != last_pref:
+            # Name both sides. This used to log only "changed", so 27 restarts in the log could not
+            # be explained after the fact — and a restart you cannot explain is one you cannot fix.
+            logger.info(f"audio watchdog: output preference changed "
+                        f"({last_pref!r} -> {pref_now!r}) — re-routing (restarting edge)")
+            last_pref = pref_now
             dead.set()
             return
         if i % device_check_every == 0:

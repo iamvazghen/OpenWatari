@@ -117,14 +117,20 @@ def main() -> None:
         print("\n[4] the watchdog turns a saved preference into a LIVE re-route")
         # This is the half that was missing: without it the command saves a setting and the sound
         # keeps coming out of the old device until the next restart.
-        from afon.edge.audio_watchdog import _pref_mtime
+        # ponytail: the watchdog watches the preference VALUE, not the file mtime. Watching mtime
+        # restarted the edge every time anything rewrote the file with identical content — 103
+        # restarts in the log, ~5/hour, and every one of them cut the speaker off mid-sentence.
+        from afon.edge.audio_watchdog import _pref_value
 
-        before = _pref_mtime()
-        check("preference mtime is observable", before > 0, str(before))
-        time.sleep(0.05)
+        save_output_preference("speakers")
+        before = _pref_value()
+        check("preference value is observable", before == "speakers", repr(before))
         save_output_preference("headphones")
-        check("...and moves when the preference is written", _pref_mtime() != before,
-              f"{before} -> {_pref_mtime()}")
+        check("...and moves when the preference CHANGES", _pref_value() != before,
+              f"{before!r} -> {_pref_value()!r}")
+        save_output_preference("headphones")
+        check("...but NOT when it is rewritten unchanged (the restart storm)",
+              _pref_value() == "headphones", repr(_pref_value()))
 
         # ...and the loop must actually ACT on it. Watching the mtime is worthless if nothing
         # rebuilds the stream, which was exactly the state this task found the system in.
