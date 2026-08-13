@@ -317,7 +317,21 @@ class Settings(BaseSettings):
     vercel_ai_gateway_base_url: str = "https://ai-gateway.vercel.sh/v1"
     # If no FIRST token arrives within this many seconds, cancel and fail over to the next model —
     # turns a slow/hung primary into a fast recovery instead of a full-timeout stall.
-    llm_first_token_timeout_seconds: float = 4.0
+    #
+    # 2.0, lowered from 4.0 on MEASURED data (2026-08-11, 10 streamed turns against the live
+    # primary): TTFT was 0.61 0.64 0.68 0.70 0.74 0.75 0.78 0.81 0.92 and one 3.69 outlier —
+    # median 0.74s. So 2.0s is ~2.7x the median and trips on roughly 1 turn in 10.
+    #
+    # Tripping on a healthy turn is normally the thing a deadline must avoid. Here it is NOT, and
+    # that inverts the usual tradeoff: the first fallback (groq llama-3.3-70b) has a measured TTFT
+    # of 0.18s, so abandoning at 2.0s and letting IT answer costs ~2.2s, against 3.7s spent waiting.
+    # Failing over is simply faster than being patient. The old 4.0s was set just above the outlier,
+    # which optimised for "never abandon the primary" — the wrong objective when the alternative is
+    # four times quicker.
+    # The one real cost, the primary being benched, is handled separately: a first-token timeout
+    # raises _SlowFirstToken and benches for 5s instead of the 45s a genuine failure gets, so a
+    # slow turn does not migrate a tenth of the day onto the quota-capped fallback.
+    llm_first_token_timeout_seconds: float = 2.0
     # After a provider/model fails with a timeout, rate limit, API error, or unusable empty response,
     # skip that chain entry briefly on later live turns while any healthy fallback exists.
     llm_unhealthy_cooldown_seconds: float = 45.0

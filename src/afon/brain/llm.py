@@ -167,6 +167,26 @@ class _EmptyResponse(Exception):
     """A model returned 200 but with no usable choice (some proxies wrap errors in a 200)."""
 
 
+class _SlowFirstToken(_EmptyResponse):
+    """The model was reachable and healthy — it just hadn't produced a first token in time.
+
+    Distinguished from a real failure because the right RESPONSE is different. A 4xx, a dead key or
+    a connection reset means "this model is broken, stop asking for a while" (45s bench). A slow
+    first token means "this ONE turn is taking too long, someone else can answer it faster" — and on
+    the measured chain the fallback's TTFT is 0.18s against the primary's 0.74s median, so failing
+    over is genuinely quicker than waiting.
+
+    Benching the primary 45s for that would be wrong: the measured distribution is 9 turns in
+    0.61-0.92s and one at 3.69s, so a tight deadline trips on roughly 1 turn in 10 — all healthy.
+    At 45s each that quietly migrates a tenth of the day's traffic onto groq, which has a 100k
+    token/day cap and cannot be the primary. Hence the much shorter bench below: a genuinely hung
+    provider re-trips every turn and still gets skipped, while a one-off slow turn costs 5s.
+    """
+
+
+_SLOW_FIRST_TOKEN_COOLDOWN_S = 5.0
+
+
 def _model_extra(model_name: str) -> dict[str, Any]:
     """Per-model request params. gpt-oss reasoning models (e.g. Cerebras gpt-oss-120b) otherwise
     spend the first ~2s 'thinking' with empty content — fatal for a voice turn. reasoning_effort=low
@@ -254,7 +274,14 @@ class LLMClient:
             return
         now = asyncio.get_running_loop().time()
         newly_benched = self._unhealthy_until.get(model, 0.0) <= now
-        cooldown = _PERMANENT_COOLDOWN_S if permanent else self._cooldown
+        if permanent:
+            cooldown = _PERMANENT_COOLDOWN_S
+        elif isinstance(err, _SlowFirstToken):
+            # Healthy but slow on this turn — see _SlowFirstToken. A full 45s bench here would
+            # migrate ~1 turn in 10 onto the quota-capped fallback for no reason.
+            cooldown = _SLOW_FIRST_TOKEN_COOLDOWN_S
+        else:
+            cooldown = self._cooldown
         self._unhealthy_until[model] = now + cooldown
         if permanent:
             METRICS.incr("llm_permanent_failures")
@@ -501,7 +528,7 @@ class LLMClient:
                     except StopAsyncIteration:
                         break
                     except asyncio.TimeoutError as e:
-                        raise _EmptyResponse(
+                        raise _SlowFirstToken(
                             f"no first token within {self._first_token_timeout}s"
                         ) from e
                     if not chunk.choices:
@@ -652,7 +679,25 @@ class LLMClient:
                     logger.warning(f"LLM streaming via fallback '{model}'")
                 got_any = False
                 stripper = _ThinkStripper()  # strip a MiniMax <think> block from the text stream
-                async for chunk in stream:
+                # The FIRST token must arrive within the deadline, exactly as in stream_with_tools.
+                # This path had NO deadline at all: a bare `async for chunk in stream`. It is the
+                # PURE-CHAT path — the most common conversational turn — so a primary that accepted
+                # the connection and then went quiet was waited on until the 60s request timeout
+                # while the 0.18s fallback sat idle. The deadline lived only on the tool path, which
+                # is the rarer one. Same construction, so the two paths cannot drift.
+                ait = stream.__aiter__()
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            ait.__anext__(),
+                            timeout=None if got_any else self._first_token_timeout,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError as e:
+                        raise _SlowFirstToken(
+                            f"no first token within {self._first_token_timeout}s"
+                        ) from e
                     delta = chunk.choices[0].delta.content if chunk.choices else None
                     if delta:
                         piece = stripper.feed(delta)
