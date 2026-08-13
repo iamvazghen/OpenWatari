@@ -224,7 +224,7 @@ One brain, reached many ways — all sharing memory, all over the tailnet:
 | **iPhone** (no app) | "Hey Siri, Afon" → `POST /talk` | n/a | Siri dictation → spoken reply |
 | **Android** (no app) | Assistant/Tasker → `POST /talk`, or Termux edge-lite | n/a | dictation → spoken reply; or full mic stream via Termux |
 | **Phone + headphones** (AirPods/BT → phone) | same shortcut (`android-headphones`/`phone-headphones` hint) | **on** (private) | reply plays in the earbuds |
-| **Mentra OS glasses** | TS bridge (`glasses/`) → brain WS | on | mic/speaker/display bridge |
+| **Mentra OS glasses** | *not shipped* — brain-side device routing (`device_id="mentra"`) only | n/a | the TypeScript bridge scaffold was deleted; parked, see TODO.md |
 | **Home Assistant** | brain → HA REST (local) | n/a | states + control (locks confirm-gated) |
 | **Remote PC control** | host executor → brain `/control` | n/a | brain drives a laptop from anywhere |
 
@@ -388,7 +388,6 @@ personality/       # afon.md — who Afon is (system-prompt persona; edit to mak
 memory/            # what it knows (Markdown): about, projects, tools, learned/, journal/
 skills/            # on-demand playbooks (self-improvement, architecture, python, pc-control, …)
 clients/iphone/    # the phone client assets
-glasses/           # Mentra OS bridge (TypeScript)
 website/           # the Next.js documentation site (deploy to Vercel)
 deploy/vps/        # the always-on recurring-reminder ticker
 scripts/           # edge service install/uninstall helpers

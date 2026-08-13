@@ -42,6 +42,10 @@ DOCS = ["TODO.md", "README.md", "SECURITY.md", *sorted(p.name for p in (ROOT / "
 _ROOTS = ("bench", "src", "scripts", "clients", "personality", "docs", "vps", "termux",
           "brain", "edge", "shared", "skills", "website")
 _PATH_RE = re.compile(r"`([A-Za-z0-9_.\-/]+\.(?:py|sh|md|json|ts|onnx|npy|toml|yml|yaml))(?::\d+)?`")
+#: Directories too, and for the same reason. README advertised a `glasses/` TypeScript bridge as a
+#: shipped, "on" integration for weeks after the scaffold was deleted (commit 2d078f4) — a reader
+#: cloning the repo goes looking for a capability that is not there. A file-only rule cannot see it.
+_DIR_RE = re.compile(r"`([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)*/)`")
 
 #: Cues that a citation is deliberately about something absent, planned, or removed.
 _ABSENT_CUES = (
@@ -50,6 +54,11 @@ _ABSENT_CUES = (
     "does not yet", "not yet", "to be created", "absent", "missing", "stale", "instead of",
 )
 _WINDOW = 2   # lines either side: these entries wrap, and the negation usually leads the path
+
+#: State directories the RUNTIME creates under ~/.afon, named in docs (SECURITY.md's never-commit
+#: list, the memory-hygiene job's output). They are correct citations of things that are correctly
+#: absent from the tree, so requiring them to exist would be requiring the repo to be dirty.
+_RUNTIME_DIRS = {"audit/", "backups/", "memory/learned/archive/", "memory/journal/archive/"}
 
 passed = failed = 0
 
@@ -103,6 +112,11 @@ def main() -> None:
                     continue        # bare filenames are prose, not path claims
                 if not _exists(cited) and not _exempt(lines, i):
                     bad.append(f"{name}:{i + 1} `{cited}`")
+            for cited in _DIR_RE.findall(line):
+                if cited in _RUNTIME_DIRS:
+                    continue
+                if not _exists(cited.rstrip("/")) and not _exempt(lines, i):
+                    bad.append(f"{name}:{i + 1} `{cited}` (directory)")
         check(not bad, f"{name}: {len(lines)} lines, no phantom paths",
               "\n        " + "\n        ".join(bad[:12]))
 

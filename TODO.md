@@ -693,10 +693,13 @@ Everything below is **either not built, or built-but-not-verified-live** — tra
 - [ ] **TTS affect prosody** — needs one **live listen-check** once C3 lands. **[1 live check]**
 
 **Parked scaffolds (not runnable):**
-- [ ] **MentraOS glasses client** — `glasses/src/index.ts` is an UNFINISHED scaffold with TODO SDK calls;
-      no `npm i`, no MentraOS account/console app, transcription stream not wired. Only brain-side device
-      routing exists + is tested. To stand up: MentraOS account + `npm i` in `glasses/` + register app +
-      finish `index.ts`. Parked per the 3.4 decision (phone/laptop cam is the eye). **[account + build]**
+- [ ] **MentraOS glasses client** — *(corrected 2026-08-13: the scaffold is GONE, not unfinished.)* The
+      `glasses/` directory was deleted in 2d078f4 along with the other unused client stubs, so this is a
+      from-scratch build, not a finishing job — the older wording under-stated it by a whole client.
+      What survives is brain-side only: `device_id="mentra"` routing, tested. To stand up now: a MentraOS
+      account + console app, a new TypeScript client speaking the `shared/protocol.py` WS protocol, and its
+      transcription stream wired. Parked per the 3.4 decision (phone/laptop cam is the eye).
+      **[account + build]**
 
 **Deliberately-not-enabled (decision, not a bug):**
 - [ ] **WS gateway fast path** — gives no speedup (CLI cold-start 0.06s; the ~25s is ispir working). The
@@ -1783,10 +1786,19 @@ root cause, both silent — nothing errored, the app simply started fresh.
       corrected. 10/10.
 - [ ] **J5.2 — README (community 75, 22 nodes, cohesion 0.09) barely connects to code. (P2)** The
       feature tour can drift arbitrarily far from the tool registry with nothing objecting.
-- [ ] **J5.3 — Re-verify the `glasses/` TypeScript references after a graph refresh. (P2)** Community
-      235 still titles a section *"The non-Python parts — TypeScript (glasses)"* for a directory that
-      does not exist. `skills/web-and-typescript.md` was rewritten 2026-08-01 — this may already be
-      closed, and the graph simply predates the fix (see J0.1).
+- [x] **J5.3 — CLOSED 2026-08-13. The skill doc was already right; README was not.** Verified:
+      `glasses/` was deleted in 2d078f4 ("delete unused client stubs") and
+      `skills/web-and-typescript.md` says so outright ("`glasses/` no longer exists … do not offer
+      to edit it"), so community 235's title is the graph predating the fix, exactly as suspected —
+      nothing to do there but refresh.
+      What the re-verification DID find is that README still sold the bridge as shipped: the
+      integration table listed *Mentra OS glasses | TS bridge (`glasses/`) → brain WS | **on***, and
+      the repo tree listed `glasses/  # Mentra OS bridge (TypeScript)`. A reader cloning the repo
+      went looking for a capability deleted months ago. Both corrected, and `bench/test_doc_paths.py`
+      now checks backticked DIRECTORY citations too, so it cannot come back.
+      Still open under J5.2: README's prose ("laptop, phone, smart-glasses — all sharing one brain")
+      claims the device class more broadly. That is a marketing-vs-tree question for the README pass,
+      not a stale path.
 - [x] **J5.4 (SECURITY.md half) — DONE 2026-08-11, and it HAD drifted, by nearly half.**
       Measured: `CONFIRM_TIER` gates **32** tools; SECURITY.md named **17**. The 15 missing included
       `place_call` (Twilio — outward and unrecallable), `write_vault`, `forget`, `delete_task`,

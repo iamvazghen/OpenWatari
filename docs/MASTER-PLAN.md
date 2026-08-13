@@ -10,7 +10,7 @@
 
 Date: 2026-06-24. **This file replaces all previous docs** (ROADMAP, FINISH-AND-OPENAFON-ROADMAP,
 AUDIT, PHASE-VERIFICATION, BENCHMARKS, TESTING, TASK-QUEUE-PLAN, EXPANSION-PLAN, multi-device, and the
-`next-steps/` set: TODO-NOW, fine-tuning, AFON-PRODUCTION-RECOMMENDATIONS, MY-AFON-CHECKLIST,
+deleted `next-steps/` set: TODO-NOW, fine-tuning, AFON-PRODUCTION-RECOMMENDATIONS, MY-AFON-CHECKLIST,
 IPHONE-AFON-CHECKLIST). Everything from those that is **not verified done** is captured below; nothing
 was dropped. Finished-and-verified history was intentionally not copied — only open work lives here.
 
@@ -253,7 +253,8 @@ These finish the personal instance; most need Vazghen, an SSH session, or the ph
   means for laptop + headphones (target ≲1.2s) and a **VAQI** baseline.
 
 **Parked on hardware purchase**
-- **4.9** Mentra OS glasses — bridge + routing built (`glasses/`, `device_id="mentra"`); remaining is
+- **4.9** Mentra OS glasses — routing built (`device_id="mentra"`); the `glasses/` TypeScript bridge
+  scaffold was deleted in 2d078f4 and no longer exists. Remaining is
   hardware-only: `npm install`, register in the MentraOS console, wire the SDK transcription stream to
   `sendUtterance()`, run a live on-device round-trip.
 - **4.10** Home Assistant — `tools/smarthome.py` built and self-degrading; set `AFON_HA_URL` +
