@@ -16,6 +16,7 @@ Exit code is non-zero only if a runnable test actually fails.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -42,6 +43,10 @@ TESTS = [
      "offline", ["checks passed ==="]),
     ("Phase 5: speaker biometrics + TTFW/VAQI", "test_phase5_identity_bench.py", "offline",
      ["checks passed ==="]),
+    ("Speaker gate: identify the UTTERANCE, not the 6s window around it (score quality + turn cost)",
+     "test_speaker_gate_scoping.py", "offline", ["checks passed ==="]),
+    ("Speaker verifier lifecycle: warm off the boot path without failing OPEN; voiceprint out of the repo",
+     "test_speaker_warmup.py", "offline", ["checks passed ==="]),
     ("Phase 6: multi-device (edge-lite + device routing)", "test_phase6_multidevice.py", "offline",
      ["checks passed ==="]),
     ("Android Termux edge-lite: push-to-talk loop (mic->STT->brain->TTS), off-device", "test_edge_lite.py",
@@ -140,6 +145,20 @@ TESTS = [
      "test_camera.py", "offline", ["checks passed ==="]),
     ("Phase 3.3+: owner face recognition (local LBP histograms) — enroll/recognise/reject, hermetic",
      "test_face_recognition.py", "offline", ["checks passed ==="]),
+    ("Face identity: the signature must respond to LAYOUT, and a burst must VOTE (not accept on one)",
+     "test_face_identity_separation.py", "offline", ["checks passed ==="]),
+    ("Face ArcFace backend: real embeddings when available, LBP fallback when not — never mixed",
+     "test_face_arcface_backend.py", "offline", ["checks passed ==="]),
+    ("Ops scripts (J4.4): the deploy parses, its gates stay in order, the restart stays LAST",
+     "test_ops_scripts.py", "offline", ["checks passed ==="]),
+    ("Skill docs (J4.6/J4.7): no doc may name a tool Afon cannot call — it fails silently mid-turn",
+     "test_skill_docs_resolve.py", "offline", ["checks passed ==="]),
+    ("Error taxonomy (J7.3): WHY a tool failed is a value, not a sentence to grep",
+     "test_error_taxonomy.py", "offline", ["checks passed ==="]),
+    ("Fire paths (J2.8): every autonomous job REPORTS what it did — none may go silent",
+     "test_fire_paths_report.py", "offline", ["checks passed ==="]),
+    ("Static correctness: undefined names / redefinitions fail at lint time, not at 03:00 Sunday",
+     "test_static_correctness.py", "offline", ["checks passed ==="]),
     ("Phase 3: presence-aware proactivity — greet-on-arrival (idle transition, privacy gate)",
      "test_presence_arrival.py", "offline", ["checks passed ==="]),
     ("LLM: MiniMax <think> stripping — reasoning primary never speaks chain-of-thought (streamed)",
@@ -174,13 +193,13 @@ TESTS = [
     # running. Verified passing before registration; three print nothing at all, so they are
     # gated on exit code only until they grow a summary line.
     ("Restore drill: a backup that has never been restored is not a backup (hermetic)",
-     "test_backup_restore.py", "offline", []),
+     "test_backup_restore.py", "offline", ["checks passed ==="]),
     ("Composio tool router: two-step router, hermetic, no network",
      "test_composio_router.py", "offline", ["checks passed ==="]),
     ("Fleet routing memory: repeated delegated domains surface as a system-prompt bias line",
-     "test_fleet_routing.py", "offline", []),
+     "test_fleet_routing.py", "offline", ["checks passed ==="]),
     ("PC-agent refuse-list: catastrophic ops die at the elevated executor",
-     "test_pc_agent_refuse.py", "offline", []),
+     "test_pc_agent_refuse.py", "offline", ["checks passed ==="]),
     ("Proactive reporting: the autonomous backlog pass reports what it did, never acts silently",
      "test_proactive_report.py", "offline", ["proactive report wiring OK"]),
     ("C7 Skills: skill runtime — invoke_skill runs built-in composable manifests step-by-step",
@@ -247,6 +266,22 @@ TESTS = [
      "test_background_tasks.py", "offline", ["checks passed ==="]),
     ("Task to-do list: add/manage/priority/deadline/progress + spoken deadline reminders",
      "test_task_todos.py", "offline", ["checks passed ==="]),
+    ("Task restart expiry: a dead work job never reloads as 'running' (the HUD orphan pile-up)",
+     "test_task_restart_expiry.py", "offline", ["checks passed ==="]),
+    ("Mis-keyed tool calls error instead of returning a fluent question the model then speaks",
+     "test_missing_arg.py", "offline", ["checks passed ==="]),
+    ("Proactive timing: no signal kind escapes quiet hours (every kind x every hour)",
+     "test_proactive_windows.py", "offline", ["checks passed ==="]),
+    ("Reminder cancel contract: all three entry points clear the ticker, not just the local job",
+     "test_reminder_cancel_contract.py", "offline", ["checks passed ==="]),
+    ("Voice-enrolment script parses: to-read-script.md is DATA, and its durations are read",
+     "test_enroll_script_parse.py", "offline", ["checks passed ==="]),
+    ("SECURITY.md's confirmation tier matches CONFIRM_TIER in code (both directions)",
+     "test_confirm_tier_documented.py", "offline", ["checks passed ==="]),
+    ("Browser/SpeechBrain guard: the k2 LazyModule cannot mask a real Playwright error",
+     "test_browser_speechbrain_guard.py", "offline", ["checks passed ==="]),
+    ("LLM failover speed: both streaming paths bail fast; a slow model is not benched like a broken one",
+     "test_llm_failover_speed.py", "offline", ["checks passed ==="]),
     ("Daily digest: one catch-up/day (6am + first edge turn), no duplicate Telegram nudges",
      "test_daily_digest.py", "offline", ["checks passed ==="]),
     ("Voice-grade brain: single-tool short-circuit + read-intent forcing + parallel tools",
@@ -400,8 +435,18 @@ def run(script: str, timeout: int) -> tuple[int, str]:
     return p.returncode, (out or "") + "\n" + (err or "") + f"\n[{dt:.0f}ms]"
 
 
+_EMPTY_RUN_RE = re.compile(r"===\s*0/0\s+checks passed\s*===")
+
+
 def classify_result(tag: str, code: int, out: str, needles: list[str]) -> str:
     """Classify a child test result as PASS, FAIL, or SKIP."""
+    # A test that asserted NOTHING is not a passing test. Three entries here were gated on the exit
+    # code alone (J6.5), so a body that stopped asserting would still have read green — and adding
+    # the "checks passed ===" needle does not fix that on its own, because "0/0 checks passed"
+    # contains it. Nothing legitimately runs zero checks, so treat it as a failure everywhere rather
+    # than per-entry, which closes the class instead of the three instances.
+    if _EMPTY_RUN_RE.search(out):
+        return "FAIL"
     if code == 0 and all(n in out for n in needles):
         return "PASS"
     if tag == "network" and code == 124:

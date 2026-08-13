@@ -87,7 +87,17 @@ calendar/email/telegram/notion/define/memory and don't **narrow** the tool set o
       needed; Composio NOT needed for calendar/email. The old "unconfigured" note was stale.
 - [ ] Add Home Assistant `AFON_HA_URL` + `AFON_HA_TOKEN` (code done, dark until set). **[needs your token —
       the ONLY remaining external cred; only matters if you want Afon controlling smart-home devices]**
-- [ ] Add Giphy key (optional). **[needs your key]**
+- [x] **Giphy key — DONE 2026-08-11, verified against the live API and the running brain.** Owner
+      supplied it; tested BEFORE writing it anywhere (HTTP 200, real results on two queries).
+      **It was already on the VPS** (`AFON_GIPHY_API_KEY` + the legacy `JARVIS_` twin, same 32-char
+      value, in place since ~Jul 25) — the "unconfigured" note here was stale. What was genuinely
+      missing was the **local** `.env`; added.
+      End-to-end on the machine that runs the brain, not just an API ping: `_resolve_gif('thumbs
+      up')` returns a real media URL, `settings.giphy_api_key != _GIPHY_PUBLIC` (so it is the
+      owner's key, not the public fallback silently standing in), and an unmatchable term returns
+      `None` so `send_telegram` says "I couldn't find a … GIF" instead of crashing.
+      *Incidental: the VPS check had to run as the `jarvis` package under `~/jarvis/.venv` — the
+      Afon rename still has not reached the VPS (see the open rename item in Part J).*
 - [ ] Rotate `.env` secrets → `pass`; document the never-commit set.
 - [ ] Live-verify each integration end-to-end. *Strong flip requires the creds above.*
 
@@ -261,8 +271,13 @@ Legend: ⬜ not started · 🔄 in development · ✅ done & verified.
 - [x] **FIXED — world-model↔REACTIVE turn:** was proactive-only; now `_world_note` folds FRESH events into
       the per-turn context (freshness-gated, ~zero cost when idle). "Anything new?" now surfaces a webhook
       payout/CI failure. Test: `test_connectivity.py` (5/5).
-- [ ] **[room for improvement]** affect↔TTS: affect only becomes a text `manner_note`; Afon's *voice
-      prosody* never changes with the owner's mood. → this is exactly **C3** (TTS affect→VoiceSettings).
+- [x] **CLOSED 2026-08-10 — affect↔TTS was already fixed by C3 and never ticked here.** Verified in
+      code, not assumed: `affect_to_voice()` reaches ElevenLabs on **all three** delivery paths —
+      `voice_io.synthesize` (`voice_settings` in the request body, `voice_io.py:50`), the Telegram
+      voice-reply (`telegram_bridge.py:73`), and the live edge stream (`edge/affect_tts.py:35` →
+      `TTSUpdateSettingsFrame`). `test_affect_voice.py` 23/23 + `test_affect_tts_edge.py` 7/7.
+      The original text below was true when written; it described the gap C3 then closed.
+      *(Was: affect only becomes a text `manner_note`; voice prosody never changes with mood.)*
 - [ ] **[room for improvement, low pri]** face-recognition↔presence: camera owner-match is tool-only; an
       arrival greeting still keys off idle-transition, not the laptop camera seeing you. Deliberate given
       the VPS-brain/laptop-camera split; wire only if a persistent laptop-side presence feed is added.
@@ -422,7 +437,22 @@ other item until it is done.
       stores, five holding their own SQLite connection, means every recall pays separate
       connection + query cost and nothing can answer "what do we know about X" in one hop. Not
       a rewrite: a single entry point the agent calls, fanning out internally.
-- [ ] **Warm the hot path once per session, not per turn.**
+- [x] **DONE 2026-08-10 — and profiling named a cost the item did not.** I expected to find
+      per-turn work worth hoisting; steady-state `_prepare_turn` is already **~9ms**, so there was
+      nothing there. The cost is entirely in the **FIRST** turn: **~90ms cold**, of which cProfile
+      puts ~64ms in `_narrowed_tools`'s lazy `import intent_router` compiling **27 module-level
+      regexes**. The brain restarts daily at 01:00, so the owner's first sentence each morning paid
+      it — the worst turn to be slow on, because no conversation is in flight to hide it.
+      `AfonAgent._warm_turn_path()`, called from `warmup()`: imports `intent_router`, builds
+      `schemas_by_name()`, and calls `forced_tools("warm")` so the regexes actually **compile**
+      rather than merely the module being imported. **17ms at startup; first turn ~90ms -> ~30ms.**
+      The lazy imports stay lazy — they keep the module graph acyclic; this only pre-populates
+      `sys.modules`. Guard: 3 checks in `bench/test_latency_guard.py` (**12/12**), including one
+      asserting the agent does NOT import `intent_router` on construction — without it the other two
+      would pass vacuously once some unrelated import pulled the module in first. Sabotage-verified
+      both directions.
+      *Residual: the first turn is still ~30ms against ~9ms warm. Left alone — 20ms once a day is
+      below anything the owner can hear, and chasing it means warming paths that may not run.*
 - [x] **Measure the L5 semantic hop.** DONE 2026-08-08 via `bench/profile_memory_recall.py`.
       **Two things I had written were wrong, and measuring corrected both:**
       (a) the embedder is **api.jina.ai**, a third-party HTTPS call — not "hosted on the VPS";
@@ -528,6 +558,37 @@ other item until it is done.
       from everything it calls transitively, not from what it imports.**
 
 ### K5 · Voice pipeline — the latency actually felt
+### K5a · Fallback-chain speed — DONE 2026-08-11 (owner ask: "switch to fallbacks very fast, no lag in normal states")
+
+- [x] **`stream()` — the PURE-CHAT path — had NO first-token deadline at all.** A bare
+      `async for chunk in stream`. The deadline lived only on `stream_with_tools`, the *rarer*
+      path, so the most common conversational turn had no fast-failover: a primary that accepted
+      the connection and then went quiet was waited on until the 60s request timeout while a
+      fallback with a measured **0.18s** TTFT sat idle. Both paths now use the identical
+      construction so they cannot drift, and a test asserts that property directly.
+- [x] **First-token deadline 4.0s -> 2.0s, on measured data, not taste.** 10 streamed turns
+      against the live primary: `0.61 0.64 0.68 0.70 0.74 0.75 0.78 0.81 0.92` and one `3.69`
+      outlier; median **0.74s**. The old 4.0s was pinned just above that outlier — optimising for
+      "never abandon the primary".
+      **That is the wrong objective here, and the reason is worth keeping: the fallback is FOUR
+      TIMES faster than the primary.** Measured TTFT — primary MiniMax-Text-01 **0.73s**, groq
+      llama-3.3-70b **0.18s**, groq llama-3.1-8b **0.24s**. So abandoning at 2.0s and letting the
+      fallback answer costs ~2.2s against 3.7s spent waiting. Failing over is simply quicker than
+      being patient, which inverts the usual "don't trip on a healthy turn" tradeoff.
+- [x] **A slow first token no longer benches the model like a broken one.** New `_SlowFirstToken`
+      (subclass of `_EmptyResponse`) benches for **5s** instead of the 45s a 4xx/dead-key gets.
+      Without this the deadline change would have been actively harmful: it trips ~1 turn in 10,
+      all healthy, and at 45s each that quietly migrates a tenth of the day's traffic onto groq —
+      which has a **100k token/day** cap and is exactly why it cannot be the primary.
+- [x] **Guard:** `bench/test_llm_failover_speed.py` (**10/10**), fully hermetic (stub clients, ms
+      deadlines — no network, no sleeping for real timeouts). Asserts both paths bail fast, a slow
+      model gets the short bench, a genuinely broken one still gets the full 45s, and — by reading
+      the source of both methods — that neither path loses the deadline again. Sabotage-verified
+      twice: reverting the short bench fails the bench check (45.0s); removing the deadline from
+      `stream()` fails four checks.
+      *Normal-state note: the primary's own TTFT is 0.73s median, so a healthy turn is unaffected
+      by any of this — the changes only bite when something is actually slow.*
+
 - [ ] **Collect the three days of turn-tracer numbers, then tune** (`stt/brain/tts/total`
       already instrumented). Nothing else in K5 should move first: without the distribution the
       wrong stage gets optimised.
@@ -536,10 +597,33 @@ other item until it is done.
       whole turn.
 
 ### K6 · Channels — timeliness, not capability
-- [ ] **Poll-vs-push audit.** Channels score 100, so they work; the open question is *when*
-      they run. Any channel on a timer rather than reacting to a webhook is spending quota to
-      be slower. The fleet already learned this expensively: a 5-minute heartbeat across 8
-      agents produced 1,229 calls/day and an overload.
+- [x] **DONE 2026-08-11 — audited, and the quota worry was the wrong worry. A repeat-nudge bug was
+      the real one.** Tick = 300s = **288 ticks/day**. What each source spends per tick:
+      | source | external call | gate BEFORE the call | calls/day |
+      |---|---|---|---|
+      | `calendar_signals` | Google Calendar | none (`configured()` only) | 288 |
+      | `anticipatory_prep` | Google Calendar | none | 288 |
+      | `news_signals` | MyNews | hour window 08:00–10:00 | 24 |
+      | `weekly_digest` | Google Calendar | Sun 20:00 only | <1 |
+      | `anticipation` | LLM + Notion | `min_interval_s=1800` | 48 |
+      | `presence` / `coaching` | local sqlite | — | 0 |
+      **576 Google Calendar calls/day is 0.06% of a 1M/day quota — so no cache, no throttle.** The
+      fleet's 1,229-calls/day overload was 8 agents against a rate-limited LLM; reasoning by analogy
+      from it to a generous REST quota would have added invalidation risk to save nothing.
+      **The real finding: `anticipatory_prep` keyed its signal `f"anticipatory-{now.isoformat()}"`.**
+      The engine suppresses repeats via `_spoken_at[signal.key]`, so a key carrying a fresh
+      microsecond timestamp **can never match** — a meeting 30 minutes out produced a brand-new
+      "starting soon" nudge on every one of the 6 ticks before it, held back only by the daily
+      budget. `calendar_signals` had it right all along (`cal-{ev.id}`). Now keyed by the event.
+      Guard: a source-wide grep in `test_proactive_windows.py` (**12/12**) — the defect is invisible
+      to any single-tick test, because each of those signals looks perfectly correct on its own.
+      Its first run flagged `coaching.py`'s `_today(now)`; reading the helper showed it returns
+      `strftime("%Y-%m-%d")`, a legitimate once-per-day scope, so the GUARD was refined rather than
+      the working code "fixed". Sabotage-verified against the original key.
+      *Still open by choice: `calendar_signals` ("X starts in 10 minutes") and `anticipatory_prep`
+      ("want me to pull attendee emails?") both fire for the same event with unrelated keys, so the
+      engine cannot dedupe across them. They are different offers, so merging them is a product
+      decision, not a bug fix — recorded rather than guessed at.*
 
 ### K7 · Ops — where the silent failures live
 - [x] **One `preflight` script asserting the invariants that actually broke.** DONE 2026-08-08 —
@@ -601,7 +685,8 @@ Everything below is **either not built, or built-but-not-verified-live** — tra
       `AFON_AEC_FILTER=krisp` → open-speaker barge-in auto-enables. (Owner uses AirPods where barge-in
       already works — this is the general capability.) **[paid SDK license]**
 - [ ] **Google OAuth (Calendar + Gmail)** — unconfigured on VPS; blocks real Channels data. **[your creds]**
-- [ ] **Giphy key** — unconfigured. **[your key]**
+- [x] **Giphy key — CONFIGURED + live-verified 2026-08-11.** See C1 above: real key on both VPS and
+      laptop, `_resolve_gif` returns a real URL on the running brain, no-match degrades cleanly.
 - [ ] **TTS affect prosody** — needs one **live listen-check** once C3 lands. **[1 live check]**
 
 **Parked scaffolds (not runnable):**
@@ -627,22 +712,43 @@ Everything below is **either not built, or built-but-not-verified-live** — tra
 - [ ] Owner-face enroll needs the owner seated ("learn my face") — refs local to laptop only (VPS is
       cameraless). *(2026-08-08: the 75 refs enrolled on 07-20 were stranded by the rename and have
       been restored — see above — so a re-enrol is NOT required just to get back to working.)*
-- [ ] **Replace the hand-rolled LBP recogniser with `uniface` (installed 2026-08-08, NOT yet wired).**
-      `uv pip install uniface` done (3.7.1); added to a new `vision` extra in `pyproject.toml`
-      alongside `opencv-python`, which had been an UNDECLARED runtime dep — `camera.py` imports cv2
-      and only logs a warning, so a fresh install got a camera that silently did nothing.
-      Only 4 new packages: onnxruntime 1.24.4 and cv2 4.13.0 were already present.
-      Why it is worth doing: today's recogniser is a 256-bin LBP histogram compared by intersection
-      (`camera.py:150`), a texture signature chosen to avoid a dependency. It degrades with pose,
-      expression and lighting, and **cannot distinguish a face from a photograph of that face** —
-      which matters, because this is the owner-identification path. uniface brings ArcFace/AdaFace
-      embeddings, RetinaFace/SCRFD detection and MiniFASNet anti-spoofing.
-      **The wiring is NOT a drop-in and must not be treated as one:** the two reference formats are
-      incompatible (256-dim histograms + intersection >= 0.62 vs 512-dim embeddings + cosine), so
-      comparing across them is meaningless. Plan: write embeddings to a SEPARATE `owner_emb.npy`
-      with its own threshold setting, keep LBP as the fallback when uniface or its model download is
-      unavailable, and have enrolment write BOTH so neither path is ever left unenrolled.
-- [ ] Stale local dev tasks stuck `status=running` ~275h show on the HUD (cap limits flood) — hygiene TODO.
+- [x] **DONE 2026-08-12 — `uniface` WIRED. `bench/test_face_arcface_backend.py` (17/17).**
+      SCRFD detection → 5-point landmarks → ArcFace 512-d embeddings, cosine, in
+      `camera.py:_arcface/_embed_faces/_owner_embeddings`. Models are 30.5 MB, fetched once to
+      `~/.uniface/models` (arcface_mnet 13.6 MB + scrfd_10g 16.9 MB); ~155 ms/face on this CPU,
+      comparable to the 202 ms/frame the LBP path already cost.
+      **Measured on the same benchmark the LBP work used** (Olivetti, 40 people × 10 photos, all
+      79,800 pairs), so the three are directly comparable:
+      | descriptor | same-person | different-person | best FAR / FRR | best-of-5 |
+      |---|---|---|---|---|
+      | global LBP (shipped until 08-11) | 0.904±0.030 | 0.855±0.034 | 23.6% / 20.3% | **overlaps** |
+      | 8×8 grid LBP (08-11) | 0.561±0.074 | 0.439±0.039 | 14.5% / 14.1% | +0.023 |
+      | **ArcFace** | 0.717±0.134 | 0.348±0.111 | **8.4% / 8.6%** | **+0.088** |
+      And that is ArcFace's WORST case — Olivetti is 64×64 grayscale upscaled to 112×112, where the
+      webcam gives 640×480 colour. End-to-end on real photographs the case that started all of this
+      now behaves: enrolled face → matched, a genuinely different person → rejected. Under the old
+      descriptor that stranger scored **0.815**, above the owner's own median.
+      **The alignment is the part not to get wrong.** ArcFace is trained on 5-point-aligned crops;
+      feeding it the raw detection box costs most of its accuracy. SCRFD returns landmarks with the
+      box, so alignment is free — and skipping it is the obvious way to wire this up and get a
+      fraction of the model everyone quotes.
+      Followed the plan recorded here: **separate `owner_emb.npy`, separate
+      `AFON_FACE_EMBED_THRESHOLD` (0.45), LBP kept as the fallback, and enrollment writes BOTH** —
+      because whichever backend is left unenrolled degrades to face-COUNTING, so an owner who
+      installed the extra would find recognition had quietly stopped. Wrong-width ref files are
+      REFUSED rather than compared: 512-d cosine against 256-bin intersection is not a weak answer,
+      it is no answer. The calibration line now reports whichever backend is actually deciding.
+- [x] **DONE 2026-08-10 — already fixed in code; what was missing was the guard.** `TaskQueue._load`
+      expires persisted `running` rows to `failed` on startup (`tasks.py:194`), and both machines are
+      clean: **0 running rows** locally (167 `failed`, oldest 754h) and **0 on the VPS** — checked on
+      the machine that runs the brain, not just this laptop. Nothing reaches the HUD.
+      The fix had **no test**, so a refactor could have silently restored the pile-up. Added
+      `bench/test_task_restart_expiry.py` (9/9), registered in `run_all_tests.py`.
+      **Two of its nine checks pass with the expiry DELETED** — `_load` only reloads
+      `kind='todo' AND status='open'`, so `active()` is empty either way. Found by sabotaging the
+      UPDATE and watching which checks failed (6/9); the three DB-level ones carry the proof, and
+      the weak two are annotated in the file rather than removed. Left the dead `failed` rows: ~5/day
+      at 12KB total, so pruning them would be code written against a problem that does not exist.
 - [ ] 2.2 daily-schedule refresh job (currently refreshes lazily before reasoning — sufficient).
 - [ ] Local freellmapi proxy (:3001) for local VLM tests (works on VPS otherwise; groq has no vision model).
 
@@ -1064,7 +1170,29 @@ since the plan was written — the plan's own later addendum supersedes parts of
       both `dynamic` (no fixed times), and the seeded morning-stretch window is gone. The
       language-learning slot and evening review are **absent**. Needs one sentence from the owner per
       routine.
-- [ ] Extend `anticipatory_prep` beyond the calendar to **Notion due-today tasks** at the morning anchor.
+- [x] **DONE 2026-08-11 — but NOT by extending `anticipatory_prep`, and going looking found a live
+      outage.** The capability already exists: `daily_digest.build_body()` calls
+      `notion.overdue_and_today()` and speaks "N due today: …" at the 06:00 morning anchor. Adding
+      the same content to `anticipatory_prep` would have produced a SECOND morning message — the
+      duplicate-nudge bug this repo already paid to fix once (7-8 duplicate Telegram messages/day).
+      So the right resolution was to verify the existing path, not to build a rival one.
+      **It was broken.** `AFON_NOTION_TASKS_DB_ID` on the VPS still pointed at the retired
+      `9c5a572c…` queue, which **404s**. `overdue_and_today()` caught that and returned `([], [])`,
+      so the digest read as "nothing due" — while the live Task Queue held **7 overdue tasks**
+      (Morning/Midday/Evening Routine, the Afon rename, the W31 fleet digest, …). Repointed both
+      machines and both prefixes to the live DB `3b2a572c-7a09-80f3-9991-eeb33415c217`, restarted
+      `jarvis-brain`, and confirmed from the RUNNING service: `overdue=7`, and the digest body now
+      leads with those tasks. This is the third instance of the same failure in this repo — a dead
+      Notion id read as an empty result (see `work_dispatch.py`, and the "0 open tasks vs 12 real"
+      note in the fleet history).
+      **Root-caused the silence, not just the id:** the bare `except Exception: return [], []` made
+      a 404 indistinguishable from a healthy empty day. It now also calls `errors.swallowed(...)` —
+      whose own docstring describes this exact failure — plus a WARNING naming the db and status, so
+      the next dead id surfaces in error tracking instead of as silence. Still never throws into the
+      tick. `test_phase11_notion.py` 29/29, `test_daily_digest.py` 21/21.
+      *Not deployed: the VPS runs the `jarvis` package, so shipping `src/afon` would not load (see
+      the open rename item). The env repoint — which IS the functional fix — is live and verified;
+      the louder logging takes effect on the VPS only after the rename/deploy item is closed.*
 - [ ] Review the coaching gate after 7 days of routine-anchor data. ⚠️ **Reframed:** the addendum finds
       coaching is *not* broken — it emits a valid signal in its 18:00–22:00 window and has simply never
       been taken up. Verified: `afon_coaching.sqlite` on the VPS is untouched since Jul 14. Treat as an
@@ -1117,9 +1245,23 @@ since the plan was written — the plan's own later addendum supersedes parts of
 
 ### I7 · MCU-AFON demeanour
 - [ ] **Brevity pass on tool prose**: answers lead with the outcome, one supporting clause, no filler.
-- [ ] **Timing test in bench**: assert that no proactive kind can fire outside its purpose window. (No
-      such test exists today — the closest are per-feature window tests in `test_coaching.py` /
-      `test_interventions.py`; there is no cross-cutting guarantee.)
+- [x] **DONE 2026-08-11 — `bench/test_proactive_windows.py` (11/11), 17 kinds x 24 hours = 408
+      engine runs.** Asserts the invariant the code ACTUALLY has rather than inventing per-kind
+      windows nobody specified: there is one cross-cutting gate (quiet hours + an urgency override)
+      plus per-feature windows inside generators. So the guarantee swept is — for **every** kind, a
+      routine-grade signal (urgency < override) cannot be spoken during quiet hours, and an
+      emergency-grade one still can.
+      **`KINDS` is discovered by grepping the source, not hard-coded.** A fixed list would rot into
+      exactly the gap this file closes, since adding a kind is a one-line `Signal(..., kind="x")`.
+      That already paid: discovery found **17** kinds where a hand-written `Signal(` grep found 6.
+      Three checks exist purely to stop the sweep passing vacuously, each guarding a way a timing
+      test can look green while proving nothing: (a) every kind must still speak OUTSIDE quiet
+      hours — a gate that blocked everything would otherwise pass; (b) the wrapping 23:00-07:00
+      window must cover 8 hours, not 0 — a naive `start <= x < end` reads a wrapping window as
+      EMPTY, so it would never be quiet and every check would trivially hold; (c) the six boundary
+      minutes (22:59/23:00/06:59/07:00) where an off-by-one hides.
+      Sabotage-verified: disabling the quiet gate fails the sweep with the leaking kind and hour
+      named. `test_phase10_proactive.py` still 44/44.
 
 ### I8 · External keys still pending (from the plan's addendum)
 - [ ] `AFON_TWILIO_*` — activates the parked `place_call` / `send_sms` / `send_whatsapp`. Verified
@@ -1213,15 +1355,26 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       emission, memory retrieval and failover. Split candidates in dependency order: tool
       execution + gating -> its own executor; streaming/sentence assembly -> its own emitter; memory
       retrieval -> the facade in J3.3.
-- [ ] **J1.2 — `tool_error()` is the most connected node in the entire system (132 edges). (P1)**
-      The system's largest hub is an *error-string formatter*. Failures are prose: no caller can
-      branch on failure KIND (not-configured vs network-down vs auth-expired vs bad-args) without
-      matching substrings. See J7.3.
-- [ ] **J1.3 — `not_configured()` has 61 edges and its contract is asserted by substring. (P2,
-      VERIFIED)** The helper itself is properly centralised in `base.py` — but tests assert
-      degradation by grepping the literal prose `"isn't configured yet"`
-      (`test_new_integrations.py:50`). Rewording one sentence silently breaks the guarantee across
-      61 call sites. The assertion should test a marker, not the wording.
+- [x] **J1.2 — DONE 2026-08-12 via J7.3.** The finding was that the system's largest hub is an
+      error-string formatter no caller can branch on. `ErrorKind` + `ToolResult` make the failure
+      KIND a value while leaving all 132 edges untouched (a `str` subclass), which was the only way
+      to fix it without a 132-site migration. The node is still the biggest hub — that part is
+      inherent to a codebase where every tool routes failures through one helper, and is a feature
+      now that the helper classifies rather than only formats.
+- [x] **J1.3 — DONE 2026-08-10, and one word of the finding was wrong: not "silently".** Added
+      `base.is_not_configured(result)` next to `tool_failed()`, with the wording in a single
+      `_NOT_CONFIGURED_MARKERS` constant, and pointed the per-file helpers at it
+      (`test_new_integrations`, `test_phase11_integrations`, `test_phase11_notion`,
+      `test_composio_router`, `test_missing_arg`). Plus 4 checks in `test_tool_error_handling.py`
+      (**26/26**) comparing the PRODUCER against the PREDICATE — including that a real `tool_error`
+      is a failure but is NOT "not configured", so the two shapes stay distinguishable.
+      **Measured the claim instead of trusting it.** Rewording `not_configured()`'s sentence and
+      re-running produced **8 loud failures** in one downstream file alone — the substring
+      assertions did catch it, so the guarantee was never silent. What was actually wrong is duller
+      and still worth fixing: the wording was duplicated across ten files, so a legitimate reword
+      meant editing ten of them while reading failures that name *Gmail* and *Notion* rather than
+      the contract. Now it is one constant, and the failure says what broke. Verified by rewording
+      the prose, watching the two producer/predicate checks trip first, then restoring.
 - [ ] **J1.4 — `clip()` has 50 edges — a truncation helper is the 4th-largest hub. (P2)** Spoken-
       output length policy is applied at 50 scattered call sites instead of once at the speech
       boundary. Every new tool must remember to call it; nothing catches one that forgets.
@@ -1254,11 +1407,39 @@ means the nodes grouped together barely reference each other.
       categorisation, sampling, aggregation and streak-tracking in one unit.
 - [ ] **J2.7 — Communities 12 / 8 / 18 at 0.08 (ProactiveEngine, StdioMCPServer, brain/coaching).
       (P2)**
-- [ ] **J2.8 — Community 79 "push" (26 nodes, 0.09): eight near-identical `_fire_*` functions. (P2)**
-      `_fire_backlog`, `_fire_backup`, `_fire_briefing`, `_fire_objectives`, … — a table-driven
-      firing surface would collapse these and make "does every fire path report?" checkable in one
-      place. (That question is not hypothetical: `_fire_backlog` logging-but-not-reporting was the
-      root cause fixed on 2026-07-26.)
+- [x] **J2.8 — DONE 2026-08-12, and asking "does every fire path report?" FOUND A SECOND ONE, live.**
+      `_fire_weekly_review` ran:
+      ```python
+      sched = get_scheduler()
+      if hasattr(sched, "_proactive") and sched._proactive: ...
+      ```
+      `get_scheduler` **does not exist in that module and never has** — that call was the only
+      occurrence of the name anywhere in the repo. The `NameError` was swallowed by a bare
+      `except Exception: pass`, so every weekly review fell through to a "fallback" whose comment
+      promised to "log so the next session surfaces it" — which nobody implemented. **The weekly
+      memory review has never once reached the owner.** (`_proactive` belongs to BrainServer, not to
+      the scheduler, so even a working `get_scheduler()` would not have found it.) Exactly the
+      `_fire_backlog` shape: work happens, a line goes in the log, the job counts itself done, the
+      owner is told nothing.
+      Fixed to `_emit_proactive`, and `_fire_briefing` + `_fire_objectives` were each hand-rolling
+      their own copy of the same emit→speak→push ladder — three copies, which is how they drift.
+      Now one. Net −38 lines.
+      `bench/test_fire_paths_report.py` (**15/15**) makes the question permanently checkable: every
+      `_fire_*` must be DECLARED as reporting or not (a new job cannot be added without someone
+      deciding), each reporting job must actually deliver when given something to report, none may
+      touch `_BRIEFING_EMIT` or the push fallback directly, a job with nothing to say must stay
+      quiet, and a failing emitter must not take the scheduler down.
+- [x] **NEW 2026-08-12 — the REAL defect behind J2.8 was that undefined names had no gate at all.**
+      ruff was already a declared dev dependency, configured for `line-length` and nothing else, and
+      **run by nothing**. `F821` catches `get_scheduler()` in milliseconds; 140 passing tests did not,
+      because no test called that job. `bench/test_static_correctness.py` (**12/12**) gates the
+      correctness subset — F821 · F811 (a redefinition silently wins, so a whole function stops
+      existing) · F822 · F823 · F402 · F631 · F632 · B018 — all green today, so red means new.
+      Style rules (F401/F841/F541, 29 findings) are deliberately NOT gated and the test says so out
+      loud: a gate that starts red is a gate someone switches off in a week. It also asserts each
+      gated rule still EXISTS in the installed ruff (E999 was removed in a version bump — a silently
+      dropped rule is a gate reporting green while checking nothing) and reproduces the original
+      bug's exact shape end-to-end rather than trusting the rule name.
 - [ ] **J2.9 — Community 55 "errors.py" (0.10) installs global monkeypatches. (P2)**
       `_bridge_stdlib`, `install_asyncio_handler`, `_install_hooks`, `_patcher` rewrite the logging
       and asyncio stacks process-wide. Powerful, invisible, and untested against library upgrades.
@@ -1271,9 +1452,37 @@ means the nodes grouped together barely reference each other.
       times** and why test nodes collapse into implementation communities, depressing every cohesion
       score in J2. One `bench/_harness.py` deletes ~112 copies of the same ten lines *and* makes the
       graph legible. Highest structural return of anything in Part J.
-- [ ] **J3.2 — Three reminder-cancellation paths. (P2, VERIFIED)** `reminders.cancel_reminder` +
-      `reminders._cancel_on_ticker`, `tasks._cancel_reminder`, `notion._cancel_task_reminder`. Three
-      places to forget when the ticker contract changes.
+- [x] **J3.2 — DONE 2026-08-11, and it was not just tidiness: two of the three were already WRONG.**
+      The cancel contract has two legs — the in-process APScheduler job and the always-on VPS ticker
+      — and only `reminders.cancel_reminder` did both. `tasks._cancel_reminder` and
+      `notion._cancel_task_reminder` called `SCHEDULER.cancel()` alone, so **completing a to-do or a
+      Notion task silenced the local job and left the ticker still nagging about a deadline the
+      owner had already met.**
+      The divergence had a mundane cause worth recording: the ticker call is async and those two
+      helpers were sync, so they *could not* await it. All seven of their call sites were already
+      inside `async def`, so the sync-ness bought nothing.
+      Consolidated into `scheduler.cancel_everywhere()` — the scheduler now owns the contract, which
+      is what stops a third caller forgetting a leg. `bench/test_reminder_cancel_contract.py`
+      **9/9**, sabotage-verified (revert tasks.py to `SCHEDULER.cancel` → the ticker check fails).
+      **Known gap, deliberately not papered over:** an ntfy push scheduled with the `At` header
+      cannot be recalled — ntfy exposes no cancel for a message it has accepted — so a one-shot
+      inside ntfy's window still reaches the phone after cancellation. Fixing that means withholding
+      the push until near fire time, which trades away the PC-off guarantee Phase 4b exists for.
+      Documented in the helper's docstring rather than silently tolerated.
+      **Two further live bugs found while verifying (both from `test_live_task_reminder_e2e`
+      dropping to 9/10 after the Notion DB repoint):**
+      1. **`_schema_map` bound "priority" to the FIRST select property in dict order**, with no name
+         heuristic — unlike the `date`/`status` branches directly above it, which have one. The
+         owner's live Task Queue has four selects (Recurrence, Priority, Project, Owner agent), so
+         priority bound to **Recurrence**; every "set that to high priority" silently did nothing.
+         Fixed by giving `select` the same heuristic. Verified against the live schema: now binds
+         `Priority` with options `P0/P1/P2`.
+      2. **`notion_update_task` answered "What should I change, sir?" when the owner had said
+         exactly what to change** — an unmatched option value and a missing field produced the same
+         reply. Now: *"'Low' isn't one of the priority options in that database, sir — it offers P0,
+         P1, P2."* Both branches verified live.
+      The test itself hard-coded `priority="Low"`, assuming one database's vocabulary; a live e2e
+      test has to read the schema it finds. Now does. **10/10.**
 - [ ] **J3.3 — Seven memory stores, five with their own sqlite connection, no unified recall. (P1,
       VERIFIED)** `coaching.py`, `graph.py`, `presence.py`, `semantic.py`, `tasks.py` each open their
       own DB; plus `MemoryStore` (L1/L2), `DocStore`, `Cache` (L4), `RelationshipMemory`,
@@ -1301,9 +1510,24 @@ means the nodes grouped together barely reference each other.
       `_detect_faces`, `_gray_faces` in `camera.py`; capture via `_capture_burst` (camera.py) *and*
       `_capture_jpeg` / `_camera_capture_local` (community 141, `look_around`). The I1 second factor
       picked one of these; nothing says it picked the right one.
-- [ ] **J3.10 — Private helpers duplicated across modules. (P2, VERIFIED)** `_norm()` (MemoryStore,
-      GraphMemory) · `_db_path()` (coaching, presence, tasks, graph) · `_parse_hhmm()` (serve,
-      Handler) · `_enabled()` (system, coding) · `_configured()` (phone, composio) · `_load()` (>=5).
+- [x] **J3.10 — DONE 2026-08-10. Marked VERIFIED, but only 2 of the 6 are real; the rest are name
+      collisions and merging them would be a BUG.** Read every body before touching anything:
+      | helper | verdict |
+      |---|---|
+      | `_configured()` ×6 | **NOT duplicates** — each checks a different credential (`composio_api_key`, `google_maps_api_key`, `notion_token`, 3 Twilio vars, `ha_url`+`ha_token`, `wolfram_app_id`) |
+      | `_enabled()` ×2 | **NOT duplicates** — `coding` returns `str \| None`, `system` returns `bool`; different contracts |
+      | `_parse_hhmm()` | **only ONE definition exists** (`scheduler.py:534`); the "(serve, Handler)" pair is a graph artifact |
+      | `_norm()` ×2 | genuinely identical |
+      | `_db_path()` ×3 | `coaching`/`presence` share a shape; `tasks` is the anchor both derive from |
+      This is the same false-positive class the Part H preamble already warns about — the graph sees
+      the NAME, and a shared name is not a shared contract.
+      **Deliberately did not merge the two real ones.** `memory.py` already imports `graph.py` (the
+      L5b recall layer), so a shared `_norm` needs a THIRD module purely to dodge an import cycle —
+      a new file and a new edge to delete two one-line functions. What actually matters is that they
+      **agree**: entity keys are written through one and looked up through the other, so a
+      divergence makes graph recall silently **miss** instead of fail. Asserted that instead —
+      `test_graph_memory.py` **25/25**, 8 cases incl. NBSP/em-space, and sabotage-verified (drop
+      `.split()` from graph's version → 5 of 8 diverge and the check fails).
 
 ### Rename · the laptop autostart was dead the whole time (found 2026-08-09)
 - [x] **RESOLVED 2026-08-09** by `scripts/finish_afon_rename.ps1` (owner ran it elevated). It renames
@@ -1475,21 +1699,68 @@ root cause, both silent — nothing errored, the app simply started fresh.
       by the time it is a wrong action on the owner's laptop it is too late, and which module wins
       depends on nothing more principled than import order in that file. 23 ops across 7 modules,
       no collisions today. The refusal is itself tested rather than assumed.
-- [ ] **J4.4 — The shell/ops layer has no tests and no graph edges. (P1)** `deploy_vps.sh`,
-      `live-check.sh`, `install-brain.sh` and friends are unreachable from `run_all_tests.py`. The
-      deploy path — the single most dangerous script in the repo — is the least tested.
+- [x] **J4.4 — DONE 2026-08-12. `bench/test_ops_scripts.py` (58/58), sabotage-verified twice.**
+      The deploy cannot be *executed* from a test (that needs the VPS, which still runs the
+      pre-rename `jarvis` package), so the test asserts what is readable without a network — chosen
+      to be exactly the properties whose absence has bitten before:
+      * **every .sh and .ps1 parses** (`bash -n`, PowerShell `Parser::ParseFile`) — a syntax error
+        in the second half of `deploy_vps.sh` is currently discovered HALF-DEPLOYED;
+      * **the gates still exist and still run in order**, and the **restart is still LAST**.
+        Sabotage: moving the restart above the drift check fails 2 checks;
+      * **the tar list and `verify_vps_sync.sh`'s `TREES` are the same list** — they are written out
+        separately in two files, so drift means the deploy pushes a tree the verifier never looks at,
+        which is how `personality/` stayed months stale. Sabotage: shortening one fails;
+      * **the verifier and preflight are still WIRED IN** — `verify_vps_sync.sh` once "existed for
+        weeks and was called from NOWHERE";
+      * **no script hardcodes a host or IP**, the real `deploy_vps.env` is gitignored, and the
+        `.example` is checked in;
+      * **every script referenced by another script exists** (12 cross-references) — a missed rename
+        otherwise surfaces only when that branch runs, which for ops scripts means during an incident.
 - [ ] **J4.5 — `clients/` (iPhone HTML/JS) is isolated and only statically checked. (P2)** Community
       161 (`test_iphone_client.py`, 3 nodes) verifies it "statically + server injection". No edge to
       the brain sidecar it actually talks to.
-- [ ] **J4.6 — No edge from any skill doc to the tools it names. (P1)** `skills/*.md`
-      (calendar-and-reminders, daily-briefing, email-triage, memory-discipline, proactive-etiquette,
-      research-method, task-capture, voice-style, proactive-companion) are nine separate islands.
-      **A skill instructing Afon to call a renamed or deleted tool would be caught by no test at
-      all** — it fails silently at runtime, mid-conversation. A doc-to-registry linter closes this.
-- [ ] **J4.7 — Same gap for `personality/*.md` and every `*.example.md` template. (P2)**
-- [ ] **J4.8 — `browser.py:_neutralize_speechbrain_lazy_modules()` is an untested cross-subsystem
-      monkeypatch. (P2)** Playwright's error reporting reaching into SpeechBrain's optional lazy `k2`
-      modules. Breaks on either dependency's upgrade, with no test to say so.
+- [x] **J4.6 + J4.7 — DONE 2026-08-12, and the linter found a live one.**
+      `skills/research-method.md` rung 3 offered "**`scrape_url` / `read_page`**" and `read_page`
+      has never been a tool — a third of that rung pointed at nothing, and Afon following it would
+      try, fail, and improvise mid-conversation with no error anyone sees afterwards. Fixed.
+      `bench/test_skill_docs_resolve.py` (**9/9**) covers `skills/*.md` AND `personality/*.md`
+      (23 docs, 98 distinct identifiers) — so J4.7 closes with it, at no extra cost.
+      Two checks, because one is not enough: (a) every backticked identifier must NAME SOMETHING —
+      a tool, a tool argument or enum value, or an identifier in `src/afon`; (b) anything ≥0.85
+      similar to a tool name but not a tool is flagged **even when it resolves elsewhere**, because
+      a renamed tool usually survives in a comment and would resolve there. Sabotage-verified with
+      both a deleted name and a misspelled one; check (a) caught both, (b) caught the rename.
+      The allow-list is 3 entries, each annotated, and check [5] fails if one stops being used —
+      an exemption nobody needs is a licence nobody asked for. MCP-provided tools cannot be verified
+      statically, so check [4] requires the doc to LABEL them as MCP instead.
+- [x] **J4.8 — DONE 2026-08-11. Writing the test found that the monkeypatch NEVER WORKED.**
+      It set `__file__ = ""`. `inspect.getfile()` does `if getattr(object, "__file__", None)`, and
+      `""` is **falsy** — so the scan went straight on to raise
+      `TypeError: <module …> is a built-in module` instead of the original ImportError. Same
+      masking of the real browser error, different exception. Measured all three cases:
+      | module state | result of the stack walk |
+      |---|---|
+      | unpatched (LazyModule) | `ImportError: k2 missing` |
+      | patched with `""` (shipped) | `TypeError: … is a built-in module` |
+      | patched with a truthy placeholder | **clean** |
+      Fixed to a non-empty placeholder. **Why it hid for so long** is the part worth keeping: both
+      call sites are inside `except Exception`, so the two exception types are indistinguishable
+      downstream, and `inspect.getmodule` short-circuits on its `modulesbyfile` cache, so a warm
+      process often skips the scan entirely — the failure was intermittent AND always presented as
+      "the browser errored", never as "the patch is broken".
+      `bench/test_browser_speechbrain_guard.py` (**8/8**) reproduces the hazard synthetically (so it
+      runs with or without speechbrain), checks the patch touches only its own prefix, is idempotent
+      and no-ops when nothing is loaded, and — the silent-rot half — asserts
+      `speechbrain.integrations.k2_fsa` still exists and `k2` is still absent, since either changing
+      makes the patch dead code.
+      **My own first version was a phantom pass**, and it is the same trap: check [2] reported "the
+      walk is clean" even with the module prefix deliberately renamed, because check [1]'s walk had
+      already populated `inspect.modulesbyfile` and the second walk never rescanned `sys.modules`.
+      The helper now clears that cache before every walk — otherwise you are testing the cache, not
+      the patch. Both sabotages (renamed prefix, empty placeholder) now fail cleanly.
+      *Also fixed in passing: `getattr(mod, "__file__", default)` cannot be used on these modules —
+      the default only swallows AttributeError, and a LazyModule raises ImportError. The test tripped
+      over that hazard while checking for it.*
 
 ### J5 · Two sources of truth (documentation drift)
 - [ ] **J5.1 — TODO.md and docs/MASTER-PLAN.md are two separate roadmap communities. (P1)** 65
@@ -1502,13 +1773,44 @@ root cause, both silent — nothing errored, the app simply started fresh.
       235 still titles a section *"The non-Python parts — TypeScript (glasses)"* for a directory that
       does not exist. `skills/web-and-typescript.md` was rewritten 2026-08-01 — this may already be
       closed, and the graph simply predates the fix (see J0.1).
-- [ ] **J5.4 — `SECURITY.md` describes the confirm tier with no edge to `confirm_required`. (P2)**
-      Same for CONFIGURATION.md -> `Settings`, CONTRIBUTING.md -> the tool template,
-      THIRD_PARTY_NOTICES.md -> the dependency set. Security prose that drifts from the enforcing
-      code is the worst kind of stale note.
-- [ ] **J5.5 — `to-read-script.md` is PARSED as data with no parse test. (P2)** `enroll_voice.py`
-      `_script_segments()` reads its `## Segment` headers. Editing the prose file breaks voice
-      enrolment — the very thing I1 is blocked on — with nothing to catch it.
+- [x] **J5.4 (SECURITY.md half) — DONE 2026-08-11, and it HAD drifted, by nearly half.**
+      Measured: `CONFIRM_TIER` gates **32** tools; SECURITY.md named **17**. The 15 missing included
+      `place_call` (Twilio — outward and unrecallable), `write_vault`, `forget`, `delete_task`,
+      `notion_delete_task`, `create_github_issue`, `composio_run_tool` and the dynamically-gated
+      `update_task`/`notion_complete_task`/`run_macro`/`invoke_skill`.
+      The drift ran in the SAFE direction (the code protects more than the doc promised), but that
+      is still the failure this item names: an auditor reads the doc *instead of* the code and
+      concludes Twilio calls are ungated. Doc rewritten to all 32, including which are gated
+      **dynamically** and the deliberate non-gates (creating/updating a task stays frictionless, or
+      capture-by-voice does not get used).
+      Guard: `bench/test_confirm_tier_documented.py` (**12/12**) checks **both** directions —
+      code→doc (every gate written down) and doc→code (the doc promises no gate that does not
+      exist, which is the dangerous direction because it invents protection). Plus six
+      highest-consequence gates asserted against the CODE directly, so a guard comparing two sets
+      cannot pass by both losing an entry together.
+      **Two things worth keeping.** The section names FUNCTIONS in prose (`confirm_required`,
+      `needs_clarification`), which a backtick regex cannot tell from tool names — discriminated
+      against the real registry rather than an exclusion list, since a list needs editing whenever
+      the prose does, which is the same rot the test exists to prevent. And my first
+      phantom-gate sabotage "passed" because I picked `get_time`/`get_weather`, which are **not in
+      the 136-tool registry** at all: the test was right and my sabotage was wrong. Re-run with
+      real ungated tools (`list_events`, `list_approvals`), it fails correctly.
+      *Still open: the CONFIGURATION.md → `Settings`, CONTRIBUTING.md → tool-template, and
+      THIRD_PARTY_NOTICES.md → dependency-set halves of this item. Same technique applies; split out
+      because SECURITY.md is the one where being wrong actually costs something.*
+- [x] **J5.5 — DONE 2026-08-11. `bench/test_enroll_script_parse.py` (14/14), and the fragility is
+      FIXED, not merely detected.** The item expected a crash-on-edit; the actual failure mode is
+      worse and invisible. `_script_segments()` required the **non-ASCII `≈`** to read each
+      `(≈ N s)` duration hint. Replace it with a `~` — an editor, a lossy paste, someone tidying the
+      file — and the regex still matched every `## Segment` header, so enrolment still ran, with
+      **all five clips silently collapsed to the 40s default** instead of 33/48/43/38/33. No error,
+      no crash: just a shorter recording and a weaker voiceprint. That matters because a weak
+      voiceprint is precisely the blocking defect G3 identified (owner scoring 0.29–0.64).
+      Widened the hint to accept `≈` / `~` / `approx` / bare, so the whole class is gone. The test
+      asserts the DURATIONS (not just the segment count — a count-only test passes through this bug
+      untouched), covers all three marker variants, and checks the structural contract (`##` not
+      `#`, "Segment"-named headers only, empty file → no crash). Sabotage-verified: restoring the
+      strict regex fails 3 checks with `[40,40,40,40,40]`.
 
 ### J6 · Test-suite structure
 - [x] **A flaky test was a PRODUCT bug, found 2026-08-09 by running the gate with full output.**
@@ -1559,6 +1861,16 @@ root cause, both silent — nothing errored, the app simply started fresh.
       `=== N/M checks passed ===` (4/4, 5/5, 7/7, 1/1). `test_fleet_routing` got a 12-line
       `_Monkeypatch` shim. `test_latency_budget` now runs against the live brain on demand —
       **verified green: first sentence inside the 6s budget.**
+      **2026-08-11 — the residual half is now closed too.** The three bodies were fixed in August
+      but the RUNNER still listed them with `[]` success-substrings, i.e. gated on the exit code
+      alone, so a body that stopped asserting would still have read green. Two changes:
+      1. All three are now gated on `"checks passed ==="` — there are **zero** exit-code-only
+         entries left in `run_all_tests.py`.
+      2. That needle alone is NOT sufficient, and saying so is the point: `"=== 0/0 checks
+         passed ==="` contains it. `classify_result()` now fails any run matching `0/0 checks
+         passed`, and any run with no output, **globally** — nothing legitimately asserts zero
+         things, so this closes the CLASS rather than the three instances. Verified directly:
+         `0/0 -> FAIL`, `7/7 -> PASS`, empty output `-> FAIL`; classifier suite still 10/10.
       Durable guard: `test_registry_complete.py` now AST-parses every bench file and fails on any
       `test_*` function that is defined and never invoked. Proved it fails on a planted orphan
       before trusting it. **Registration was never the real invariant — execution is.**
@@ -1573,16 +1885,50 @@ root cause, both silent — nothing errored, the app simply started fresh.
       code volume.
 
 ### J7 · Error and exception discipline
-- [ ] **J7.1 — 22 undocumented broad catches. (P2, VERIFIED)** 455 `except Exception` in `src/`, of
-      which 433 carry `# noqa: BLE001` with a stated reason. The discipline is real and nearly
-      universal — which is exactly why the 22 exceptions to it are worth reading.
+- [x] **J7.1 — DONE 2026-08-11. Read all of them; 2 of 21 hid a capability, the rest are fine.**
+      Re-measured: **463** `except Exception` in `src/`, **442** carrying `# noqa: BLE001` — so 21
+      undocumented, not 22. The deliverable here was the READ, not adding 21 comments, because a
+      `# noqa` added without judgement just documents a bug as intentional.
+      **Fixed — both are the "capability goes dormant with no symptom" shape:**
+      1. **`agent.py:1811` — `patterns.record()` swallowed with a bare `pass`.** That JSONL append
+         is the ONLY input to `pattern_suggestion`, so a broken write makes the whole capability
+         stop suggesting anything — indistinguishable from "no pattern matched today". Exactly the
+         K4a scare, which cost two sessions of wrong diagnosis. Now reports via `errors.swallowed`.
+      2. **`context.py:261` — unreadable `operating-rules.md` fell back to built-in defaults
+         silently.** Falling back is right; doing it silently means Afon quietly ignores every rule
+         the owner wrote and behaves like a fresh install, with no symptom beyond "he stopped
+         following my rules". Now logs a WARNING naming the path and the error. Verified by forcing
+         the failure.
+      **Read and deliberately left alone (the swallow costs nothing):** `proactive_signals.py:142`
+      (the "Upcoming:" enrichment — the digest still sends without it) · `reliability.py:98`
+      (corrupt probe JSON → start a fresh history) · `scheduler.py:212` (already has an explicit
+      `logger.info` fallback on the next line) · the browser/macros/audio_devices/`_supervisor`
+      cluster (all per-attempt retries inside a loop that reports its own outcome).
+      Suites re-run green: finetune 40/40, phase9_memory 27/27, phase10_proactive 44/44,
+      memory_behavioral 18/18.
 - [ ] **J7.2 — Exception types are structural graph participants. (P2)** `RuntimeError` and
       `Exception` appear as *nodes* in communities 17, 42, 98 and 164. Control flow routes through
       generic exceptions rather than domain errors.
-- [ ] **J7.3 — No typed error taxonomy. (P1)** The consequence of J1.2 + J7.2: a caller cannot
-      distinguish not-configured / network-down / auth-expired / bad-args without string matching.
-      This is why the LLM permanent-error classifier and the degradation tests both had to be built
-      on prose.
+- [x] **J7.3 — DONE 2026-08-12. `ErrorKind` + `ToolResult` in `brain/tools/base.py`;
+      `bench/test_error_taxonomy.py` (34/34).**
+      Eight kinds, each annotated with the DECISION it licenses, because a taxonomy that does not
+      change what a caller does is decoration: `NOT_CONFIGURED` (never retry) · `AUTH` (retrying
+      cannot help) · `NETWORK` (retry) · `RATE_LIMIT` (retry later and slower) · `UNAVAILABLE`
+      (5xx — retry later) · `NOT_FOUND` (pointless) · `BAD_ARGS` (a *different* call might work) ·
+      `UNKNOWN` (no guessing without evidence).
+      **The adoption problem was the whole design constraint.** `tool_error` is the most connected
+      node in the system (132 edges, J1.2) and every handler is contracted to return something the
+      model can speak, so a new return type would have been a 132-site migration. `ToolResult`
+      subclasses `str`: it is still speakable, json-dumpable, comparable, hashable and usable as a
+      dict key — proven by six checks — and merely carries `.kind` for callers that ask. Zero call
+      sites changed.
+      `is_not_configured()` and `tool_failed()` now consult the type FIRST and keep the substring
+      match as the fallback, so prose arriving from elsewhere (across the wire, from an MCP server,
+      hand-written in a handler) still classifies. The new power is the negative: a typed NETWORK
+      error is now *definitively* not "unconfigured", which the string match could never assert.
+      **Documented limit, with a test on it:** the kind does NOT survive JSON, so anything crossing
+      to the edge arrives as prose again and edge-side callers must keep using the prose helpers.
+      Better to state that in a check than to let someone discover it.
 
 ### J8 · Cohesion program (cross-cutting — how to stop this recurring)
 - [ ] **J8.1 — Record today's per-community cohesion as a baseline and gate regressions. (P2)**
@@ -1882,21 +2228,45 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       guessing which mistyped field held the intent is fine when the worst case is an unhelpful
       search, not when it is dropping the wrong memory. Checks in `bench/test_phase9_memory.py`
       (27/27).
-- [ ] **The same shape exists in ~23 other tools. (P2, deliberately NOT swept)** `grep` finds
-      `return "Which URL, sir?"`, `"What should I play, sir?"`, `"Who should I look up, sir?"` and
-      twenty more. For an OWNER who genuinely left a detail out, asking is the right behaviour —
-      which is why this is not a blanket bug and why I did not rewrite all of them. It only turns
-      harmful when the MODEL supplies a wrong key. A safe sweep would need to distinguish those two
-      callers; the cheap version is to route argument-less tool calls through `tool_error` while
-      keeping the question for turns where the owner's own utterance lacked the detail.
+- [x] **DONE 2026-08-10 — swept, with the discriminator this item said a safe sweep would need.**
+      The real population is **52, not ~23** (`grep -c 'return "…, sir?"'`).
+      The item framed the problem as "distinguish the owner from the model", which is not
+      observable — a tool is *always* called by the model. What IS observable is which **keys**
+      arrived, and that separates the two cases exactly:
+      | args | meaning | behaviour |
+      |---|---|---|
+      | `{}` | the model relayed an underspecified request | **ASK** (unchanged) |
+      | `{"query": ""}` | right key, no content | **ASK** (unchanged) |
+      | `{"entity": …, "key": …}` | the model invented the key | **ERROR** → retry ladder fires |
+      `base.missing_arg(tool, args, *names, ask=…)` implements it, so only the third case changes —
+      precisely the documented bug (`recall({'entity':…,'key':…})` → "What should I recall, sir?" →
+      spoken as the reply). Applied to 11 handlers on the paths the owner actually uses: `remember`,
+      `resolve_contact`, `save_contact`, `travel_time` (**both engines**), `find_place`,
+      `set_reminder`, `recall_related`, `assign_objective`, `send_push`, `browser`, `play_music`.
+      `bench/test_missing_arg.py` **23/23**, asserting BOTH halves per handler — the mis-keyed call
+      must error AND the argument-less one must still ask, because a blanket sweep trades one
+      failure for another.
+      **Two failures the two-sided test caught, both of which a one-sided test would have shipped:**
+      (a) `maps.travel_time` delegates to the keyless OSRM fallback *before* the arg check, and with
+      no Google Maps key **that is the branch that runs** — fixing only the Google side would have
+      left the live path broken (`utility.py:400`); (b) `set_reminder`'s accepted-key list has to
+      mirror `_normalize_reminder_args` exactly (`about`/`content`/`when`/`minutes`), or a spelling
+      the normaliser accepts would be rejected as unknown. My first test case picked `content` as
+      "mis-keyed" when it is in fact valid — the test was wrong, not the code.
+      Left the remaining ~41 sites: they are confirm-gated or rarely-called, and the helper is there
+      when one of them actually misfires. Neighbouring suites re-run green (phase9_memory 27,
+      contacts 21, phase12_utility 23, reminder_args 14, objectives 29, autorecall 12, behavioral 18).
 - [ ] **`tool_choice`/name-forcing is not honoured by the primary. (P2, known, now measured)** The
       B1 router logged `narrowing turn to ['read_skill'] (forcing read_skill by name)` and the model
       called `recall` regardless. The code already documents MiniMax honouring `required`
       inconsistently; this is the same defect reaching a different tool. The narrowing is still
       worth keeping (it fixed B25's fabrication) but it cannot be relied on as a guarantee.
-- [ ] **The connection banner lies about capabilities, in both directions.** It reports the
-      CLI-wrapped provider; the inspections use the fixture-wrapped one. Run 8 printed
-      `tools=no, audit=no, auth=no, governance=no` while B01–B04 all scored 100%. Ignore the banner.
+- [x] **CLOSED 2026-08-10 as a recorded finding — there is no work item inside it.** The banner
+      reports the CLI-wrapped provider while the inspections use the fixture-wrapped one, so run 8
+      printed `tools=no, audit=no, auth=no, governance=no` while B01–B04 scored 100%. The defect is
+      **upstream in iFixAi**, not in Afon, and the action was already decided: ignore the banner,
+      read the per-probe results. Nothing here is ours to fix, and the banner is cosmetic: it
+      misreports the wrapper, never the probe outcome.
 
 ### L4 · Sequence to a defensible grade
 1. ~~Raise the request timeout so B07 measures behaviour instead of latency.~~ `--timeout` exists
@@ -2039,3 +2409,123 @@ cron job on startup, which would otherwise burn model credits unattended. It is 
 - [ ] **Watch for the fleet's own known-false detectors.** Three delegation detectors previously
       gave false readings; ground truth is `toolCall` blocks in `messagesSnapshot`. An audit that
       trusts a broken detector inherits its lie.
+
+---
+
+## N · Identity end-to-end review — voice + face (2026-08-11, owner ask: "find weaknesses and breaking points, be objective")
+
+Reviewed both enrolment→recognition paths against live data rather than against the code's own
+claims. One subsystem was found to be doing nothing at all; the other was diluting its own signal
+and charging half a second per turn for it.
+
+### N1 · Face recognition recognised NOBODY — DONE
+- [x] **Measured against the live refs (`~/.afon/faces/owner.npy`, 75 refs).** A photograph of a
+      different person scored **0.815** best-of-75 against the owner — above the owner's own median
+      of **0.712** — and cleared the 0.62 bar against **48 of the 75**. Stranger mean-to-refs
+      **0.700** vs owner mean-to-refs **0.709**: indistinguishable. No threshold could have fixed
+      this. `visual_presence` said "I recognise you" to anyone with a face, and
+      `verify_owner_present` — the I1 SECOND AUTHORISATION FACTOR — returned matched=True for them.
+- [x] **Confirmed on real multi-person data** (Olivetti, 40 people x 10 photos, all 79,800 pairs):
+      the shipped global histogram's *best achievable* operating point is 23.6% false-accept /
+      20.3% false-reject, and under best-of-N matching the impostor's best (0.928) EXCEEDS the
+      owner's worst (0.911) — overlapping outright.
+- [x] **Cause was structural, not a tuning miss.** A single global 256-bin LBP histogram over the
+      whole crop records WHICH textures a face contains and discards WHERE they sit — and where
+      they sit is the whole of face identity. Shuffling a face's cells leaves the histogram 0.955
+      identical to the original.
+- [x] **Fixed: 8x8 spatially blocked signature** (`_face_signature`), which is what OpenCV's
+      LBPHFaceRecognizer actually does. Same cost, no new dependency. Olivetti: 14.5% / 14.1%.
+- [x] **Threshold 0.62 -> 0.48**, taken from the Olivetti error-equalising point. Marked PROVISIONAL
+      in config.py: absolute similarity scales with image sharpness and Olivetti is pre-aligned
+      where a haar crop jitters.
+- [x] **Old refs are refused, not mis-scored.** 256-wide refs load as "not enrolled" with a spoken
+      prompt to re-enrol, so the system degrades to face-COUNTING (honest) instead of silently
+      comparing incomparable vectors.
+- [x] **Enrolment no longer learns bystanders.** Every detected face in a frame became an owner ref;
+      with best-of-N, one such ref admits that person permanently. Frames with more than one face
+      are now skipped.
+- [x] **The burst VOTES instead of accepting on any single frame** (`_majority_matched`). At a ~14%
+      per-frame false-accept rate, "matched if ANY of 12 frames matched" is better than even odds
+      for a stranger; a majority makes it negligible while frames where he looked away are not
+      counted against him. `visual_presence` keeps `any` — a greeting should survive a glance away.
+- [x] **Enrolment now reports its own calibration** — the owner's measured worst-case self-match
+      against the threshold — because the threshold is a constant carried from a public dataset and
+      he otherwise has no way to know it fits his camera until recognition quietly stops working.
+- [x] `bench/test_face_identity_separation.py` 12/12, sabotage-verified (reverts to 7/12).
+      It pins the PROPERTY (layout response) rather than a score: two earlier drafts tried to
+      benchmark separation on synthetic faces and were measuring the fixture, not the descriptor.
+
+**OWNER ACTION REQUIRED:** say *"learn my face"* in front of the camera. The 75 stored refs are in
+the old format and are being ignored until then — face recognition is OFF, not wrong, in the
+meantime. *(2026-08-12: worth more now — one enrolment writes BOTH the LBP signatures and the
+ArcFace embeddings, so it lands on the real recogniser rather than the fallback.)*
+
+**Deliberately NOT claimed:** the new descriptor is a strict, measured improvement (22% -> 14% equal
+error) but 14% is a "probably him" heuristic, not identity. Alignment sensitivity is its weak spot —
+a 2-degree rotation of the same face costs more similarity than it should. Nothing should treat it
+as authorisation on its own. Identity grade needs a face-embedding model (dlib / insightface), which
+remains the upgrade path noted in config.py.
+
+### N2 · The speaker gate was scoring the room, not the speaker — DONE
+- [x] **Read the live gate log: 742 real decisions.** The score distribution is ONE smooth hump —
+      mode 0.20-0.25 decaying to 0.64 — with the 0.30 threshold sitting on its slope. Owner and
+      not-owner are not two populations there, they are one. 186 (25%) were accepted, and the
+      accepted transcripts include a film playing in the room ("Spider Man who watched a certain
+      version", "a scene from two films") plus Italian, French and German media audio. The gate was
+      forwarding a television to the brain as though the owner had said it.
+- [x] **Cause: the gate embedded its whole 6s rolling window.** A 2s utterance was scored together
+      with 4s of room tone, television and other people, so the score largely measured the window's
+      noise floor rather than who spoke.
+- [x] **Fixed: delimit the utterance with the VAD frames the pipeline already emits**, keeping 0.3s
+      of pre-roll because VAD fires after speech onset, and falling back to the whole window if no
+      VAD frame ever arrives (a pipeline without VAD must not silently lose speaker-id).
+- [x] **Per-turn cost 1161 ms -> 554 ms**, measured on this hardware. This is on the CRITICAL PATH —
+      the transcript is not forwarded until `verify()` returns — so it was costing more per turn
+      than the entire LLM first-token budget (see K5a: measured primary TTFT 0.73s).
+- [x] **Several finals in one utterance no longer mean several ECAPA passes.** Deepgram emits more
+      than one final per utterance; identical audio is now memoised, and a later final re-scores the
+      WHOLE utterance rather than the sliver since the last one — a sliver falls under embed()'s
+      0.5s floor, and a None embedding makes `verify()` fail OPEN.
+- [x] **Closed the short-turn hole.** Under 0.5s of audio `verify()` fails open, so a one-word turn
+      skipped the check entirely — and "yes" is the word that confirms a privileged action. The gate
+      now widens back to the rolling window rather than skipping: a diluted score is still a score.
+- [x] **Pre-roll slices to the byte, not to whole chunks.** My first cut kept the last whole audio
+      chunk, which keeps the ENTIRE preceding window when chunks are large — the exact dilution the
+      change exists to remove. Caught by the new test, not by review.
+- [x] `bench/test_speaker_gate_scoping.py` 14/14. `test_phase5_identity_bench.py` still 32/32.
+
+### N3 · Still open on identity
+- [ ] **Re-enrol the voiceprint on the runtime mic.** The 10 enrolled vectors are only 0.288-0.807
+      similar TO EACH OTHER (median 0.517) — the owner's own intra-enrolment spread straddles the
+      0.30 accept threshold, which is why no threshold separates him from the television. Utterance
+      scoping should lift live scores; re-measure the distribution afterwards before touching the
+      threshold, and raise it only against evidence.
+- [x] **DONE 2026-08-12 — enrolment now measures the SEPARATION.** After the owner pass it records
+      6s of "not your voice" (a video, another person, or just silence) and reports both scores plus
+      a verdict. **The verdict is the point, not the second number:** a too-small GAP and a
+      misplaced THRESHOLD produce the identical accept/reject outcome and need opposite fixes, so
+      they get different sentences — re-enrol when owner and impostor sit on top of each other,
+      RAISE the bar when there is a real gap and the impostor clears it anyway, LOWER it when the
+      bar is above the owner. Telling him to re-enrol a profile that is fine is how a good profile
+      gets thrown away. `separation_verdict()` is a pure function so it is testable without a mic;
+      6 checks in `bench/test_enroll_script_parse.py` (**22/22**), including that the two
+      look-alike failures do not share a message.
+- [x] **DONE 2026-08-12 — warm-up moved off the boot path. `bench/test_speaker_warmup.py` (13/13).**
+      The edge is now listening in about a second instead of ~57. **The half that made it safe is
+      the lock, not the thread.** `_ensure_embedder` set `_tried_load = True` on ENTRY, so an
+      utterance arriving mid-load would have seen "already tried", got `None`, and `verify()` fails
+      OPEN by design — the gate would have been silently off for the first minute after every
+      restart, which is strictly worse than the delay it was meant to fix. The load is serialised
+      now: a mid-load caller waits (measured 401ms in the test's stand-in) and then gets the real
+      embedder. A genuinely broken backend is still only attempted once, and no-backend still means
+      accept — an install problem must never lock the owner out of his own assistant.
+- [x] **DONE 2026-08-12 — moved to `~/.afon/voiceprint.json`, with the `.bak` alongside it.**
+      One `voiceprint.json*` ignore line was the only thing keeping a biometric out of git, and it
+      is state rather than code, so a fresh clone or a deploy had no business seeing it. Migration is
+      one-time and MOVES rather than copies (two copies of a biometric is worse than one in the wrong
+      place), brings the `.bak` (the only recovery path from a bad re-enrol), and never overwrites an
+      existing new-location profile — re-enrolling is what created that one. Verified live: both
+      files moved, profile still loads (10 vectors, 192-dim).
+- [ ] **Haar is frontal-only with minSize 50x50.** Sitting back from the desk, or turned, reads as
+      "no one is in view" rather than "I can't tell". The distinction matters because presence
+      drives whether proactive nudges fire.

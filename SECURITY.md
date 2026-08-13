@@ -51,14 +51,31 @@ code**, not merely prompted: the agent's tool-execution path (`brain/agent.py::_
 model a `CONFIRM_REQUIRED` sentinel so it reads the action back, and runs it only after the next user
 turn affirms it (`_is_affirmation`). One "yes" authorises exactly one action (the grant is consumed).
 So even a weak model that ignores the prompt physically cannot fire a consequential tool unprompted.
-The tier (`CONFIRM_TIER`) covers:
+The tier (`CONFIRM_TIER`) covers all 32 of these. `bench/test_confirm_tier_documented.py` fails if
+this list and the code ever disagree — security prose that drifts from the enforcing code is worse
+than no prose, because it is the thing an auditor reads instead of the code.
 
-- Messaging/outbound: `send_telegram`, `send_email`, `send_push`.
+- Messaging/outbound: `send_telegram`, `send_email`, `send_push`, `place_call` (Twilio — a wrong
+  number or wrong words cannot be recalled).
 - Machine: `file_op` (deletes), `process_op` (kill/start), `run_powershell`, `browser`.
 - Calendar/home/Notion: `create_event`, `ha_call` (locks/alarms/covers especially),
   `notion_append`, `notion_comment`, `notion_create_page`.
 - Self-improvement: `write_source`, `git_commit`, `git_push`, `git_revert`.
-- Protocols: `run_protocol`.
+- Outward-facing filing: `create_github_issue` (posts to a shared repo).
+- Protocols and stored sequences: `run_protocol`; `run_macro` and `invoke_skill` are gated
+  **dynamically** — only when their own steps contain a confirm-tier tool.
+- Destroying owner state (no undo): `delete_task`, `notion_delete_task`, `delete_macro`, `forget`,
+  `drop_objective`, `complete_objective`, `write_vault` (a wrong note in the durable knowledge base
+  is worse than no note, because it gets trusted later).
+- Gated **dynamically**, so the frictionless case stays frictionless:
+  - `update_task` / `notion_update_task` — adding a note or nudging a deadline is free; overwriting
+    a title or blanking a field is not.
+  - `notion_complete_task` — completing one task by name is free; "mark everything done" sweeps the
+    whole open list in one call and is gated.
+  - `composio_run_tool` — gated when the resolved slug is a WRITE.
+
+Creating and updating tasks is deliberately **not** gated: capture-by-voice has to be frictionless
+or it does not get used.
 
 Reads and lookups (recall, web/vault search, weather, `read_email`, `read_chat`, `git_status`, …)
 need no confirmation — they have no side effects.
