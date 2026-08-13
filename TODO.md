@@ -1996,11 +1996,25 @@ root cause, both silent — nothing errored, the app simply started fresh.
       rediscovers it as a bug:** the graph can no longer answer "which test covers X" — acceptable
       only because tests here are named `bench/test_<topic>.py`, so a glob answers it as well.
       Reversal is one `mv` (documented in the file).
-- [ ] **J8.4 — Write down the intended layering (edge / brain / tools / stores / ops) and check it.
-      (P2)** The graph found no import cycles — genuinely good, and worth keeping. But it also has no
-      concept of a *layer*, so an edge module importing a brain store, or a tool importing the agent,
-      registers as a normal edge. A layering rule turns the "no cycles" win into a durable invariant
-      rather than a lucky snapshot.
+- [x] **J8.4 — DONE 2026-08-13. `bench/test_layering.py` (23/23) is the written-down layering.**
+      Kept in the test rather than a separate doc, so the description and the check cannot drift —
+      the whole lesson of J5.1 and J5.4 in one decision. Four rules, each measured before it was
+      written, so the gate describes the tree instead of an aspiration:
+      **R1** base (`shared/`, `protocols/`) and root (`config.py`, `bench_metrics.py`,
+      `setup_wizard.py`) import nothing upward — verified zero today, and it is what keeps `config`
+      importable from anywhere without a cycle.
+      **R2** `brain/tools` may reach `edge` only LAZILY. The live instance is `tools/audioout.py`
+      driving the laptop's speakers through PC_LINK inside a `try:` at call time; the same import at
+      module level would take the whole tool registry down on the headless VPS, turning "this
+      capability is unavailable here" into "the brain does not boot".
+      **R3** all 15 edge<->brain crossings are declared with their reason (local-brain mode, PC_LINK
+      handler merge, pure brain helpers reused on the laptop). A sixteenth fails; and the list is
+      checked in reverse too, so an entry nobody imports any more is deleted rather than rotting
+      into a licence.
+      **R4** no module-level import cycle. Lazy imports are excluded deliberately — they are the
+      technique this codebase uses to stay acyclic, and counting them would report a cycle for code
+      that imports fine. The detector is proven against a planted cycle in the same run, because a
+      green cycle check and a broken cycle check look identical.
 
 ---
 
