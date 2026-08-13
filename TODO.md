@@ -304,14 +304,23 @@ other item until it is done.
       and tool execution — which genuinely differs (one returns a string, one yields chunks) and is
       a larger, riskier refactor. The duplication that was actively costing double work on every
       behavioural change is gone; `bench/test_clause_completion.py` asserts both paths agree.
-- [ ] **`agent.py` carries two near-duplicate completion loops** — `311/986/1002` and
-      `1339/1397/1420`. Found while planning the `clause_tools` wiring. Every behavioural fix
-      must be applied twice, and a fix applied ONCE produces a defect that appears only on one
-      path: the same input behaves differently depending on how it arrived, which is the
-      hardest class of bug to reproduce. This is not a tidiness item — until it is one loop,
-      every K-item below costs double and carries a silent-divergence risk.
-      Done means: one loop, both entry points calling it, and a test asserting that a forced
-      tool fires identically through both.
+- [x] **DONE 2026-08-13 for the part that mattered — and the predicted divergence was ALREADY
+      THERE, in the path production uses.** The item said a fix applied to one loop produces a
+      defect visible only on the other. It had happened: **B4 (retry a dodged forced tool past the
+      primary onto the reliable tool-caller) existed ONLY in `respond()`.** The streaming loop — the
+      one the voice pipeline runs — had no B4 at all, so a forced tool the primary dodged was
+      simply lost on voice turns while the same sentence typed through Telegram recovered it.
+      Now single-sourced, following the `TurnPlan` precedent (same reasoning, one stage later):
+      `_Completion` (the ~22-line multi-intent completion block both loops carried verbatim),
+      `_fallback_retry` (B4, now called by BOTH), `_calls_from` (the tool-call→dict conversion,
+      written out three times), and `_SUMMARY_NUDGE` (the budget-exhausted prose, duplicated
+      verbatim — a reworded copy would have changed how turns END on one path only).
+      **Not done, deliberately: the two loops are still two.** Every DECISION is now shared; what
+      differs is mechanics — `complete()` returns a message, `stream_with_tools()` yields chunks.
+      Truly one loop means `respond()` becoming a thin drain of the streaming generator, which
+      changes which LLM API the buffered path uses and breaks every test double that implements
+      only `complete()`. That is a real piece of work with a real blast radius, not a passing
+      refactor, and it should be decided rather than slipped in. Suite green after the change.
 
 ### K2 · Tool catalogue — the dominant per-turn cost
 - [ ] **Tier the catalogue by RECENCY as well as intent.** *(BLOCKED ON DATA — the blocker was

@@ -216,6 +216,14 @@ _MULTI_INTENT_COMPLETE = (
     "(e.g. remember/save it, send it, set it, add it, note it) before you give your final reply."
 )
 
+#: The last-pass nudge, when the tool budget is spent and he must speak rather than call again.
+#: One constant because both loops appended it verbatim, and a reworded copy in one path would
+#: change how turns END on that path only.
+_SUMMARY_NUDGE = (
+    "Now reply to the owner in one or two spoken sentences, summarising what you did and what you "
+    "found. Do NOT call or write any tool calls."
+)
+
 
 def _is_multi_intent(user_text: str) -> bool:
     return bool(_MULTI_INTENT_RE.search(user_text or ""))
@@ -267,6 +275,57 @@ def _completion_force(clause_plan: list[str], seen_tools: set[str],
     except Exception as e:  # noqa: BLE001 — completion must never break a turn
         logger.debug(f"clause completion skipped: {type(e).__name__}: {e}")
     return turn_tools, None
+
+
+class _Completion:
+    """Multi-intent completion bookkeeping — the ~22 lines both response loops carried verbatim (K1).
+
+    Same reasoning as ``TurnPlan``, one stage later in the turn. The streaming mechanics genuinely
+    differ (one returns a string, one yields chunks), but "has the user's second intent been
+    satisfied, and if not what do we force next" is a DECISION, and a decision in two copies is one
+    fix away from behaving differently depending on how the turn arrived.
+    """
+
+    def __init__(self, multi_intent: bool, clause_plan: list[str]) -> None:
+        self.multi_intent = multi_intent
+        self.clause_plan = clause_plan
+        self.passes = 0      # bounded by len(clause_plan) when a clause plan exists
+        self.done = False    # the without-a-plan case gets exactly one extra pass
+
+    def step(self, seen_tools: set[str], turn_tools: list[dict[str, Any]],
+             forced_name: str | None, narrowed: bool, messages: list[dict[str, Any]]):
+        """A pass fired no tool: should the turn take another one, and forcing what?
+
+        Returns ``(take_another_pass, turn_tools, forced_name, narrowed)``. A compound request
+        legitimately needs more passes than a single-intent one — each outstanding clause costs a
+        pass, and the old fixed budget ran out before the last clause could fire, so the turn ended
+        having satisfied everything except the part the owner probably cared about most
+        ("...and remember it").
+        """
+        outstanding = [n for n in self.clause_plan if n not in seen_tools]
+        may_complete = (
+            (bool(outstanding) and self.passes < len(self.clause_plan))
+            or (not self.clause_plan and len(seen_tools) == 1 and not self.done)
+        )
+        if not (self.multi_intent and may_complete):
+            return False, turn_tools, forced_name, narrowed
+        self.done = True
+        self.passes += 1
+        # B6: force the tool the clause router says is still outstanding, BY NAME. The prose nudge
+        # is the fallback for when we cannot name it.
+        turn_tools, clause_forced = _completion_force(self.clause_plan, seen_tools, turn_tools)
+        if clause_forced:
+            logger.info(f"B6 completion: forcing outstanding {clause_forced}")
+            return True, turn_tools, clause_forced, True
+        messages.append({"role": "system", "content": _MULTI_INTENT_COMPLETE})
+        return True, turn_tools, forced_name, narrowed
+
+
+def _calls_from(msg) -> list[dict[str, str]]:
+    """OpenAI tool-call objects -> the plain dicts `_execute_calls` takes. Was written out three
+    times; three copies of a shape conversion is three places to forget `or "{}"` on a null."""
+    return [{"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments or "{}"}
+            for tc in (getattr(msg, "tool_calls", None) or [])]
 
 
 # Catastrophic system-destruction commands — refused DETERMINISTICALLY, before the model, with NO tool
@@ -1128,15 +1187,10 @@ class AfonAgent:
             return reply
 
         completion_pending = False   # force an extra pass to finish a multi-intent turn
-        completion_done = False
-        completion_passes = 0        # bounded by len(clause_plan) when a clause plan exists
+        comp = _Completion(multi_intent, clause_plan)
         b4_retried = False           # B4: one fallback-model retry per turn when the primary dodges
         b5_escalated = False         # B5: one thinking-tier escalation per turn on a persistent dodge
         seen_tools: set[str] = set()
-        # A compound request legitimately needs more passes than a single-intent one: each
-        # outstanding clause costs a completion pass, and the old fixed budget ran out before
-        # the last clause could fire — the turn ended having satisfied everything but the part
-        # the user probably cared about most ("...and remember it").
         for i in range(self._max_tool_iters + len(clause_plan)):
             force_this = (i == 0 and force_first) or completion_pending
             completion_pending = False
@@ -1161,17 +1215,9 @@ class AfonAgent:
             # Skipped when we already started at the fallback (prefer_fb) — that retry would be identical.
             if (force_this and not getattr(msg, "tool_calls", None) and not b4_retried and not prefer_fb):
                 b4_retried = True
-                try:
-                    alt = await self._llm.complete(messages, tools=turn_tools,
-                                                   tool_choice="required", skip_primary=True)
-                    if getattr(alt, "tool_calls", None):
-                        logger.info(f"B4: primary dodged {forced_name}; fallback tool-caller fired it")
-                        msg = alt
-                except (RuntimeError, TypeError):
-                    # RuntimeError: the fallback also rejected forcing. TypeError: an injected test-double
-                    # LLM lacks the skip_primary kwarg (the real client always has it). Either way, no
-                    # fallback available — fall through to the honest degrade.
-                    pass
+                alt = await self._fallback_retry(messages, turn_tools, forced_name)
+                if alt is not None:
+                    msg = alt
             # B5 thinking-tier: forced turn the fast models still dodged → escalate ONCE to a MiniMax
             # reasoning model before giving up. This is what rescues arg-bearing tools (set_reminder,
             # create_event, notion_create) that the non-thinking primary + groq miss.
@@ -1182,29 +1228,10 @@ class AfonAgent:
                     msg = alt
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
-                # Multi-intent completion: the user asked for >1 thing but only ONE tool ran. Give the
-                # model exactly one forced pass to satisfy the remaining part before ending (Roadmap 4.2).
-                # A clause plan tells us exactly what is still outstanding, so completion is
-                # allowed until every clause has fired (bounded by the plan's length and by
-                # _max_tool_iters). Without a plan we keep the original single extra pass.
-                _outstanding = [n for n in clause_plan if n not in seen_tools]
-                _may_complete = (
-                    (bool(_outstanding) and completion_passes < len(clause_plan))
-                    or (not clause_plan and len(seen_tools) == 1 and not completion_done)
-                )
-                if multi_intent and _may_complete:
-                    completion_done = True
-                    completion_passes += 1
+                again, turn_tools, forced_name, narrowed = comp.step(
+                    seen_tools, turn_tools, forced_name, narrowed, messages)
+                if again:
                     completion_pending = True
-                    # B6: force the tool the clause router says is still outstanding, by name.
-                    # The prose nudge below is the fallback for when we cannot name it.
-                    turn_tools, clause_forced = _completion_force(clause_plan, seen_tools, turn_tools)
-                    if clause_forced:
-                        forced_name = clause_forced
-                        narrowed = True
-                        logger.info(f"B6 completion: forcing outstanding {clause_forced}")
-                    else:
-                        messages.append({"role": "system", "content": _MULTI_INTENT_COMPLETE})
                     continue
                 reply = _clean_reply(msg.content or "")
                 # B3: a narrowed+forced live-data/side-effect intent that fired NO tool means the model
@@ -1224,10 +1251,7 @@ class AfonAgent:
 
             # Record the assistant's tool-call turn, then execute each call (shared with the
             # streaming path) — normalise the OpenAI objects to plain dicts first.
-            calls = [
-                {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments or "{}"}
-                for tc in tool_calls
-            ]
+            calls = _calls_from(msg)
             outcomes = await self._execute_calls(messages, calls, msg.content or "", on_progress)
             seen_tools.update(o["name"] for o in outcomes)
             # Short-circuit: a single speakable read-only result is spoken as-is (no summary pass).
@@ -1241,17 +1265,36 @@ class AfonAgent:
 
         # Tool-iteration budget exhausted — final no-tools pass so he speaks a summary, not
         # another tool call. The nudge steers models that would otherwise emit a raw tool-call.
-        messages.append({
-            "role": "system",
-            "content": "Now reply to the owner in one or two spoken sentences, summarising what you "
-                       "did and what you found. Do NOT call or write any tool calls.",
-        })
+        messages.append({"role": "system", "content": _SUMMARY_NUDGE})
         msg = await self._llm.complete(messages)
         reply = _clean_reply(msg.content or "") or "I've done what I can on that, sir."
         self._history.append({"role": "assistant", "content": reply})
         self._trim()
         self._spawn_review()
         return reply
+
+    async def _fallback_retry(self, messages: list[dict[str, Any]], turn_tools: list[dict[str, Any]],
+                              forced_name: str | None):
+        """B4: a forced pass fired NO tool — retry once past the primary onto the reliable tool-caller.
+
+        Returns the message if the retry fired a tool, else None. Fail-quiet, and the two exceptions
+        are different animals: RuntimeError is the fallback also rejecting forced tool_choice;
+        TypeError is an injected test-double LLM without the `skip_primary` kwarg (the real client
+        always has it). Either way there is no fallback to be had, and the caller degrades honestly.
+
+        Extracted for K1: this lived inline in `respond()` ONLY, so the streaming path — the one the
+        voice pipeline actually uses — had no B4 at all. That is the exact failure the K1 item
+        predicts: a behavioural fix applied to one loop produces a defect visible only on the other.
+        """
+        try:
+            alt = await self._llm.complete(messages, tools=turn_tools,
+                                           tool_choice="required", skip_primary=True)
+        except (RuntimeError, TypeError):
+            return None
+        if getattr(alt, "tool_calls", None):
+            logger.info(f"B4: primary dodged {forced_name}; fallback tool-caller fired it")
+            return alt
+        return None
 
     async def _escalate_thinking(self, messages: list[dict[str, Any]], turn_tools: list[dict[str, Any]]):
         """B5 thinking-tier: a forced tool turn the fast primary AND the reliable fallback both dodged is
@@ -1584,14 +1627,10 @@ class AfonAgent:
             return
 
         completion_pending = False   # force an extra pass to finish a multi-intent turn
-        completion_done = False
-        completion_passes = 0        # bounded by len(clause_plan) when a clause plan exists
+        comp = _Completion(multi_intent, clause_plan)
+        b4_retried = False           # B4: one fallback-model retry per turn when the primary dodges
         b5_escalated = False         # B5: one thinking-tier escalation per turn on a persistent dodge
         seen_tools: set[str] = set()
-        # A compound request legitimately needs more passes than a single-intent one: each
-        # outstanding clause costs a completion pass, and the old fixed budget ran out before
-        # the last clause could fire — the turn ended having satisfied everything but the part
-        # the user probably cared about most ("...and remember it").
         for i in range(self._max_tool_iters + len(clause_plan)):
             force_this = (i == 0 and force_first) or completion_pending
             completion_pending = False
@@ -1622,39 +1661,27 @@ class AfonAgent:
                         raise
                     continue  # forced tool_choice rejected by every model — retry on auto
 
+            # B4: a forced pass that fired nothing gets ONE retry past the primary onto the reliable
+            # tool-caller — same as the buffered path, which is the only place it used to exist.
+            # Gated on nothing having been spoken yet: once a sentence is out of the speaker, a
+            # second attempt at the same turn would talk over itself. Skipped when we already
+            # started at the fallback (prefer_fb), where the retry would be identical.
+            if not calls and force_this and not b4_retried and not prefer_fb and not spoken:
+                b4_retried = True
+                alt = await self._fallback_retry(messages, turn_tools, forced_name)
+                calls = _calls_from(alt) or None
             if not calls:
                 # B5 thinking-tier: a forced turn the fast models dodged → escalate ONCE to a MiniMax
                 # reasoning model. Only when nothing's been spoken yet, so we never double up on speech.
                 if force_this and not b5_escalated and not spoken:
                     b5_escalated = True
                     alt = await self._escalate_thinking(messages, turn_tools)
-                    if alt is not None and getattr(alt, "tool_calls", None):
-                        calls = [{"id": tc.id, "name": tc.function.name,
-                                  "arguments": tc.function.arguments or "{}"} for tc in alt.tool_calls]
+                    calls = _calls_from(alt) or None
             if not calls:
-                # Multi-intent completion: only one tool ran but the user asked for >1 thing — force ONE
-                # pass to finish the remaining part (e.g. remember it) before ending the turn.
-                # A clause plan tells us exactly what is still outstanding, so completion is
-                # allowed until every clause has fired (bounded by the plan's length and by
-                # _max_tool_iters). Without a plan we keep the original single extra pass.
-                _outstanding = [n for n in clause_plan if n not in seen_tools]
-                _may_complete = (
-                    (bool(_outstanding) and completion_passes < len(clause_plan))
-                    or (not clause_plan and len(seen_tools) == 1 and not completion_done)
-                )
-                if multi_intent and _may_complete:
-                    completion_done = True
-                    completion_passes += 1
+                again, turn_tools, forced_name, narrowed = comp.step(
+                    seen_tools, turn_tools, forced_name, narrowed, messages)
+                if again:
                     completion_pending = True
-                    # B6: same named-forcing as the buffered path. Both loops call the one helper,
-                    # so this behaviour cannot drift between response modes.
-                    turn_tools, clause_forced = _completion_force(clause_plan, seen_tools, turn_tools)
-                    if clause_forced:
-                        forced_name = clause_forced
-                        narrowed = True
-                        logger.info(f"B6 completion: forcing outstanding {clause_forced}")
-                    else:
-                        messages.append({"role": "system", "content": _MULTI_INTENT_COMPLETE})
                     continue
                 # B3: a narrowed+forced live-data intent that fired no tool → don't speak an unverified
                 # tail (knowledge tools exempt — they may answer inline).
@@ -1682,11 +1709,7 @@ class AfonAgent:
                 return
 
         # Budget exhausted — one final no-tools summary pass, also streamed.
-        messages.append({
-            "role": "system",
-            "content": "Now reply to the owner in one or two spoken sentences, summarising what you "
-                       "did and what you found. Do NOT call or write any tool calls.",
-        })
+        messages.append({"role": "system", "content": _SUMMARY_NUDGE})
         buf = ""
         async for kind, payload in self._llm.stream_with_tools(messages):
             if kind == "text":
