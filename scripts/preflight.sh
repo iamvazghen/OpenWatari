@@ -47,6 +47,9 @@ HOME_DIR=$("$PYBIN" -c "from pathlib import Path; print(Path.home().as_posix())"
 fails=0
 pass() { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; [[ -n "${2:-}" ]] && echo "        -> $2"; fails=$((fails + 1)); }
+# Loud, but not a broken invariant: a state an operator can legitimately have CHOSEN. Failing the
+# gate on those trains people to ignore it, which costs more than the thing being warned about.
+warn() { echo "  WARN  $1"; [[ -n "${2:-}" ]] && echo "        -> $2"; }
 
 echo "== preflight =="
 
@@ -130,6 +133,7 @@ fi
 if command -v powershell.exe >/dev/null 2>&1; then
   tasks=$(powershell.exe -NoProfile -Command '
     $bad = @()
+    $off = @()
     Get-ScheduledTask -ErrorAction SilentlyContinue |
       Where-Object { $_.TaskName -match "Afon|Watari|Jarvis" } |
       ForEach-Object {
@@ -147,16 +151,25 @@ if command -v powershell.exe >/dev/null 2>&1; then
             if (-not (Test-Path $f)) { $bad += "$($t.TaskName)->missing:$f" }
           }
         }
-        if ($t.TaskName -like "*Guard*" -and $t.State -eq "Disabled") {
-          $bad += "$($t.TaskName)->DISABLED"
-        }
+        # Reported separately from a broken path, because they are different events with opposite
+        # responses. A missing exe is a silent breakage nobody chose. A DISABLED task is a state
+        # somebody chose — deliberately, when Afon is taken out of production, which is exactly
+        # what happened on 2026-08-13. Failing the code gate on an operator decision teaches
+        # people to ignore the gate, and an ignored gate protects nothing.
+        if ($t.State -eq "Disabled") { $off += $t.TaskName }
       }
-    $bad -join " "' 2>/dev/null | tr -d '\r')
-  if [[ -n "${tasks// /}" ]]; then
-    fail "scheduled task(s) broken: ${tasks}" \
+    "BAD:" + ($bad -join " ") + "|OFF:" + ($off -join " ")' 2>/dev/null | tr -d '\r')
+  bad_tasks="${tasks#BAD:}"; bad_tasks="${bad_tasks%%|OFF:*}"
+  off_tasks="${tasks##*|OFF:}"
+  if [[ -n "${bad_tasks// /}" ]]; then
+    fail "scheduled task(s) broken: ${bad_tasks}" \
          "a task whose exe is missing fails silently — the edge never starts; re-run scripts/install_edge_*.ps1"
   else
     pass "scheduled tasks point at code that exists"
+  fi
+  if [[ -n "${off_tasks// /}" ]]; then
+    warn "scheduled task(s) DISABLED: ${off_tasks}" \
+         "the edge will not start or self-restart. Deliberate while Afon is out of production; otherwise: Enable-ScheduledTask -TaskName <name>"
   fi
 fi
 
