@@ -51,7 +51,6 @@ async def anticipatory_prep() -> list[Signal]:
         # Look ahead ~30 min. NB: list_events takes date/days/minutes/max — the from/to/limit this
         # used to pass were silently ignored, so it actually read the whole next DAY and announced
         # anything in it as "starting soon".
-        now = _utc_now()
         res = await list_events({"minutes": 30, "max": 4})
         # A failed/unconfigured calendar read returns prose, not events — never voice it as one.
         if tool_failed(res) or "nothing" in res.lower()[:50]:
