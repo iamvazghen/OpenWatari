@@ -1,4 +1,12 @@
-# Afon & OpenAfon — Master Plan (single source of remaining work)
+# Afon & OpenAfon — Master Plan (2026-06-24 snapshot, superseded)
+
+> **Superseded by `TODO.md`, which is the canonical roadmap.** This file is kept as the
+> 2026-06-24 snapshot of the plan and is not maintained. Do not cite it as current: it has
+> already been wrong in a way that propagated — it asserted a `bench/train_wakeword.py` that
+> has never existed, and that claim reached four other files before `ls bench/` caught it.
+> `bench/test_doc_paths.py` now fails if either roadmap cites a path that is not in the tree.
+> Anything here that is still open lives in `TODO.md`; anything that disagrees with `TODO.md`
+> is stale by definition.
 
 Date: 2026-06-24. **This file replaces all previous docs** (ROADMAP, FINISH-AND-OPENAFON-ROADMAP,
 AUDIT, PHASE-VERIFICATION, BENCHMARKS, TESTING, TASK-QUEUE-PLAN, EXPANSION-PLAN, multi-device, and the

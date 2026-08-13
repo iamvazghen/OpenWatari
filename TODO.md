@@ -1,5 +1,8 @@
 # OpenAfon / Afon — Development TODO
 
+**This is the canonical roadmap.** `docs/MASTER-PLAN.md` is the superseded 2026-06-24 snapshot
+and is not maintained; where the two disagree, this file wins (J5.1).
+
 **Goal:** behavioral production-readiness **≥ 95/100 overall (no category < 90)** and **all 22 subsystems
 genuinely Strong** — objectively, from real test/benchmark runs, never a relabel.
 
@@ -1324,7 +1327,7 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       stays noise forever.
 - [ ] **J0.4 — 218 isolated nodes (<=1 edge); the entire ops layer is one of them. (P1, VERIFIED)**
       `deploy_vps.sh`, `deploy_docs.sh`, `live-check.sh`, `install-live-check.sh`, `install-brain.sh`,
-      `verify_vps_sync.sh`, `run.sh`, `termux/install.sh`, `vps/install.sh`, `pre-push`, `post-commit`
+      `verify_vps_sync.sh`, `run.sh`, `deploy/termux/install.sh`, `deploy/vps/install.sh`, `pre-push`, `post-commit`
       — all disconnected. The graph cannot answer *"what does a deploy touch"*, which is exactly the
       question that would have caught H2.13.
 - [ ] **J0.5 — 42 thin communities (<3 nodes) are silently omitted from the report. (P2)** 16% of
@@ -1450,7 +1453,8 @@ means the nodes grouped together barely reference each other.
 - [ ] **J3.1 — 112 of 157 bench files define their own `check()`; 129 define `main()`; no shared
       harness exists. (P1, VERIFIED)** This is why `main` appears as a **community hub 14 separate
       times** and why test nodes collapse into implementation communities, depressing every cohesion
-      score in J2. One `bench/_harness.py` deletes ~112 copies of the same ten lines *and* makes the
+      score in J2. One new `bench/_harness.py` (planned, not yet written) would delete ~112 copies
+      of the same ten lines *and* make the
       graph legible. Highest structural return of anything in Part J.
 - [x] **J3.2 — DONE 2026-08-11, and it was not just tidiness: two of the three were already WRONG.**
       The cancel contract has two legs — the in-process APScheduler job and the always-on VPS ticker
@@ -1678,7 +1682,7 @@ root cause, both silent — nothing errored, the app simply started fresh.
       "VPS side of the rename" item. It forms its own island (community 229, cohesion 0.80) and is referenced from
       **nowhere** but its own usage comment. It hashes local vs remote trees — precisely what would
       have caught the orphaned `brain/tools/mynews.py` that `deploy_vps.sh`'s tar-into-tar left on
-      the live VPS. Wire it into the deploy gate; a verifier nobody calls is worse than none,
+      the live VPS (since removed by hand — it exists in neither tree now). Wire it into the deploy gate; a verifier nobody calls is worse than none,
       because its existence implies the check is happening.
 - [x] **J4.2 — `pc_agent.py` merges `LOCAL_HANDLERS` from 7 HARDCODED imports; nothing guards
       completeness. (P0, VERIFIED)** DONE 2026-08-08. The list stays EXPLICIT on purpose — it encodes
@@ -1763,10 +1767,20 @@ root cause, both silent — nothing errored, the app simply started fresh.
       over that hazard while checking for it.*
 
 ### J5 · Two sources of truth (documentation drift)
-- [ ] **J5.1 — TODO.md and docs/MASTER-PLAN.md are two separate roadmap communities. (P1)** 65
-      (cohesion 0.09) and 127 (0.11). This has already bitten once: MASTER-PLAN claimed a
-      `bench/train_wakeword.py` that has never existed, and the citation propagated to four places
-      before `ls bench/` caught it. Name one canonical roadmap; make the other point at it.
+- [x] **J5.1 — DONE 2026-08-13, and the guard found four more phantom paths on its first run.**
+      TODO.md now declares itself canonical in its header and MASTER-PLAN opens with a superseded
+      banner naming it; MASTER-PLAN keeps its content as the 2026-06-24 snapshot rather than being
+      truncated, since deleting it would lose open work nobody has re-triaged.
+      The naming is the cheap half. The half with teeth is `bench/test_doc_paths.py`: every
+      backticked repo path in TODO.md / README.md / SECURITY.md / `docs/*.md` must resolve, from the
+      root or under `src/afon/` (these docs cite modules both ways). A doc must still be able to
+      say something is ABSENT — half of this file's value is recording what was found missing — so a
+      citation is exempt when the surrounding two lines say so ("has never existed", "New `x`").
+      First run: 4 real misses. `termux/install.sh` and `vps/install.sh` are actually under
+      `deploy/`, so J0.4's own list of the disconnected ops layer had two wrong paths in it;
+      `bench/_harness.py` (J3.1) was cited as though it exists rather than as the proposal it is;
+      `brain/tools/mynews.py` read as a live orphan after it had been removed by hand. All four
+      corrected. 10/10.
 - [ ] **J5.2 — README (community 75, 22 nodes, cohesion 0.09) barely connects to code. (P2)** The
       feature tour can drift arbitrarily far from the tool registry with nothing objecting.
 - [ ] **J5.3 — Re-verify the `glasses/` TypeScript references after a graph refresh. (P2)** Community
