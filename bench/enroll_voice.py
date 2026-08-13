@@ -43,11 +43,45 @@ def _script_segments(path: Path) -> list[tuple[str, int]]:
     for m in re.finditer(r"^##\s+(Segment[^\n]*)", text, re.MULTILINE):
         header = m.group(1).strip()
         sec = SCRIPT_CLIP_S
-        hint = re.search(r"≈\s*(\d+)\s*s", header)
+        # Accept ≈ / ~ / "approx" / nothing before the number. Requiring the non-ASCII ≈ made the
+        # whole thing fail SILENTLY: swap it for a '~' (an editor, a lossy paste) and every header
+        # still matched, so enrolment still ran — just with default-length clips, producing a
+        # weaker voiceprint with no error to notice. See bench/test_enroll_script_parse.py.
+        hint = re.search(r"(?:≈|~|approx\.?)?\s*(\d+)\s*s\b", header, re.IGNORECASE)
         if hint:
             sec = int(hint.group(1)) + 3  # small buffer so the tail isn't clipped
         segs.append((f"Read aloud: '{header}'", sec))
     return segs
+
+
+def separation_verdict(owner: float, impostor: float, threshold: float) -> str:
+    """Judge the gate as a SEPARATION rather than as two independent scores.
+
+    A profile can score the owner well and still be useless: what decides whether the gate works is
+    the GAP between him and everything else, and whether the threshold sits inside it. The three
+    failing shapes are genuinely different problems with different fixes, so they get different
+    sentences rather than one "check your setup".
+    """
+    gap = owner - impostor
+    mid = (owner + impostor) / 2
+    # Order matters: a too-small GAP and a misplaced THRESHOLD look identical from the accept/reject
+    # outcome alone, and the fixes are opposite — one needs a re-enrolment, the other needs one
+    # number changed. Diagnose the gap first, then where the bar sits inside it.
+    if gap < 0.10:
+        return (f"✗ NO USABLE SEPARATION — you scored {owner:.2f} and the impostor {impostor:.2f}, a "
+                f"gap of {gap:+.2f}. No threshold can split that, so the gate would forward a "
+                "television as though you had said it. Re-enrol on the mic you actually use, in the "
+                "room you actually use.")
+    if owner < threshold:
+        return (f"✗ the threshold is above YOU ({owner:.2f} < {threshold:.2f}) — Afon would ignore "
+                f"you. There IS a {gap:.2f} gap, so lower AFON_SPEAKER_THRESHOLD to about {mid:.2f} "
+                "rather than re-enrolling.")
+    if impostor >= threshold:
+        return (f"✗ the threshold is below the IMPOSTOR ({impostor:.2f} >= {threshold:.2f}) — it "
+                f"would be let through. There IS a {gap:.2f} gap, so RAISE AFON_SPEAKER_THRESHOLD to "
+                f"about {mid:.2f}; the profile is fine.")
+    room = "well placed" if abs(threshold - mid) <= gap / 3 else f"better placed near {mid:.2f}"
+    return f"✓ separated by {gap:.2f}, and the {threshold:.2f} threshold is {room}."
 
 
 def _find_input_device(pa, hint: str = "airpods"):
@@ -158,13 +192,31 @@ def main() -> None:
     accept, score = fresh.verify(pcm, SR)
     print(f"  live score: {score:.2f} (threshold {_s.speaker_threshold})")
     if score >= max(_s.speaker_threshold + 0.1, 0.45):
-        print("  ✓ strong match — enrollment good. Restart the edge to load it.")
+        print("  ✓ strong match — enrollment good.")
     elif score >= _s.speaker_threshold:
         print("  ~ passes, but thin margin. Consider re-running; check mic distance / Bluetooth.")
     else:
         print("  ✗ WEAK MATCH — this profile would NOT reliably recognise you. The previous "
               "profile is in voiceprint.json.bak. Re-run in the conditions you normally speak "
               "(same mic, AirPods state as usual).")
+
+    # --- the OTHER half of the measurement -------------------------------------------------
+    # Everything above measures false-REJECT: does the profile recognise the owner? Nothing has
+    # ever measured false-ACCEPT, and that is precisely how a threshold that admits a television
+    # survived in production — 742 live gate decisions on 2026-08-11 accepted 186, among them a
+    # film playing in the room, in four languages. A gate is a SEPARATION, and a separation cannot
+    # be judged from one side of it.
+    print("\n--- impostor check: play a video/podcast at your normal volume, or have someone else")
+    print("    speak. (Just staying silent also works — silence should score low too.)")
+    for c in (3, 2, 1):
+        print(f"  recording in {c}…", end="\r", flush=True)
+        time.sleep(1)
+    print("  ● recording 6s — NOT your voice")
+    other = _record(6)
+    _, imp = fresh.verify(other, SR)
+    print(f"  impostor score: {imp:.2f} (owner {score:.2f}, threshold {_s.speaker_threshold})")
+    print("  " + separation_verdict(score, imp, _s.speaker_threshold))
+    print("\nRestart the edge to load the new profile.")
 
 
 if __name__ == "__main__":

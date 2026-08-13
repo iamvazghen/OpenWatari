@@ -654,12 +654,23 @@ class Settings(BaseSettings):
     # Phase 6.3 — calibrated wellbeing pushback: after this many minutes of unbroken heads-down work,
     # the proactive engine may gently suggest a break (kind='wellbeing', so etiquette-learning tunes it).
     wellbeing_session_minutes: int = 180
-    # Owner face recognition (Phase 3 — Perception). Local LBP-histogram match on haar-detected faces
-    # (no cloud, no dlib). Histogram-intersection similarity 0..1; >= this = "it's the owner". NOT
-    # identity-grade — a lighting/pose-tolerant "owner-at-desk vs stranger" heuristic. TUNE to your
-    # face + lighting: raise to reject look-alikes, lower if it fails to recognise you. Upgrade path:
-    # a real face-embedding model (dlib/insightface) if this proves too coarse.
-    face_match_threshold: float = 0.62
+    # Owner face recognition (Phase 3 — Perception). Local spatially-blocked LBP match on haar-detected
+    # faces (no cloud, no dlib). Histogram-intersection similarity 0..1; >= this = "it's the owner".
+    # NOT identity-grade — a lighting/pose-tolerant "owner-at-desk vs stranger" heuristic.
+    # 0.48 belongs to the 8x8-grid descriptor (2026-08-11) and comes from the largest real sample
+    # available: Olivetti, 40 people x 10 photos, all 79,800 pairs — same-person 0.561+-0.074,
+    # different-person 0.439+-0.039, error-equalising threshold 0.480. The old 0.62 belonged to the
+    # global histogram, which separated nobody from anybody (23.6% false-accept at ITS best setting,
+    # and best-of-N overlapped outright) — do NOT carry that number forward.
+    # PROVISIONAL: absolute similarity scales with image sharpness, and Olivetti is pre-aligned where
+    # a haar crop jitters, so this wants one calibration against the owner's own re-enrollment —
+    # which is why enroll_owner_face now reports his measured worst-case next to this number.
+    face_match_threshold: float = 0.48
+    # ArcFace cosine threshold — the REAL recogniser (uniface, `uv sync --extra vision`), used
+    # whenever the backend loads and an embedding enrollment exists. Nothing to do with the LBP
+    # number above: different space, different metric, and comparing across them is meaningless,
+    # which is why they are two settings and two files (owner.npy vs owner_emb.npy).
+    face_embed_threshold: float = 0.45
     # I1 — face as a SECOND factor on privileged (confirm-gated) actions. The voice gate cannot carry
     # authorisation on its own: measured on the live mic the owner's accept median is 0.33 while the
     # impostor ceiling is 0.30, and logs/edge.log shows 61 accepts against 0 rejections — ambient
@@ -680,7 +691,8 @@ class Settings(BaseSettings):
 
     # --- Phase 5: speaker biometrics (respond only to the owner's voice) ------------------
     speaker_id_enabled: bool = False      # gate commands by speaker match (off until enrolled)
-    speaker_profile_path: str | None = None  # default: <repo>/voiceprint.json
+    speaker_profile_path: str | None = None  # default: ~/.afon/voiceprint.json (biometric
+    #                                       data belongs in state, not in the source tree)
     room_check_on_suspicion: bool = True  # unrecognized/overlapping voice -> one camera look (3-min
     #                                       cooldown) to understand who's in the room; never a routine poll
     speaker_threshold: float = 0.30       # ECAPA cosine accept threshold. Live data (2026-07-25): owner

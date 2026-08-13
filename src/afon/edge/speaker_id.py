@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -31,9 +32,34 @@ from loguru import logger
 from afon.config import settings
 
 
+#: Where the voiceprint used to live — the repo root. It is biometric data, and biometric data does
+#: not belong in a source tree: it was only kept out of git by a `voiceprint.json*` ignore rule, one
+#: line away from being committed, and it is state rather than code so a deploy or a fresh clone had
+#: no business seeing it. It now sits with the face refs under ~/.afon/.
+_LEGACY_PROFILE = Path(__file__).resolve().parents[3] / "voiceprint.json"
+
+
 def _default_profile_path() -> Path:
-    return Path(settings.speaker_profile_path or
-                str(Path(__file__).resolve().parents[3] / "voiceprint.json"))
+    if settings.speaker_profile_path:
+        return Path(settings.speaker_profile_path)
+    return Path.home() / ".afon" / "voiceprint.json"
+
+
+def _migrate_legacy_profile(path: Path) -> None:
+    """Move a repo-root voiceprint (and its .bak) to the new home, once. Never overwrites: if both
+    exist the new one wins, because re-enrolling is what created it."""
+    if path.exists() or not _LEGACY_PROFILE.exists() or settings.speaker_profile_path:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for src, dst in ((_LEGACY_PROFILE, path),
+                         (_LEGACY_PROFILE.with_suffix(".json.bak"), path.with_suffix(".json.bak"))):
+            if src.exists() and not dst.exists():
+                dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+                src.unlink()
+        logger.info(f"voiceprint moved out of the repo to {path}")
+    except OSError as e:
+        logger.warning(f"could not move the voiceprint to {path}: {e}")
 
 
 def should_accept(score: float, threshold: float, has_profile: bool, enabled: bool) -> bool:
@@ -60,6 +86,12 @@ class SpeakerVerifier:
     def __init__(self, embedder=None) -> None:
         self._embedder = embedder           # callable(pcm_float32_mono_16k) -> np.ndarray | None
         self._tried_load = embedder is not None
+        # Loading ECAPA takes ~56s (measured). It is warmed on a background thread at edge start so
+        # the edge is listening in ~1s instead of ~57s, which means a real utterance CAN arrive
+        # mid-load. Without this lock the second caller sees `_tried_load` already True, gets None,
+        # and verify() fails OPEN — the gate would be silently off for the first minute after every
+        # restart, and the audio watchdog restarts the edge on a device change mid-day.
+        self._load_lock = threading.Lock()
         self._profile: np.ndarray | None = None
         self._load_profile()
 
@@ -70,6 +102,7 @@ class SpeakerVerifier:
     # 0.37-0.52 with AirPods off but 0.05-0.28 with AirPods on, against the SAME mean profile.
     def _load_profile(self) -> None:
         path = _default_profile_path()
+        _migrate_legacy_profile(path)
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -92,6 +125,7 @@ class SpeakerVerifier:
         under different acoustics (AirPods connected) ADDS coverage instead of replacing it.
         Always leaves a ``.bak`` of the previous profile — recovery was impossible without it."""
         path = _default_profile_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         arr = np.atleast_2d(np.asarray(embedding, dtype=np.float32))
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
@@ -121,8 +155,16 @@ class SpeakerVerifier:
                     "label_encoder.ckpt", "mean_var_norm_emb.ckpt")
 
     def _ensure_embedder(self):
-        if self._embedder is not None or self._tried_load:
+        if self._embedder is not None:
             return self._embedder
+        # Serialise the load. A caller arriving mid-load BLOCKS here and then gets the real
+        # embedder, rather than being told the backend is unavailable (which fails open).
+        with self._load_lock:
+            if self._embedder is not None or self._tried_load:
+                return self._embedder
+            return self._load_embedder()
+
+    def _load_embedder(self):
         self._tried_load = True
         try:
             import torch  # noqa: F401

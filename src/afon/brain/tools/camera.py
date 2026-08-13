@@ -28,6 +28,13 @@ _FACE_DIR = Path.home() / ".afon" / "faces"
 _OWNER_REFS = _FACE_DIR / "owner.npy"
 _MAX_REFS = 80   # newest refs kept across enrollment sessions (append, don't clobber)
 
+# ArcFace embeddings — the real recogniser. SEPARATE file, separate threshold, separate metric:
+# 512-dim cosine has nothing to do with 256-bin histogram intersection, and a number from one
+# compared against the other is noise wearing a decimal point. Enrollment writes BOTH, so whichever
+# backend is available at recognition time finds itself enrolled.
+_OWNER_EMB = _FACE_DIR / "owner_emb.npy"
+_EMB_DIM = 512
+
 
 def _capture_jpeg(index: int = 0, warmup: int = 20, min_brightness: float = 12.0) -> bytes | None:
     """Grab ONE well-exposed JPEG frame from the webcam. Returns bytes, or None if no frame at all.
@@ -167,6 +174,30 @@ def _lbp_hist(gray) -> "list":
     return hist / s if s else hist
 
 
+#: Cells per side for the face signature. A face is identified by WHERE its textures sit, not by
+#: which textures it has: one global histogram over the whole crop is blind to layout, and measured
+#: against the live refs on 2026-08-11 that blindness was total — a photo of a different person
+#: scored 0.815 against the owner's 75 refs, higher than the owner's own median of 0.712, clearing
+#: the 0.62 bar against 48 of them. Mean-to-refs was 0.700 for the stranger vs 0.709 for the owner:
+#: no threshold could separate them because the descriptor carried no identity at all. Splitting the
+#: crop into an 8x8 grid and concatenating the per-cell histograms (what OpenCV's LBPHFaceRecognizer
+#: actually does) restores it: same-person 0.446-0.656 vs different-person 0.263-0.351, separable
+#: with margin. See bench/test_face_identity_separation.py.
+_GRID = 8
+_SIG_LEN = _GRID * _GRID * 256
+
+
+def _face_signature(gray) -> "list":
+    """Spatially-blocked LBP signature of a 100x100 face crop — the identity descriptor."""
+    import numpy as np
+
+    step = gray.shape[0] // _GRID
+    cells = [_lbp_hist(gray[gy * step:(gy + 1) * step + 2, gx * step:(gx + 1) * step + 2])
+             for gy in range(_GRID) for gx in range(_GRID)]
+    v = np.concatenate(cells)
+    return v / (v.sum() or 1.0)
+
+
 def _similarity(h1, h2) -> float:
     """Histogram intersection of two normalised histograms: 1.0 identical, 0.0 disjoint."""
     import numpy as np
@@ -174,46 +205,194 @@ def _similarity(h1, h2) -> float:
     return float(np.minimum(h1, h2).sum())
 
 
+def _best_similarity(sig, refs) -> float:
+    """Best intersection against any ref, in one vectorised pass (refs is (n, _SIG_LEN))."""
+    import numpy as np
+
+    return float(np.minimum(refs, sig).sum(axis=1).max())
+
+
+# ---- ArcFace backend (optional: `uv sync --extra vision`) --------------------------------------
+
+_ARC: "tuple | None | bool" = None    # None = untried, False = unavailable, tuple = (detector, recogniser)
+
+
+def _arcface():
+    """(detector, recogniser) or None. Loaded once, lazily — importing onnxruntime and reading two
+    ONNX files costs ~1s, and the LBP path must keep working on a machine that has neither.
+
+    Deliberately silent about WHY beyond one warning: an owner without the vision extra installed
+    should get a working face-counter, not a stack trace every time he walks past the camera.
+    """
+    global _ARC
+    if _ARC is not None:
+        return _ARC or None
+    try:
+        from uniface.detection import SCRFD
+        from uniface.recognition import ArcFace
+
+        _ARC = (SCRFD(), ArcFace())
+        logger.info("face recognition: ArcFace + SCRFD loaded")
+    except Exception as e:  # noqa: BLE001 — no uniface, no models, no network on first run
+        _ARC = False
+        logger.warning(f"face recognition: ArcFace unavailable ({type(e).__name__}); "
+                       "falling back to the local LBP signature. Install: uv sync --extra vision")
+    return _ARC or None
+
+
+def _embed_faces(jpeg: bytes) -> list:
+    """Every face in a frame as a normalised 512-d ArcFace embedding, or [] if the backend is off.
+
+    The landmarks matter more than anything else here: ArcFace is trained on 5-point-aligned crops,
+    and feeding it an unaligned box costs most of its accuracy. SCRFD returns the landmarks with the
+    box, so alignment is free — skipping it would be the classic way to wire this up and get a
+    fraction of the model people quote.
+    """
+    import numpy as np
+
+    arc = _arcface()
+    if arc is None:
+        return []
+    det, rec = arc
+    import cv2
+
+    img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return []
+    out = []
+    try:
+        for f in det.detect(img):
+            emb = np.asarray(rec.get_embedding(img, np.asarray(f.landmarks))).ravel()
+            n = float(np.linalg.norm(emb))
+            if n:
+                out.append(emb / n)
+    except Exception as e:  # noqa: BLE001 — a bad frame must not take the camera down
+        logger.warning(f"face embedding failed ({type(e).__name__}: {e})")
+        return []
+    return out
+
+
+def _owner_embeddings():
+    """Enrolled ArcFace embeddings, or None. Wrong-width files are refused for the same reason the
+    LBP ones are: a comparison across two incompatible spaces is not a weak answer, it is no answer."""
+    import numpy as np
+
+    if not _OWNER_EMB.exists():
+        return None
+    try:
+        e = np.load(_OWNER_EMB)
+        if not len(e):
+            return None
+        if e.shape[1] != _EMB_DIM:
+            logger.warning(f"face embeddings are {e.shape[1]}-wide, expected {_EMB_DIM} — ignoring")
+            return None
+        return e
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _owner_refs():
-    """Load enrolled owner histograms, or None if the owner's face hasn't been learned yet."""
+    """Load enrolled owner signatures, or None if the owner's face hasn't been learned yet.
+
+    Refs saved by the pre-2026-08-11 global-histogram descriptor are 256-wide and are REJECTED here:
+    they cannot be compared against the current signature, and scoring them anyway is how a stranger
+    got read as the owner. Rejecting them degrades to face-COUNTING and asks for a re-enrollment,
+    which is honest; silently mis-scoring them is not.
+    """
     import numpy as np
 
     if not _OWNER_REFS.exists():
         return None
     try:
         refs = np.load(_OWNER_REFS)
-        return refs if len(refs) else None
+        if not len(refs):
+            return None
+        if refs.shape[1] != _SIG_LEN:
+            logger.warning(
+                f"face refs are the old {refs.shape[1]}-wide format (no spatial layout — it could "
+                "not tell the owner from a stranger). Ignoring them; say 'learn my face' to re-enrol."
+            )
+            return None
+        return refs
     except Exception:  # noqa: BLE001 — a corrupt ref file just means "not enrolled"
         return None
 
 
 def _enroll_from_jpegs(jpegs: list) -> int:
-    """Enrol the owner from frames: store the LBP histogram of every detected face. APPENDS to any
+    """Enrol the owner from frames: store the signature of every detected face. APPENDS to any
     existing refs (each session adds lighting/angle diversity instead of discarding it), keeping the
-    newest ``_MAX_REFS``. Returns the number of refs now stored."""
+    newest ``_MAX_REFS``. Returns the number of refs now stored.
+
+    Frames showing more than one face are SKIPPED: every detected face was being enrolled as the
+    owner, so anyone standing behind him during enrollment became a permanent "owner" reference, and
+    with best-of-N matching one such ref is enough to let that person through forever.
+    """
     import numpy as np
 
-    hists = [_lbp_hist(f) for j in jpegs for f in _gray_faces(j)]
-    if not hists:
-        return 0
+    solo = [j for j in jpegs if len(_gray_faces(j)) == 1]
+    sigs = [_face_signature(f) for j in solo for f in _gray_faces(j)]
+
+    # Write BOTH formats from the same frames. Enrolling only the backend that happens to be
+    # available today leaves the other one silently unenrolled — and "unenrolled" degrades to
+    # face-COUNTING, so the owner would find recognition had quietly stopped after an install.
+    embs = [e for j in solo for e in _embed_faces(j)] if _arcface() is not None else []
+    if embs:
+        old_e = _owner_embeddings()
+        if old_e is not None:
+            embs = list(old_e) + embs
+        _FACE_DIR.mkdir(parents=True, exist_ok=True)
+        np.save(_OWNER_EMB, np.array(embs[-_MAX_REFS:]))
+
+    if not sigs:
+        return len(embs[-_MAX_REFS:]) if embs else 0
     old = _owner_refs()
     if old is not None:
-        hists = list(old) + hists
-    hists = hists[-_MAX_REFS:]
+        sigs = list(old) + sigs
+    sigs = sigs[-_MAX_REFS:]
     _FACE_DIR.mkdir(parents=True, exist_ok=True)
-    np.save(_OWNER_REFS, np.array(hists))
-    return len(hists)
+    np.save(_OWNER_REFS, np.array(sigs))
+    return len(sigs)
 
 
 def _recognise(jpeg: bytes, refs) -> tuple[int, bool]:
-    """(face_count, owner_matched) for a frame given enrolled refs. Matched only if a face clears the
-    similarity threshold against the best-matching enrolled sample."""
+    """(face_count, owner_matched) for a frame. Uses ArcFace when both the backend and an embedding
+    enrollment are available, and the LBP signature otherwise — the two never mix.
+
+    ``refs`` stays the LBP refs so every existing caller keeps working; the embeddings are looked up
+    here because only this function knows which backend it ended up using.
+    """
+    import numpy as np
+
+    embs = _owner_embeddings()
+    if embs is not None:
+        live = _embed_faces(jpeg)
+        if live:
+            thr = settings.face_embed_threshold
+            return len(live), any(float((embs @ e).max()) >= thr for e in live)
+        if _arcface() is not None:
+            return 0, False       # backend is up and saw nobody — that is an answer, not a gap
     faces = _gray_faces(jpeg)
     if not faces:
         return 0, False
     thr = settings.face_match_threshold
-    matched = any(max(_similarity(_lbp_hist(f), r) for r in refs) >= thr for f in faces)
+    matched = any(_best_similarity(_face_signature(f), refs) >= thr for f in faces)
     return len(faces), matched
+
+
+def _majority_matched(results: list) -> bool:
+    """Did MOST of the frames that saw a face see the owner?
+
+    ``visual_presence`` greets on any single matching frame, which is right for a greeting — a
+    glance away should not make him invisible. Authorisation is the opposite trade: a burst of 12
+    gives a stranger twelve independent chances to clear the bar once, so "any" turns a per-frame
+    false-accept rate into a near-certainty. Measured per-frame FAR for this descriptor is ~14%
+    (Olivetti, 40 people); any-of-12 makes that better than even odds, a majority of 12 makes it
+    negligible, and the owner's own frames pass often enough that a majority still clears easily.
+
+    Frames with no face at all are not votes against him — he looked away, that is all.
+    """
+    voting = [m for c, m in results if c > 0]
+    return len(voting) >= 2 and sum(voting) * 2 > len(voting)
 
 
 async def _camera_capture_local(args: dict) -> str:
@@ -325,7 +504,7 @@ async def _verify_owner_present_local(_args: dict) -> str:
             return json.dumps({"available": False, "matched": False, "faces": 0})
         results = [await asyncio.to_thread(_recognise, j, refs) for j in jpegs]
         return json.dumps({"available": True,
-                           "matched": any(m for _, m in results),
+                           "matched": _majority_matched(results),
                            "faces": max((c for c, _ in results), default=0)})
     except Exception as e:  # noqa: BLE001 — an unreadable camera is "can't tell", never "not him"
         logger.warning(f"face second factor: camera check failed ({type(e).__name__}: {e})")
@@ -354,8 +533,40 @@ async def _enroll_owner_face_local(args: dict) -> str:
         return tool_error("enroll_owner_face", e)
     if n <= 0:
         return ("I couldn't spot a face to learn, sir — sit facing the camera in good light and try "
-                "'learn my face' again.")
-    return f"Learned your face, sir — {n} reference{'s' if n != 1 else ''} captured. I'll recognise you now."
+                "'learn my face' again. If someone else is in shot, those frames are skipped.")
+    margin = _enrollment_margin()
+    return (f"Learned your face, sir — {n} reference{'s' if n != 1 else ''} captured. "
+            f"I'll recognise you now.{margin}")
+
+
+def _enrollment_margin() -> str:
+    """One sentence of calibration: how well the owner's own frames match each other, against the
+    threshold they must clear. The threshold is a constant carried from a public dataset, so without
+    this the owner has no way to know it fits HIS camera and lighting until recognition quietly stops
+    working (or quietly stops discriminating). Same-session frames are correlated, so treat this as a
+    ceiling, not a guarantee — it is meant to catch a bad number, not to certify a good one."""
+    import numpy as np
+
+    # Measure whichever backend recognition will ACTUALLY use. Reporting the LBP margin while
+    # ArcFace does the deciding would calibrate the path nobody is on.
+    embs = _owner_embeddings()
+    if embs is not None and _arcface() is not None and len(embs) >= 2:
+        sims, thr, knob = embs @ embs.T, settings.face_embed_threshold, "AFON_FACE_EMBED_THRESHOLD"
+        np.fill_diagonal(sims, -1.0)
+        worst = float(sims.max(axis=1).min())
+    else:
+        refs = _owner_refs()
+        if refs is None or len(refs) < 2:
+            return ""
+        thr, knob = settings.face_match_threshold, "AFON_FACE_MATCH_THRESHOLD"
+        worst = float(min(np.minimum(refs, refs[i]).sum(axis=1)[np.arange(len(refs)) != i].max()
+                          for i in range(len(refs))))
+    if worst < thr:
+        return (f" One caution: your own frames only reach {worst:.2f} against a {thr:.2f} bar, so "
+                f"I'd miss you often — better light, or lower {knob}.")
+    if worst < thr + 0.05:
+        return f" Margin is thin though ({worst:.2f} against a {thr:.2f} bar) — worth re-running in the light you normally sit in."
+    return f" Your own frames match at {worst:.2f} against a {thr:.2f} bar, sir — comfortable."
 
 
 SCHEMAS = [
@@ -410,7 +621,8 @@ SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "camera_index": {"type": "integer", "description": "Webcam index (default 0)."},
-                    "frames": {"type": "integer", "description": "How many frames to sample (default 6)."},
+                    "frames": {"type": "integer",
+                               "description": "How many frames to sample (default 24, 6-30)."},
                 },
                 "required": [],
             },

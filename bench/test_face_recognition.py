@@ -40,6 +40,8 @@ def _face(kind: str) -> np.ndarray:
     is what makes their LBP histograms person-specific; fine (period-1) patterns model that, so two
     different 'faces' genuinely separate under LBP instead of both collapsing to the flat-region code."""
     x, y = np.meshgrid(np.arange(100), np.arange(100))
+    if kind == "noise":   # a stranger: unstructured, so it shares no layout with the striped 'faces'
+        return np.random.default_rng(4).integers(0, 256, (100, 100), dtype=np.uint8)
     m = {"v": x % 2, "h": y % 2, "checker": (x + y) % 2}[kind]
     return (np.asarray(m).astype(np.uint8) * 255)
 
@@ -74,7 +76,12 @@ async def main() -> None:
         cnt, matched = camera._recognise(b"frame", refs)
         check("owner is recognised", cnt == 1 and matched is True)
 
-        camera._gray_faces = lambda jpeg: [_face('h')]         # a stranger (orthogonal structure)
+        # A stranger, and deliberately NOT _face('h'): every pair of these two-tone stripe patterns
+        # scores exactly 0.500 under both descriptors, so that check only ever asserted "the
+        # threshold constant is above 0.5" — it would have gone green for a recogniser that
+        # recognised nobody. Real identity separation is measured in test_face_identity_separation.py;
+        # this one only has to prove the roundtrip wires up.
+        camera._gray_faces = lambda jpeg: [_face('noise')]
         _, matched2 = camera._recognise(b"frame", refs)
         check("a stranger is rejected", matched2 is False)
 

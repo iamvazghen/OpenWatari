@@ -176,10 +176,18 @@ def build_worker(brain: AfonBrain | None = None) -> PipelineWorker:
 
         gate = SpeakerGate()
         if gate._verifier.has_profile:
-            # Warm the ECAPA embedder now: it otherwise cold-loads on the FIRST utterance (~35s),
-            # which the owner experiences as a long lag before the first reply. One-time cost at boot.
-            gate._verifier._ensure_embedder()
-            logger.info("speaker-id: ON — only the owner's enrolled voice will be obeyed")
+            # Warm ECAPA on a BACKGROUND thread. Loading it takes ~56s (measured), and doing that
+            # here meant the edge was deaf for ~56s after every start — including the mid-day
+            # restarts the audio watchdog performs on a device change, where the owner just finds
+            # Afon not listening and no explanation anywhere. Off the boot path the edge is live in
+            # about a second; an utterance arriving mid-load blocks on the verifier's load lock and
+            # is then checked properly, rather than being waved through.
+            import threading
+
+            threading.Thread(target=gate._verifier._ensure_embedder,
+                             name="ecapa-warm", daemon=True).start()
+            logger.info("speaker-id: ON — only the owner's enrolled voice will be obeyed "
+                        "(ECAPA warming in the background)")
         else:
             logger.warning("speaker-id enabled but no voiceprint — run bench/enroll_voice.py "
                            "(gate is a no-op until enrolled)")
