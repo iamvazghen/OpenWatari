@@ -72,14 +72,14 @@ async def _schedule_deadline_reminder(title: str, epoch: float) -> str | None:
         return None
 
 
-def _cancel_reminder(t) -> None:
+async def _cancel_reminder(t) -> None:
     job_id = (t.meta or {}).get("reminder_job")
     if not job_id:
         return
     try:
-        from afon.brain.scheduler import SCHEDULER
+        from afon.brain.scheduler import cancel_everywhere
 
-        SCHEDULER.cancel(job_id)
+        await cancel_everywhere(job_id)   # NOT SCHEDULER.cancel: that left the ticker nagging
     except Exception as e:  # noqa: BLE001
         logger.warning(f"deadline reminder cancel failed: {e}")
 
@@ -150,7 +150,7 @@ async def update_task(args: dict) -> str:
         return "What should I change, sir — description, priority, deadline, or progress?"
     try:
         if reschedule:  # cancel the old spoken reminder before setting a new one
-            _cancel_reminder(t)
+            await _cancel_reminder(t)
             t.meta.pop("reminder_job", None)
         TASKS.edit_todo(t.id, **fields)
         if reschedule and fields["deadline"] is not None:
@@ -171,7 +171,7 @@ async def complete_task(args: dict) -> str:
     if t is None:
         return msg
     try:
-        _cancel_reminder(t)
+        await _cancel_reminder(t)
         TASKS.complete_todo(t.id)
         return f"Marked '{t.title}' done, sir. Nice work."
     except Exception as e:  # noqa: BLE001
@@ -186,7 +186,7 @@ async def delete_task(args: dict) -> str:
     if t is None:
         return msg
     try:
-        _cancel_reminder(t)
+        await _cancel_reminder(t)
         TASKS.drop(t.id)
         return f"Deleted '{t.title}' from your list, sir."
     except Exception as e:  # noqa: BLE001

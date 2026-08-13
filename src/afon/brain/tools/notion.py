@@ -430,7 +430,19 @@ async def overdue_and_today() -> tuple[list[str], list[str]]:
         if not p["date"]:
             return [], []
         data = await _post(f"/databases/{db_id}/query", {"page_size": 100})
-    except Exception:  # noqa: BLE001 — never throw into the digest/tick
+    except Exception as e:  # noqa: BLE001 — never throw into the digest/tick
+        # ...but never let it look like SILENCE either. A retired database id 404s here, and
+        # returning ([], []) makes that indistinguishable from "nothing due" — which is exactly
+        # how the 06:00 digest reported an empty day for weeks while 7 tasks sat overdue
+        # (2026-08-11: notion_tasks_db_id still pointed at the dead 9c5a572c… queue).
+        try:
+            from afon.shared import errors as _err
+
+            _err.swallowed("notion.overdue_and_today", e,
+                           note=f"tasks DB {db_id[:8]}… unreadable: {type(e).__name__}: {e}")
+        except Exception:  # noqa: BLE001
+            pass
+        logger.warning(f"notion digest source failed for db {db_id[:8]}…: {type(e).__name__}: {e}")
         return [], []
     overdue: list[str] = []
     due_today: list[str] = []
@@ -514,7 +526,13 @@ def _schema_map(schema: dict) -> dict:
             for o in m["status_options"]:
                 if o.lower() in {"done", "complete", "completed", "closed"}:
                     m["status_done"] = o
-        elif tp == "select" and m["select"] is None:
+        elif tp == "select" and (m["select"] is None or any(
+                k in low for k in ("priority", "prio", "importance", "urgency"))):
+            # Name heuristic, matching the date/status branches above. Without it this took the
+            # FIRST select in dict order, and the owner's live Task Queue lists four
+            # (Recurrence, Priority, Project, Owner agent) — so "priority" bound to *Recurrence*,
+            # "Low" was not a valid option, no property was built, and `notion_update_task`
+            # answered "What should I change, sir?" to a request that named exactly what to change.
             m["select"] = name
             m["select_options"] = [o["name"] for o in meta.get("select", {}).get("options", [])]
         elif tp == "multi_select" and m["multi_select"] is None:
@@ -634,7 +652,7 @@ async def _set_task_reminder(page_id: str, title: str, when_str: str) -> bool:
     return False
 
 
-def _cancel_task_reminder(page_id: str) -> None:
+async def _cancel_task_reminder(page_id: str) -> None:
     if not page_id:
         return
     m = _load_task_reminders()
@@ -642,9 +660,9 @@ def _cancel_task_reminder(page_id: str) -> None:
     if not job_id:
         return
     try:
-        from afon.brain.scheduler import SCHEDULER
+        from afon.brain.scheduler import cancel_everywhere
 
-        SCHEDULER.cancel(job_id)
+        await cancel_everywhere(job_id)   # NOT SCHEDULER.cancel: that left the ticker nagging
     except Exception as e:  # noqa: BLE001
         logger.warning(f"notion reminder cancel failed: {e}")
     _save_task_reminders(m)
@@ -689,12 +707,27 @@ async def notion_update_task(args: dict) -> str:
         m = _schema_map(await _get(f"/databases/{db_id}"))
         props = _build_task_props(m, args, for_create=False)
         if not props and "reminder" not in args:
+            # Distinguish "you didn't say what to change" from "you did, but that value isn't one
+            # this database offers". They used to give the SAME reply, so asking to set priority
+            # Low on a DB whose options are P0/P1/P2 was answered "What should I change?" — a
+            # question about something the owner had just been explicit about.
+            asked = [k for k in ("status", "priority", "category", "deadline", "notes") if args.get(k)]
+            if asked:
+                offers = {"priority": m["select_options"], "status": m["status_options"],
+                          "category": m["multi_options"]}
+                for field in asked:
+                    opts = offers.get(field)
+                    if opts:
+                        return (f"'{args[field]}' isn't one of the {field} options in that database, "
+                                f"sir — it offers {', '.join(opts)}.")
+                return (f"I couldn't apply {', '.join(asked)} to that task, sir — the database has no "
+                        "matching property.")
             return "What should I change, sir — status, deadline, or priority?"
         if props:
             await _patch(f"/pages/{page_id}", {"properties": props})
         # Deadline (or explicit reminder) changed -> reschedule the spoken reminder for this task.
         if "deadline" in args or "reminder" in args:
-            _cancel_task_reminder(page_id)
+            await _cancel_task_reminder(page_id)
             when = (args.get("reminder") or args.get("deadline") or "").strip()
             if when:
                 await _set_task_reminder(page_id, title or "your task", when)
@@ -740,7 +773,7 @@ async def notion_complete_task(args: dict) -> str:
                 try:
                     await _patch(f"/pages/{p['id']}",
                                  {"properties": {m["status"]: {"status": {"name": done}}}})
-                    _cancel_task_reminder(p["id"])
+                    await _cancel_task_reminder(p["id"])
                     n += 1
                 except Exception:  # noqa: BLE001 — one failure must not abort the sweep
                     continue
@@ -750,7 +783,7 @@ async def notion_complete_task(args: dict) -> str:
         if err:
             return err
         await _patch(f"/pages/{page_id}", {"properties": {m["status"]: {"status": {"name": done}}}})
-        _cancel_task_reminder(page_id)  # done -> no need to nag about the deadline
+        await _cancel_task_reminder(page_id)  # done -> no need to nag about the deadline
         return f"Marked '{title or 'that task'}' as {done}, sir."
     except Exception as e:  # noqa: BLE001
         return tool_error("Notion complete task", e)
@@ -768,7 +801,7 @@ async def notion_delete_task(args: dict) -> str:
         if err:
             return err
         await _patch(f"/pages/{page_id}", {"archived": True})
-        _cancel_task_reminder(page_id)  # gone -> cancel any pending deadline reminder
+        await _cancel_task_reminder(page_id)  # gone -> cancel any pending deadline reminder
         return f"Deleted '{title or 'that task'}' from your tasks, sir."
     except Exception as e:  # noqa: BLE001
         return tool_error("Notion delete task", e)

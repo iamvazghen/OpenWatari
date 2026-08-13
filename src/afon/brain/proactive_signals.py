@@ -60,9 +60,15 @@ async def anticipatory_prep() -> list[Signal]:
         first_line = res.splitlines()[0] if res else ""
         if not first_line.strip():
             return []
-        msg = (f"Heads up: '{first_line.strip()[:120]}' is starting soon. "
+        event = first_line.strip()[:120]
+        msg = (f"Heads up: '{event}' is starting soon. "
                "Want me to pull the last emails from the attendees?")
-        return [Signal(key=f"anticipatory-{now.isoformat()}", message=msg,
+        # Key by the EVENT, not the clock. This was f"anticipatory-{now.isoformat()}" — a fresh
+        # microsecond timestamp on every tick, so the engine's repeat-suppression (which matches on
+        # signal.key) could NEVER match it. A meeting 30 minutes out therefore produced a brand-new
+        # "starting soon" signal every 5-minute tick: up to 6 nudges for one event, held back only
+        # by the daily budget. `calendar_signals` had this right all along (`cal-{ev.id}`).
+        return [Signal(key=f"anticipatory-{event.lower()}", message=msg,
                        urgency=0.7, kind="calendar-prep")]
     except Exception as e:  # noqa: BLE001
         _swallowed("anticipatory_prep", e)

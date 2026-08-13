@@ -11,7 +11,7 @@ import re
 from loguru import logger
 
 from afon.brain.scheduler import SCHEDULER
-from afon.brain.tools.base import tool_error
+from afon.brain.tools.base import missing_arg, tool_error
 from afon.config import settings
 
 # A relative delay phrase a model may put anywhere ("in 90 minutes", "90 min", "in 2 hours", "in a day").
@@ -83,29 +83,18 @@ async def _register_daily_with_ticker(job_id: str, message: str, daily: str) -> 
         return False
 
 
-async def _cancel_on_ticker(job_id: str) -> None:
-    """Best-effort: drop a reminder from the VPS ticker too. Never raises."""
-    if not settings.ticker_url:
-        return
-    try:
-        import httpx
-
-        headers = {}
-        if settings.ticker_token:
-            headers["Authorization"] = f"Bearer {settings.ticker_token}"
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-            await c.post(
-                f"{settings.ticker_url.rstrip('/')}/reminders/cancel",
-                json={"id": job_id}, headers=headers,
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"ticker cancel failed: {type(e).__name__}: {e}")
+# _cancel_on_ticker moved to scheduler.cancel_everywhere -- it is part of the CANCEL CONTRACT, and
+# keeping it here is what let two other modules cancel a reminder while forgetting the ticker.
 
 
 async def set_reminder(args: dict) -> str:
     message, in_minutes, at, daily = _normalize_reminder_args(args)
     if not message:
-        return "What should I remind you about, sir?"
+        # Keep this list identical to _normalize_reminder_args above, plus the timing keys --
+        # a spelling it accepts but this rejects would error on a call that was actually fine.
+        return missing_arg("set_reminder", args, "message", "text", "reminder", "task", "about",
+                           "what", "content", "in_minutes", "minutes", "at", "time", "when", "daily",
+                           ask="What should I remind you about, sir?")
     if in_minutes is None and not at and not daily:
         return "When should I remind you, sir? Give me a delay, a time, or a daily time."
     try:
@@ -151,8 +140,9 @@ async def cancel_reminder(args: dict) -> str:
     try:
         # Allow a short id prefix from the spoken list.
         full = next((jid for jid, _, _ in SCHEDULER.list_reminders() if jid.startswith(job_id)), job_id)
-        ok = SCHEDULER.cancel(full)
-        await _cancel_on_ticker(full)  # best-effort: also drop it from the always-on host
+        from afon.brain.scheduler import cancel_everywhere
+
+        ok = await cancel_everywhere(full)   # in-process job + the always-on VPS ticker
         return "Cancelled, sir." if ok else f"I couldn't find a reminder '{job_id}', sir."
     except Exception as e:  # noqa: BLE001
         return tool_error("reminder cancel", e)

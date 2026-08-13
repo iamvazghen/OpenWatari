@@ -90,8 +90,14 @@ async def main() -> None:
     check("spoken as a 'task due' announcement", any("Task due" in m for m in spoke), str(spoke)[:200])
 
     print("\n[4] update (priority), then complete, then delete — and clean up")
-    up = await nt.notion_update_task({"query": marker, "priority": "Low"})
-    check("update confirmed", "Updated" in up, up)
+    # Ask for a priority the CONFIGURED database actually offers. This used to hard-code "Low",
+    # which silently assumed one owner's vocabulary: the live Task Queue grades P0/P1/P2, so the
+    # test failed on a schema difference and read exactly like a code regression. A live e2e test
+    # has to take the schema as it finds it.
+    _m = nt._schema_map(await nt._get(f"/databases/{nt._tasks_db({})}"))
+    _pri = (_m["select_options"] or ["Low"])[-1]
+    up = await nt.notion_update_task({"query": marker, "priority": _pri})
+    check(f"update confirmed (priority={_pri})", "Updated" in up, up)
     comp = await nt.notion_complete_task({"query": marker})
     check("complete confirmed", "Marked" in comp or "as " in comp, comp)
     # delete (archive) so the test leaves no residue

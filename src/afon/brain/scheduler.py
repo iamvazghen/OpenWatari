@@ -84,26 +84,7 @@ async def _fire_briefing() -> None:
         msg = "Good morning, sir. Here's your catch-up. " + body
     daily_digest.mark_delivered("push", datetime.now(USER_TZ))
     logger.info("firing daily digest briefing")
-    if _BRIEFING_EMIT is not None:
-        try:
-            res = _BRIEFING_EMIT(msg, 0.6, True)
-            if hasattr(res, "__await__"):
-                await res
-            return
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"briefing proactive-emit failed ({e}); falling back to speak+push")
-    # Fallback (no proactive emitter wired): speak on the live edge + push to phone.
-    if _LIVE_SPEAK is not None:
-        try:
-            _LIVE_SPEAK(msg)
-        except Exception:  # noqa: BLE001
-            pass
-    try:
-        from afon.brain.tools.notify import push
-
-        await push(msg, title="Afon — today")
-    except Exception:  # noqa: BLE001
-        pass
+    await _emit_proactive(msg, 0.6, "Afon — today")
 
 
 async def _fire_backlog() -> None:
@@ -158,25 +139,7 @@ async def _fire_objectives() -> None:
     if not msg:
         return
     logger.info(f"objectives advanced: {len(advanced)} — reporting")
-    if _BRIEFING_EMIT is not None:
-        try:
-            r = _BRIEFING_EMIT(msg, 0.55, True)
-            if hasattr(r, "__await__"):
-                await r
-            return
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"objectives proactive-emit failed ({e}); falling back to speak+push")
-    if _LIVE_SPEAK is not None:
-        try:
-            _LIVE_SPEAK(msg)
-        except Exception:  # noqa: BLE001
-            pass
-    try:
-        from afon.brain.tools.notify import push
-
-        await push(msg, title="Afon — objectives")
-    except Exception:  # noqa: BLE001
-        pass
+    await _emit_proactive(msg, 0.55, "Afon — objectives")
 
 
 async def _fire_pattern_scan() -> None:
@@ -202,17 +165,13 @@ async def _fire_weekly_review() -> None:
             return
         body = "Afon learned these facts this week, sir — anything to correct or forget?\n\n"
         body += "\n".join(f"  • {f}" for f in recent)
-        # Surface via the proactive engine (it'll DM Telegram / nudge) if the brain has one.
-        try:
-            from afon.brain.proactive import proactive  # noqa: F401  may not exist as instance
-            sched = get_scheduler()
-            if hasattr(sched, "_proactive") and sched._proactive:  # type: ignore[attr-defined]
-                sched._proactive.request_speak(body)  # type: ignore[attr-defined]
-                return
-        except Exception:
-            pass
-        # Fallback: log so the next session surfaces it.
-        logger.info(f"weekly memory review prompt:\n{body}")
+        # Deliver it the same way every other autonomous job does. What was here before called
+        # `get_scheduler()`, which does not exist in this module and never has: the NameError was
+        # swallowed by a bare `except Exception: pass`, so every weekly review fell through to the
+        # "fallback" below — and the comment on that fallback ("log so the next session surfaces
+        # it") described something nobody implemented. The review has therefore never reached the
+        # owner. Same shape as the `_fire_backlog` bug: logged, counted as done, never reported.
+        await _emit_proactive(body, 0.45, "Afon — weekly memory review")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"weekly memory review failed: {e}")
 
@@ -523,12 +482,56 @@ class Scheduler:
         return out
 
     def cancel(self, job_id: str) -> bool:
+        """Cancel the IN-PROCESS job only. Prefer ``cancel_everywhere`` — see its docstring."""
         sched = self._ensure()
         try:
             sched.remove_job(job_id)
             return True
         except Exception:  # noqa: BLE001
             return False
+
+
+async def cancel_everywhere(job_id: str) -> bool:
+    """THE cancel path for a reminder: the in-process job AND the always-on VPS ticker.
+
+    A reminder can live in up to three places — APScheduler here, the VPS ticker, and (for one-shots
+    inside its window) an ntfy server-side push. Cancelling used to be open-coded in three modules,
+    and only ONE of them remembered the ticker: `tasks._cancel_reminder` and
+    `notion._cancel_task_reminder` called `SCHEDULER.cancel()` alone, so completing a to-do or a
+    Notion task killed the local job and left the ticker to nag about a deadline already met.
+    The divergence had a mundane cause worth recording — the ticker call is async and those two
+    helpers were sync, so they simply could not await it. Every one of their seven call sites is
+    already inside an `async def`, so the sync-ness bought nothing.
+
+    Returns whether the in-process job was found; the ticker leg is best-effort and never raises.
+
+    KNOWN GAP, deliberately not papered over: an ntfy push scheduled with the `At` header cannot be
+    recalled — ntfy exposes no cancel for a message it has already accepted. So a one-shot inside
+    ntfy's window still reaches the phone after cancellation. Fixing that means not handing the push
+    to ntfy until close to fire time, which trades away the PC-off guarantee Phase 4b exists for.
+    """
+    ok = SCHEDULER.cancel(job_id)
+    await _cancel_on_ticker(job_id)
+    return ok
+
+
+async def _cancel_on_ticker(job_id: str) -> None:
+    """Best-effort: drop a reminder from the VPS ticker too. Never raises."""
+    if not settings.ticker_url:
+        return
+    try:
+        import httpx
+
+        headers = {}
+        if settings.ticker_token:
+            headers["Authorization"] = f"Bearer {settings.ticker_token}"
+        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
+            await c.post(
+                f"{settings.ticker_url.rstrip('/')}/reminders/cancel",
+                json={"id": job_id}, headers=headers,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"ticker cancel failed: {type(e).__name__}: {e}")
 
 
 def _parse_hhmm(s: str) -> tuple[int, int]:
