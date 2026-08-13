@@ -127,6 +127,23 @@ def main() -> None:
         type(_c.BOOK).save = real_save
     check("save_contact degrades in prose", tool_failed(out), out[:70])
 
+    print("\n[7] The degradation contract is asserted by a MARKER, not by prose (J1.3)")
+    # 61 call sites return not_configured(); ten bench files used to grep the literal sentence
+    # "isn't configured yet" for themselves, so rewording it would have left them ALL green with
+    # the guarantee gone. These checks compare the PRODUCER against the PREDICATE, so the pair
+    # cannot drift: reword the sentence and this fails immediately, in one place.
+    from afon.brain.tools.base import is_not_configured, not_configured, tool_error
+
+    _nc = not_configured("Gmail", "an OAuth token")
+    check("not_configured() output is recognised by is_not_configured()", is_not_configured(_nc), _nc)
+    check("...and counts as a failure for data consumers", tool_failed(_nc), _nc)
+    _err = tool_error("calendar read", RuntimeError("boom"))
+    check("a real ERROR is a failure but NOT 'not configured'",
+          tool_failed(_err) and not is_not_configured(_err), _err)
+    check("ordinary data is neither",
+          not tool_failed("You have 3 meetings today, sir.")
+          and not is_not_configured("You have 3 meetings today, sir."))
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

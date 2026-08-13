@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 from loguru import logger
 
-from afon.brain.tools.base import not_configured, tool_error
+from afon.brain.tools.base import missing_arg, not_configured, tool_error
 from afon.config import settings
 
 
@@ -58,7 +58,8 @@ async def send_push(args: dict) -> str:
     message = (args.get("message") or "").strip()
     title = (args.get("title") or "Afon").strip()
     if not message:
-        return "What should I push, sir?"
+        return missing_arg("send_push", args, "message", "text", "body", "title",
+                           ask="What should I push, sir?")
     if not settings.ntfy_topic:
         return not_configured("push notifications", "an ntfy topic (AFON_NTFY_TOPIC)")
     try:

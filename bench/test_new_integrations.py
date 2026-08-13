@@ -47,7 +47,8 @@ def main() -> None:
 
     print("\n[2] graceful degradation without keys")
     def degrades(out: str) -> bool:
-        return "isn't configured yet" in out
+        from afon.brain.tools.base import is_not_configured
+        return is_not_configured(out)
     check("place_call degrades", degrades(asyncio.run(phone.place_call({"to": "+491", "message": "x"}))))
     # travel_time never degrades: with no Google key it must DELEGATE to the keyless OSRM engine.
     import afon.brain.tools.utility as util

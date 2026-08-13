@@ -29,7 +29,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def degrades(out: str) -> bool:
-    return isinstance(out, str) and ("isn't configured" in out or "not configured" in out)
+    from afon.brain.tools.base import is_not_configured
+    return isinstance(out, str) and is_not_configured(out)
 
 
 def main() -> None:

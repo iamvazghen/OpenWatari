@@ -9,7 +9,7 @@ so they work offline and never crash the brain.
 from __future__ import annotations
 
 from afon.brain.memory import STORE
-from afon.brain.tools.base import tool_error
+from afon.brain.tools.base import missing_arg, tool_error
 from afon.config import settings
 
 
@@ -40,9 +40,10 @@ def _arg(args: dict, *names: str) -> str:
 async def remember(args: dict) -> str:
     if not settings.memory_enabled:
         return "My long-term memory is switched off right now, sir."
-    text = (args.get("text") or "").strip()
+    text = _arg(args, "text", "content", "note", "fact", "memory")
     if not text:
-        return "What would you like me to remember, sir?"
+        return missing_arg("remember", args, "text", "content", "note", "fact", "memory", "tags",
+                           ask="What would you like me to remember, sir?")
     tags = args.get("tags") or []
     if isinstance(tags, str):
         tags = [t for t in tags.replace(";", ",").split(",") if t.strip()]

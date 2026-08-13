@@ -9,7 +9,7 @@ sqlite triple store) — see that module's header for why this is lean rather th
 from __future__ import annotations
 
 from afon.brain.graph import GRAPH
-from afon.brain.tools.base import tool_error
+from afon.brain.tools.base import missing_arg, tool_error
 from afon.config import settings
 
 
@@ -36,7 +36,8 @@ async def recall_related(args: dict) -> str:
         return "My long-term memory is switched off right now, sir."
     entity = (args.get("entity") or "").strip()
     if not entity:
-        return "Which person or thing should I explore, sir?"
+        return missing_arg("recall_related", args, "entity", "name", "person", "thing", "subject",
+                           ask="Which person or thing should I explore, sir?")
     try:
         direct = GRAPH.describe(entity)
         if not direct:

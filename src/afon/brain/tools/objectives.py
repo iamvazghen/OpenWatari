@@ -13,13 +13,14 @@ let the owner manage the list. Fail-quiet.
 from __future__ import annotations
 
 from afon.brain.objectives import OBJECTIVES
-from afon.brain.tools.base import tool_error
+from afon.brain.tools.base import missing_arg, tool_error
 
 
 async def assign_objective(args: dict) -> str:
     text = (args.get("objective") or args.get("text") or "").strip()
     if not text:
-        return "What objective would you like me to take on, sir?"
+        return missing_arg("assign_objective", args, "objective", "text", "goal", "task",
+                           ask="What objective would you like me to take on, sir?")
     try:
         obj = OBJECTIVES.assign(text, project=(args.get("project") or "").strip())
     except Exception as e:  # noqa: BLE001

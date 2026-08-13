@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
-from afon.brain.tools.base import not_configured, tool_error
+from afon.brain.tools.base import missing_arg, not_configured, tool_error
 from afon.config import settings
 
 
@@ -79,7 +79,8 @@ async def play_music(args: dict) -> str:
         )
 
     if not query:
-        return "What should I play, sir?"
+        return missing_arg("play_music", args, "query", "track", "song", "artist", "text",
+                           ask="What should I play, sir?")
 
     # YouTube Music (default): music-tuned search → YouTube Music player.
     if source == "ytmusic":

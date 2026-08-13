@@ -21,7 +21,7 @@ factored out so they're unit-tested with no network.
 from __future__ import annotations
 
 from afon.brain.cache import CACHE
-from afon.brain.tools.base import clip, http_get, tool_error
+from afon.brain.tools.base import clip, http_get, missing_arg, tool_error
 
 # ---- pure helpers (offline-testable) ----------------------------------------------------
 
@@ -398,7 +398,10 @@ async def osrm_travel_time(args: dict) -> str:
     delegates HERE when no Google Maps key is configured (Google adds live traffic)."""
     dest = (args.get("to") or args.get("destination") or "").strip()
     if not dest:
-        return "Where to, sir?"
+        # This, not maps.travel_time, is the branch that runs when no Google Maps key is set --
+        # i.e. the default today. Fixing only the Google side would have left the live path broken.
+        return missing_arg("travel_time", args, "to", "destination", "from", "origin", "mode",
+                           ask="Where to, sir?")
     origin = (args.get("from") or args.get("origin") or "").strip()
     if not origin:
         from afon.brain import prefs

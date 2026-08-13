@@ -24,7 +24,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from afon.brain.tools.base import clip, not_configured, tool_error
+from afon.brain.tools.base import clip, missing_arg, not_configured, tool_error
 from afon.config import settings
 
 # browser.py lives at src/afon/brain/tools/ — repo root is 4 parents up (one deeper than
@@ -122,7 +122,8 @@ async def _browser_action(args: dict) -> str:
         if action == "open":
             url = (args.get("url") or "").strip()
             if not url:
-                return "Which URL, sir?"
+                return missing_arg("browser", args, "url", "action", "query", "text",
+                                   ask="Which URL, sir?")
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
             await page.goto(url, wait_until="domcontentloaded")
@@ -288,16 +289,31 @@ def _neutralize_speechbrain_lazy_modules() -> None:
     hasattr(module, "__file__"); SpeechBrain's LazyModule for k2 raises ImportError there if k2 is
     not installed. Giving that lazy module a harmless __file__ prevents an unrelated optional
     SpeechBrain dependency from masking the real browser error.
+
+    The placeholder MUST be non-empty. It was `""` and that did not fix the hazard, it only changed
+    its shape: `inspect.getfile()` does `if getattr(object, "__file__", None)`, and `""` is falsy,
+    so the scan went on to raise `TypeError: <module …> is a built-in module` instead of the
+    original ImportError — still masking the real browser error. Measured:
+
+        unpatched (LazyModule)  -> ImportError: k2 missing
+        patched with ""         -> TypeError: … is a built-in module
+        patched with "<lazy>"   -> clean
+
+    It went unnoticed for two reasons worth remembering: both call sites are inside
+    `except Exception`, so the two exception types are indistinguishable downstream; and
+    `inspect.getmodule` short-circuits on its `modulesbyfile` cache, so a warm process often skips
+    the scan entirely and the failure looks intermittent. See bench/test_browser_speechbrain_guard.py.
     """
+    placeholder = "<speechbrain lazy module>"
     for name, mod in list(sys.modules.items()):
         if not name.startswith("speechbrain.integrations.k2_fsa") or mod is None:
             continue
         try:
-            object.__setattr__(mod, "__file__", "")
-        except Exception:
+            object.__setattr__(mod, "__file__", placeholder)
+        except Exception:  # noqa: BLE001 — a module that refuses the write is no worse than before
             try:
-                setattr(mod, "__file__", "")
-            except Exception:
+                setattr(mod, "__file__", placeholder)
+            except Exception:  # noqa: BLE001
                 pass
 
 

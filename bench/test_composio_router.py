@@ -92,7 +92,8 @@ async def test_find_and_run() -> None:
     settings.composio_api_key = None
     cx._user_id = cx._active_toolkits = None
     out3 = await cx.composio_find_tools({"query": "x"})
-    check("no key -> graceful not-configured note", "isn't configured" in out3, out3)
+    from afon.brain.tools.base import is_not_configured
+    check("no key -> graceful not-configured note", is_not_configured(out3), out3)
 
 
 def test_registry_wiring() -> None:

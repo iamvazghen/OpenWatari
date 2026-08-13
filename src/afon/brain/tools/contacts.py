@@ -9,13 +9,14 @@ confirm-gated). Read-only and degrades to a clear note when no contact book is c
 from __future__ import annotations
 
 from afon.brain import contacts as _contacts
-from afon.brain.tools.base import tool_error
+from afon.brain.tools.base import missing_arg, tool_error
 
 
 async def resolve_contact(args: dict) -> str:
     name = (args.get("name") or "").strip()
     if not name:
-        return "Who should I look up, sir?"
+        return missing_arg("resolve_contact", args, "name", "person", "contact", "who",
+                           ask="Who should I look up, sir?")
     matches = _contacts.BOOK.resolve(name)
     if not matches:
         return (f"I don't have a contact for '{name}', sir — what's their email or Telegram? "
@@ -30,7 +31,8 @@ async def resolve_contact(args: dict) -> str:
 async def save_contact(args: dict) -> str:
     name = (args.get("name") or "").strip()
     if not name:
-        return "Whose details should I save, sir?"
+        return missing_arg("save_contact", args, "name", "person", "contact", "who",
+                           ask="Whose details should I save, sir?")
     c = _contacts.Contact(
         name=name,
         email=(args.get("email") or "").strip() or None,

@@ -8,7 +8,7 @@ confirm-gated. Degrades to a spoken note without AFON_GOOGLE_MAPS_API_KEY.
 from __future__ import annotations
 
 from afon.config import settings
-from afon.brain.tools.base import http_get, not_configured, tool_error
+from afon.brain.tools.base import http_get, missing_arg, not_configured, tool_error
 
 _NEEDS = "a Google Maps API key (AFON_GOOGLE_MAPS_API_KEY, Directions + Places APIs enabled)"
 
@@ -29,7 +29,8 @@ async def travel_time(args: dict) -> str:
     mode = {"drive": "driving", "walk": "walking", "bike": "bicycling"}.get(
         (args.get("mode") or "driving").strip().lower(), (args.get("mode") or "driving").strip().lower())
     if not dest:
-        return "Where to, sir?"
+        return missing_arg("travel_time", args, "destination", "dest", "to", "address", "mode",
+                           ask="Where to, sir?")
     if not origin:
         origin = settings.owner_home_address or ""
     if not origin:
@@ -62,7 +63,8 @@ async def find_place(args: dict) -> str:
         return not_configured("Google Maps", _NEEDS)
     query = (args.get("query") or "").strip()
     if not query:
-        return "What should I look for, sir?"
+        return missing_arg("find_place", args, "query", "place", "search", "text",
+                           ask="What should I look for, sir?")
     try:
         r = await http_get(
             "https://maps.googleapis.com/maps/api/place/textsearch/json",
