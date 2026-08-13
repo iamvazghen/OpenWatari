@@ -124,7 +124,27 @@ def main() -> None:
             check("MCP" in line, f"`{token}` in {name} is labelled as an MCP tool",
                   f"line does not say MCP: {line.strip()[:90]}")
 
-    print("\n[5] the allow-list stays honest")
+    print("\n[5] the persona TEMPLATE carries every section the shipped persona has (J3.4)")
+    # The graph showed communities 211 and 228 both titled "{assistant_name} — Persona" with
+    # different section sets, which on disk is personality/afon.md against persona.example.md. The
+    # template was missing "Proactive companion" and "Protocols" — so a stranger who copies it, as
+    # its own header tells them to, gets a strictly reactive assistant with no protocol handling and
+    # nothing anywhere saying that is what they chose. Extra sections in the template are fine (it
+    # explains itself); missing ones are the drift.
+    def _sections(path: Path) -> set[str]:
+        # Strip HTML comments first: afon.md's header COMMENT lists section names as guidance, and
+        # counting those would make the file pass by talking about sections it does not have.
+        body = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.S)
+        return {ln.lstrip("# ").split("(")[0].strip().lower()
+                for ln in body.splitlines() if ln.startswith("## ")}
+
+    shipped = _sections(ROOT / "personality" / "afon.md")
+    template = _sections(ROOT / "personality" / "persona.example.md")
+    missing = sorted(shipped - template)
+    check(not missing, f"persona.example.md covers all {len(shipped)} shipped sections",
+          f"missing from the template: {missing}")
+
+    print("\n[6] the allow-list stays honest")
     # An entry that no doc uses any more is a licence nobody asked for; delete it.
     for token in sorted(EXTERNAL):
         check(token in mentions, f"allow-listed `{token}` is still actually used by a doc",

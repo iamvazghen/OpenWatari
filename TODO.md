@@ -1495,7 +1495,17 @@ means the nodes grouped together barely reference each other.
       own DB; plus `MemoryStore` (L1/L2), `DocStore`, `Cache` (L4), `RelationshipMemory`,
       `patterns.py`. Every consumer fans out by hand — which is exactly the shape that produced the
       I6 "one brain, not two" problem.
-- [ ] **J3.4 — Two divergent persona templates. (P2, VERIFIED)** The graph shows communities 211 and
+- [x] **J3.4 — DONE 2026-08-13.** `persona.example.md` now carries "Proactive companion" and
+      "Protocols (password-gated)", each marked droppable with the consequence stated rather than
+      just absent — deleting the proactive section is a real choice (the engine still runs; nothing
+      tells the model how to behave when it speaks first), and that is exactly what a stranger who
+      copied the template was making silently. Guarded in `bench/test_skill_docs_resolve.py` [5]:
+      every `##` section in the shipped persona must exist in the template, extra template sections
+      are fine. HTML comments are stripped first, because afon.md's own header comment LISTS the
+      section names as guidance and counting those would let a file pass by talking about sections
+      it does not have. Proven against the pre-fix file: it reports exactly the two that were
+      missing. *(Original finding below.)*
+- [ ] ~~**J3.4 — Two divergent persona templates. (P2, VERIFIED)**~~ The graph shows communities 211 and
       228 *both* titled `{assistant_name} — Persona`, with different section sets — 211 has
       "Proactive companion" and "Protocols (password-gated)", 228 does not. On disk:
       `personality/afon.md` and `personality/persona.example.md`. A stranger cloning the repo
