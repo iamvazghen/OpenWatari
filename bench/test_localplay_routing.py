@@ -75,6 +75,45 @@ def main() -> None:
         check("now_playing dispatches", any(o == "audio_now" for o, _ in seen), str([o for o, _ in seen]))
         src.unlink(missing_ok=True)
 
+        print("\n[1b] J3.5: 'stop the music' reaches BOTH homes, whichever tool the model picked")
+        # play_music and stop_music live in different modules (localplay = desktop player,
+        # voicechat = Telegram music room). Each stop path used to answer only for its own, so
+        # asking to stop the music while a track streamed into the voice chat got "nothing was
+        # playing out loud, sir" AND left it playing — a confident wrong answer plus the failure.
+        from afon.brain.tools import voicechat as vc
+
+        async def _idle_forward(op, args, timeout=None):
+            seen.append((op, args))
+            return json.dumps({"ok": True, "out": ""})     # desktop player idle
+
+        saved_playing, saved_stop = vc._PLAYING, vc.stop_music_room
+        try:
+            PC_LINK.forward = _idle_forward  # type: ignore[method-assign]
+            vc._PLAYING = "A Room Track"
+
+            async def _fake_room_stop(_args):
+                vc._PLAYING = None
+                return "Left the music room voice chat, sir."
+
+            vc.stop_music_room = _fake_room_stop
+            out = asyncio.run(lp.stop_music({}))
+            check("desktop idle + room playing -> stops the ROOM", "music room" in out, out)
+            check("...and never claims nothing was playing", "Nothing was playing" not in out, out)
+
+            vc._PLAYING = None
+            out = asyncio.run(lp.stop_music({}))
+            check("both idle -> the honest 'nothing was playing'", "Nothing was playing" in out, out)
+
+            # ...and the mirror image: the room tool, asked while the DESKTOP is the one playing.
+            vc.stop_music_room = saved_stop
+            PC_LINK.forward = fake_forward  # desktop reports "Some Track" stopped
+            out = asyncio.run(vc.stop_music_room({}))
+            check("room idle + desktop playing -> stops the DESKTOP",
+                  "Some Track" in out and "desktop" in out, out)
+        finally:
+            vc._PLAYING, vc.stop_music_room = saved_playing, saved_stop
+            PC_LINK.forward = fake_forward  # type: ignore[method-assign]
+
         print("\n[2] the size ceiling matches what the transport can actually carry")
         # pc_agent connects with max_size=8MB and base64 inflates by 4/3, so the raw cap must leave
         # room for the encoded frame — otherwise the transport drops it as an unexplained failure.

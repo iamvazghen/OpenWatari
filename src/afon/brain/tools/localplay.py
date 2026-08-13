@@ -158,11 +158,31 @@ async def play_file(path: str, label: str | None = None) -> str | None:
     return None if d.get("ok") else str(d.get("out") or "I couldn't start playback, sir.")
 
 
-async def stop_music(_args: dict) -> str:
+async def stop_desktop_playback() -> str:
+    """Stop the desktop player and return the label it was playing, or "" if it was idle.
+
+    Split out of ``stop_music`` so the music-room stop path can reach it without calling the tool
+    (and without the two tools calling each other in a loop) — see J3.5.
+    """
     d = await _forward("audio_stop", {}, _pc_audio_stop)
-    was = str(d.get("out") or "")
+    return str(d.get("out") or "")
+
+
+async def stop_music(_args: dict) -> str:
+    was = await stop_desktop_playback()
     if was:
         return f"Stopped '{was}', sir."
+    # J3.5: "stop the music" is ONE instruction, and music has two homes — the desktop player here
+    # and the Telegram music-room stream in voicechat.py. Whichever tool the model picked, the
+    # owner meant "stop it". Answering "nothing was playing" while a track streams into the voice
+    # chat is a confident wrong answer AND leaves it playing, which is the worse half.
+    try:
+        from afon.brain.tools import voicechat
+
+        if voicechat.room_is_playing():
+            return await voicechat.stop_music_room({})
+    except Exception as e:  # noqa: BLE001 — no telethon/pytgcalls installed is the normal case
+        logger.debug(f"music-room cross-check skipped: {type(e).__name__}: {e}")
     return "Nothing was playing out loud, sir. (If it's a YouTube tab, I can close the browser.)"
 
 

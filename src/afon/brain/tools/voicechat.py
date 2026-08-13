@@ -26,6 +26,16 @@ from afon.config import settings
 _APP = None       # PyTgCalls singleton
 _CLIENT = None    # its dedicated Telethon client
 _LOCK = asyncio.Lock()
+#: Whether a track is streaming into the room RIGHT NOW. `_APP is not None` cannot answer that —
+#: it stays set once the client has ever connected, so it says "we have a phone", not "someone is
+#: talking". J3.5: the desktop stop path asks this before telling the owner nothing was playing.
+_PLAYING: str | None = None
+
+
+def room_is_playing() -> str | None:
+    """The track streaming into the music room, or None. Cheap and safe to call from the other
+    stop path — no locks, no network, no pytgcalls import."""
+    return _PLAYING
 
 
 def _vc_session() -> str:
@@ -123,6 +133,8 @@ async def play_in_music_room(args: dict) -> str:
             os.close(fd)
             await _CLIENT.download_media(msg, file=tmp)
             await _APP.play(int(room), MediaStream(tmp))
+            global _PLAYING
+            _PLAYING = label
         return (f"Now playing '{label}' in your Afon Music Room voice chat — open that group on "
                 "your phone and join the voice chat to listen, sir.")
     except Exception as e:  # noqa: BLE001
@@ -130,14 +142,28 @@ async def play_in_music_room(args: dict) -> str:
 
 
 async def stop_music_room(_args: dict) -> str:
+    global _PLAYING
     room = settings.telegram_music_room_chat
     async with _LOCK:
         if _APP is None or not room:
+            # J3.5: nothing here — but "stop the music" is one instruction and music has two homes.
+            # Reach the DESKTOP player directly rather than through its tool, so the two stop paths
+            # cannot call each other in a loop.
+            try:
+                from afon.brain.tools.localplay import stop_desktop_playback
+
+                was = await stop_desktop_playback()
+                if was:
+                    return f"Nothing was in the music room, sir — but I've stopped '{was}' on your desktop."
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"desktop cross-check skipped: {type(e).__name__}: {e}")
             return "Nothing is playing in the music room, sir."
         try:
             await _APP.leave_call(int(room))
         except Exception:  # noqa: BLE001
+            _PLAYING = None
             return "The music room voice chat was already closed, sir."
+        _PLAYING = None
     return "Left the music room voice chat, sir."
 
 

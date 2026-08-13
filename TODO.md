@@ -1519,7 +1519,22 @@ means the nodes grouped together barely reference each other.
       "Proactive companion" and "Protocols (password-gated)", 228 does not. On disk:
       `personality/afon.md` and `personality/persona.example.md`. A stranger cloning the repo
       configures the one that is missing two sections.
-- [ ] **J3.5 — Music playback is split across three communities. (P2)** `voicechat.py` (`play_music`,
+- [x] **J3.5 — DONE 2026-08-14 for the half that was a BUG, not a shape.** The graph's complaint
+      ("`stop_music` lives in a different module from `play_music` — the stop path cannot see what
+      the play path started") was exactly right, and it was reachable by voice: music has two homes,
+      the desktop player (`localplay`) and the Telegram music room (`voicechat`), and each stop tool
+      answered only for its own. Ask to stop the music while a track streams into the voice chat and
+      the model picks `stop_music`, which replied *"Nothing was playing out loud, sir"* — a
+      confident wrong answer that also left it playing.
+      Both stop paths now check the other before claiming silence. `voicechat.room_is_playing()`
+      exposes the state (`_APP is not None` could never answer it — that stays set once the client
+      has connected, so it means "we have a phone", not "someone is talking"), and the room path
+      reaches `localplay.stop_desktop_playback()` directly rather than through the tool, so the two
+      cannot call each other in a loop. `bench/test_localplay_routing.py` 29/29, covering both
+      directions plus the both-idle case that must still answer honestly.
+      *(Still open, and only a shape: the three modules remain three. Merging them buys tidiness,
+      not behaviour — the behaviour is fixed above.)*
+- [ ] ~~**J3.5 — Music playback is split across three communities. (P2)**~~ `voicechat.py` (`play_music`,
       `_yt_search`, `_ytmusic_search`), `channels.py` (`play_latest/random_from_channel`),
       `localplay.py` (`play_file`, `now_playing`, `stop_music`). **`stop_music` lives in a different
       module from `play_music`** — the stop path cannot see what the play path started.
