@@ -270,6 +270,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    from afon.shared.maintenance import halt_if_parked
+
+    halt_if_parked("pc_agent")   # before the supervisor — see shared/maintenance.py
     from afon.edge._supervisor import run_supervised
 
     run_supervised("pc_agent", main)

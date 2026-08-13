@@ -886,6 +886,9 @@ def _serve_client_http(
 
 
 def main() -> None:
+    from afon.shared.maintenance import halt_if_parked
+
+    halt_if_parked("brain")   # systemd Restart=always cannot be argued with — see maintenance.py
     host = settings.brain_host
     try:
         asyncio.run(serve(host=host))

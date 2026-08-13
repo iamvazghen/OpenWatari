@@ -40,6 +40,23 @@ Run:  python3 afon_ticker.py   (or via the systemd unit — see install.sh)
 
 from __future__ import annotations
 
+# --- maintenance guard --------------------------------------------------------------------------
+# Mirrors afon/shared/maintenance.py, inlined because this script is deployed standalone and does
+# not import the package. It is installed as a SYSTEM unit with Restart=always, and the VPS user has
+# no passwordless sudo — so on 2026-08-13 there was no way for the owner to say "stay stopped" and
+# have it stick. A file is: `rm ~/.afon/MAINTENANCE` un-parks it.
+# Placement matters: this must sit AFTER `from __future__`, which has to be the first statement in
+# the file. The first attempt at this guard went above it and left the ticker crash-looping on a
+# SyntaxError — parked, but for the wrong reason and with a broken file on the host.
+import pathlib as _pl  # noqa: E402
+import sys as _sys  # noqa: E402
+
+_LOCK = _pl.Path.home() / ".afon" / "MAINTENANCE"
+if _LOCK.exists():
+    print(f"afon ticker: parked by {_LOCK}", file=_sys.stderr)
+    raise SystemExit(0)
+# -------------------------------------------------------------------------------------------------
+
 import json
 import os
 import threading

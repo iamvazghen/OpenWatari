@@ -12,6 +12,14 @@ Run:
 
 from __future__ import annotations
 
+# Parked? Exit before ANY of the heavy imports below. Under `python -m`, `__name__` is already
+# "__main__" on this line, so this costs a stat when the module is merely imported (tests) and
+# skips a ~20s audio-stack load on every one of the launcher's 5-minute relaunches when parked.
+if __name__ == "__main__":
+    from afon.shared.maintenance import halt_if_parked
+
+    halt_if_parked("edge")
+
 # MUST run before pipecat/huggingface_hub import: when STT=moonshine, force HF Hub offline so its
 # cached-model revision check can't make the network call that HANGS the windowless edge at startup.
 # huggingface_hub freezes the offline flag at import time, so setting it later (in the builder) is
@@ -322,6 +330,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # (the parked check is at the TOP of this file, before the heavy imports)
     # Supervised: relaunch on any exit (crash or clean pipeline end) + log to logs/edge.log, so a
     # brain restart or a transient audio glitch never leaves the laptop silently without Afon.
     from afon.edge._supervisor import run_supervised
