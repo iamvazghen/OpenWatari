@@ -73,6 +73,18 @@ async def main() -> None:
     check("names the real reason (nobody there)", empty and "nobody at the desk" in empty, str(empty))
     check("forbids claiming success", empty and "do NOT" in empty and "BLOCKED" in empty)
 
+    # L2529: zero frontal faces is not the same claim as an empty room. The cascade is frontal-only
+    # at minSize 50x50, so leaning back or turning to the second monitor also yields zero — and this
+    # gate then told the owner "the camera shows nobody at the desk" while he sat at it. A person in
+    # frame who is not facing the camera is a CAN'T TELL, which this module already defines as
+    # fail-open, so it must behave exactly like the unavailable case above.
+    stub({"available": True, "matched": False, "faces": 0, "evidence": True})
+    check("a person in frame but not frontal -> proceeds (can't tell, not a negative)",
+          await agent._face_second_factor("send_email", {}) is None)
+    stub({"available": True, "matched": False, "faces": 0, "evidence": False})
+    check("...and a genuinely empty room still refuses",
+          bool(await agent._face_second_factor("send_email", {})))
+
     stub({"available": True, "matched": False, "faces": 2})
     other = await agent._face_second_factor("send_email", {})
     check("someone else present -> refused", bool(other), str(other))

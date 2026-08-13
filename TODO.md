@@ -2576,6 +2576,21 @@ remains the upgrade path noted in config.py.
       place), brings the `.bak` (the only recovery path from a bad re-enrol), and never overwrites an
       existing new-location profile — re-enrolling is what created that one. Verified live: both
       files moved, profile still loads (10 vectors, 192-dim).
-- [ ] **Haar is frontal-only with minSize 50x50.** Sitting back from the desk, or turned, reads as
-      "no one is in view" rather than "I can't tell". The distinction matters because presence
-      drives whether proactive nudges fire.
+- [x] **DONE 2026-08-13 — and it was worse than "presence": the CONFIRM GATE was making the claim.**
+      Haar stays frontal-only at minSize 50x50, deliberately — its boxes feed identity
+      (`_gray_faces` → LBP refs / ArcFace crops), and a profile crop matched against frontal refs is
+      noise. What changes is what zero boxes is allowed to MEAN. New `_person_evidence()` answers
+      occupancy with cascades that are useless for identity and fine for it: profileface (mirrored
+      too — OpenCV's only detects one side) and upperbody at a coarser minSize 90x90, so curtains
+      and chair backs do not start reading as people.
+      Three consumers now separate "I can't tell" from "nobody is there":
+      `visual_presence` says "someone's there but not facing the camera" instead of claiming an
+      empty room; `verify_owner_present` carries `evidence`; and — the one that mattered —
+      `agent._face_second_factor` no longer REFUSES a privileged action with "the camera shows
+      nobody at the desk" when the owner is sitting at it leaning back. That is a can't-tell, and
+      this module's own doctrine already says can't-tell fails open, so it proceeds on the spoken
+      yes exactly as it did before the second factor existed. A genuinely empty room (no face, no
+      evidence — the television case) still refuses, unchanged.
+      Tests: `test_camera.py` 12/12 (including: the two cascade XMLs really ship with this OpenCV,
+      or the whole path degrades to False silently and looks like an empty room; noise is not a
+      person; garbage bytes do not crash) and `test_face_second_factor.py` 16/16.

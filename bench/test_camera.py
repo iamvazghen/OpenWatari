@@ -34,6 +34,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 async def main() -> None:
     saved_cap, saved_faces, saved_llm = camera._capture_jpeg, camera._detect_faces, llm_mod.LLMClient
     saved_refs, saved_burst = camera._owner_refs, camera._capture_burst
+    saved_evidence = camera._person_evidence
     camera._owner_refs = lambda: None   # count-based path (owner not enrolled) — deterministic
     try:
         print("[1] look_around: captures a frame + describes it via vision")
@@ -64,11 +65,38 @@ async def main() -> None:
         print("\n[4] visual_presence: local face count -> spoken presence")
         camera._capture_burst = lambda *a, **k: [b"\xff\xd8jpeg"]  # one frame; count comes from the mock
         camera._detect_faces = lambda jpeg: 0
-        check("no face -> 'no one in view'", "No one's in view" in await camera.visual_presence({}))
+        camera._person_evidence = lambda jpeg: False
+        check("no face + no evidence -> 'no one in view'",
+              "No one's in view" in await camera.visual_presence({}))
+
+        # L2529: the frontal cascade is frontal-only at minSize 50x50, so "no box" also means
+        # leaning back, turned to the other monitor, or a dim room. Claiming an empty room in those
+        # cases is a confident wrong answer — and presence is what decides whether nudges fire.
+        camera._person_evidence = lambda jpeg: True
+        r = await camera.visual_presence({})
+        check("no face BUT a person in frame -> can't tell, not 'no one'",
+              "not facing the camera" in r and "No one's in view" not in r, r)
         camera._detect_faces = lambda jpeg: 1
         check("one face -> 'you're at your desk'", "at your desk" in await camera.visual_presence({}))
         camera._detect_faces = lambda jpeg: 3
         check("many faces -> counts them", "3 people" in await camera.visual_presence({}))
+
+        print("\n[4b] the evidence cascades are really there, and do not invent people")
+        # The whole L2529 fix degrades to False if a cascade file is missing — silently, and it
+        # would look exactly like "the room really was empty". OpenCV has dropped shipped XMLs
+        # between versions before, so name them.
+        camera._person_evidence = saved_evidence
+        import cv2  # noqa: E402
+        import numpy as np  # noqa: E402
+        for xml in ("haarcascade_profileface.xml", "haarcascade_upperbody.xml"):
+            check(f"{xml} ships with this OpenCV",
+                  not cv2.CascadeClassifier(cv2.data.haarcascades + xml).empty())
+        noise = np.random.default_rng(7).integers(0, 256, (480, 640), dtype=np.uint8)
+        ok, buf = cv2.imencode(".jpg", noise)
+        check("random noise is not a person (no false 'someone is there')",
+              ok and not camera._person_evidence(buf.tobytes()))
+        check("garbage bytes degrade to 'no evidence', never a crash",
+              camera._person_evidence(b"not a jpeg") is False)
 
         print("\n[5] visual_presence: no camera -> calm line, no crash")
         camera._capture_burst = lambda *a, **k: []
@@ -77,6 +105,7 @@ async def main() -> None:
     finally:
         camera._capture_jpeg, camera._detect_faces, llm_mod.LLMClient = saved_cap, saved_faces, saved_llm
         camera._owner_refs, camera._capture_burst = saved_refs, saved_burst
+        camera._person_evidence = saved_evidence
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

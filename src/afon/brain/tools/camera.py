@@ -126,6 +126,48 @@ def _detect_boxes(gray) -> list:
     return []
 
 
+def _person_evidence(jpeg: bytes) -> bool:
+    """Is there a person in frame that the FRONTAL detector cannot see? (turned away, leaning back)
+
+    `_detect_boxes` is frontal-only at minSize 50x50 — deliberately, because its boxes feed identity
+    (`_gray_faces` -> LBP refs / ArcFace crops), and a profile crop matched against frontal refs is
+    noise. The cost of that correct choice is that "no box" has been reported as "no one is in view",
+    which is an absence claim the detector cannot support: sitting back from the desk, turning to a
+    second monitor, or a dim room all produce zero boxes with the owner sitting right there.
+
+    So this answers a DIFFERENT question with cascades that are useless for identity and fine for
+    occupancy: a profile face (both ways — OpenCV's profileface only detects one side, so the frame
+    is mirrored and retried) or an upper body. It never contributes a recognition crop.
+
+    Returns False on any failure. A missing cascade file must degrade to today's behaviour, not
+    invent a person.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return False
+        eq = cv2.equalizeHist(img)
+        for xml, scale, neighbours, min_size in (
+                ("haarcascade_profileface.xml", 1.1, 4, (50, 50)),
+                # Upper body is coarser and needs a bigger minimum, or curtains and chair backs
+                # start reading as people — which would turn one wrong answer into a louder one.
+                ("haarcascade_upperbody.xml", 1.1, 5, (90, 90))):
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + xml)
+            if cascade.empty():
+                continue
+            for frame in (eq, cv2.flip(eq, 1)) if "profile" in xml else (eq,):
+                if len(cascade.detectMultiScale(frame, scaleFactor=scale,
+                                                minNeighbors=neighbours, minSize=min_size)):
+                    return True
+        return False
+    except Exception as e:  # noqa: BLE001 — occupancy evidence is a nicety; identity is not
+        logger.debug(f"person-evidence check skipped: {type(e).__name__}: {e}")
+        return False
+
+
 def _detect_faces(jpeg: bytes) -> int:
     """Count frontal faces in a JPEG (fully local)."""
     import cv2
@@ -452,7 +494,7 @@ async def _visual_presence_local(args: dict) -> str:
             if matched:
                 return "You're at your desk, sir — I recognise you."
             if n <= 0:
-                return "No one's in view of the camera, sir."
+                return await _empty_or_unsure(jpegs)
             if n == 1:
                 return "Someone's at the desk, sir, but I don't recognise them."
             return f"I can see {n} people, sir, but none I recognise as you."
@@ -461,23 +503,41 @@ async def _visual_presence_local(args: dict) -> str:
     except Exception as e:  # noqa: BLE001
         return tool_error("visual_presence", e)
     if n <= 0:
-        return "No one's in view of the camera, sir."
+        return await _empty_or_unsure(jpegs)
     if n == 1:
         return "You're at your desk, sir — I can see you."
     return f"I can see {n} people in front of the camera, sir."
+
+
+async def _empty_or_unsure(jpegs: list) -> str:
+    """No frontal face: say which of the two things that means, instead of guessing the confident one.
+
+    Only reached when the frontal count is zero, and it checks a few frames rather than all of them —
+    the burst is 12 and the cascades are the expensive part, so this is the cheap half of a question
+    that was previously answered wrongly for free.
+    """
+    for j in jpegs[:3]:
+        if await asyncio.to_thread(_person_evidence, j):
+            return ("Someone's there, sir, but not facing the camera — I can't tell if it's you.")
+    return "No one's in view of the camera, sir."
 
 
 async def verify_owner_present() -> dict:
     """I1 — a STRUCTURED owner verdict for use as a second authorisation factor.
 
     ``visual_presence`` answers the owner in prose, which is right for him and useless to a gate.
-    This returns ``{"available": bool, "matched": bool, "faces": int}``:
+    This returns ``{"available": bool, "matched": bool, "faces": int, "evidence": bool}``:
 
       * ``available`` False — no camera, no enrolment, or the laptop is offline. The caller must then
         fall back to whatever it did before. A second factor that LOCKS THE OWNER OUT when a webcam is
         busy is worse than no second factor at all.
-      * ``available`` True, ``matched`` False, ``faces`` 0 — the room is empty. Nobody is there to
-        authorise anything, which is exactly the case a television talking at the microphone produces.
+      * ``available`` True, ``matched`` False, ``faces`` 0, ``evidence`` False — the room is empty.
+        Nobody is there to authorise anything, which is exactly the case a television talking at the
+        microphone produces.
+      * ``available`` True, ``matched`` False, ``faces`` 0, ``evidence`` True — a person IS in frame
+        but not facing the camera (leaning back, turned to the other monitor). The frontal detector
+        cannot rule on that, so this is a CAN'T TELL, not a negative verdict. Reporting it as an
+        empty room told the owner "nobody is at the desk" while he sat at it.
       * ``available`` True, ``matched`` False, ``faces`` >0 — someone is there and it is not him.
 
     Not a tool: nothing should let the MODEL decide whether the owner is present.
@@ -486,11 +546,11 @@ async def verify_owner_present() -> dict:
     try:
         d = json.loads(raw)
         return {"available": bool(d.get("available")), "matched": bool(d.get("matched")),
-                "faces": int(d.get("faces") or 0)}
+                "faces": int(d.get("faces") or 0), "evidence": bool(d.get("evidence"))}
     except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
         # _dispatch turns a dropped PC_LINK into a spoken sentence rather than JSON — that is the
         # "can't tell" case, not a negative verdict.
-        return {"available": False, "matched": False, "faces": 0}
+        return {"available": False, "matched": False, "faces": 0, "evidence": False}
 
 
 async def _verify_owner_present_local(_args: dict) -> str:
@@ -503,9 +563,19 @@ async def _verify_owner_present_local(_args: dict) -> str:
         if not jpegs:
             return json.dumps({"available": False, "matched": False, "faces": 0})
         results = [await asyncio.to_thread(_recognise, j, refs) for j in jpegs]
+        faces = max((c for c, _ in results), default=0)
+        # Only when no frontal face was found: distinguishing an empty room from a turned back is
+        # the whole point, and running the cascades when a face WAS seen would be paying for an
+        # answer already in hand.
+        evidence = False
+        if faces <= 0:
+            for j in jpegs[:3]:
+                if await asyncio.to_thread(_person_evidence, j):
+                    evidence = True
+                    break
         return json.dumps({"available": True,
                            "matched": _majority_matched(results),
-                           "faces": max((c for c, _ in results), default=0)})
+                           "faces": faces, "evidence": evidence})
     except Exception as e:  # noqa: BLE001 — an unreadable camera is "can't tell", never "not him"
         logger.warning(f"face second factor: camera check failed ({type(e).__name__}: {e})")
         return json.dumps({"available": False, "matched": False, "faces": 0})

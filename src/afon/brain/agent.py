@@ -1317,6 +1317,15 @@ class AfonAgent:
             return None
         # Positive negative: the camera worked and he is not the one in front of it.
         faces = int(v.get("faces") or 0)
+        if faces == 0 and v.get("evidence"):
+            # Someone IS in frame, just not facing the camera — the frontal detector cannot rule on
+            # that. By this module's own doctrine (everything that is not a positive "he is not
+            # present" returns None) it is a can't-tell, so the action proceeds on the spoken yes,
+            # exactly as it did before the second factor existed. Blocking here is what told the
+            # owner "the camera shows nobody at the desk" while he was sitting at it, leaning back.
+            logger.info(f"face second factor: person in frame but not frontal — {name} proceeds "
+                        "on the spoken yes alone")
+            return None
         logger.warning(f"confirm-gate: REFUSED {name}({args}) — camera saw {faces} face(s), none the owner")
         if faces == 0:
             return ("BLOCKED — the camera shows nobody at the desk, so that confirmation did not come "
