@@ -264,6 +264,26 @@ what it costs, who it blocks on, or how to undo it is a wish list.
 
 ---
 
+# Ownership boundaries — the four pairs that would otherwise fight
+
+The fifty are the owner's taxonomy, and four pairs overlap enough that two sections could each claim
+the same work. Left implicit, that produces the worst kind of duplication: two modules that each
+half-implement a behaviour and disagree at the seam. Settled here, once.
+
+| Pair | The line | Who owns what |
+|---|---|---|
+| **S26 Perception** vs **S27 Context** | Sensing vs interpretation | S26 turns sensors into facts ("a face is present", "the room is playing television"). S27 turns facts into a *situation* ("he is at the desk, in focus, twenty minutes before a meeting"). S26 never decides what a state means; S27 never touches a camera. |
+| **S13 Notifications** vs **S14 Proactivity** | Whether to speak vs how to reach him | S14 decides **if** something is worth saying and when. S13 decides **which channel** carries it and whether it arrived. A message that should not have been sent is S14's bug; one that was sent and never seen is S13's. |
+| **S39 Delegation** vs **S48 Coordination** | One handoff vs many | S39 owns a single delegation end to end: brief, deadline, result, verification. S48 exists only when **more than one** worker is on the same job — claiming, merging, isolating failure. With one worker, S48 is not involved at all. |
+| **S30 Memory** vs **S24 World Model** | What was said vs what is true | S30 stores and retrieves *records* — turns, facts, documents, with provenance. S24 holds the *model* — entities, relations, validity over time — and is built from S30's records. S24 never stores a raw turn; S30 never resolves an entity. |
+
+Two more, weaker but worth stating: **S22 Recoverability** owns getting back to a working state,
+**S32 Redundancy** owns not needing to; and **S36 Security** owns who may act, **S44 Ethics** owns
+what may be done at all — a refusal that depends on identity is S36, one that holds for everyone is
+S44.
+
+---
+
 # Confidence map — where this plan is grounded, reasoned, or guessing
 
 **25 grounded · 18 reasoned · 7 guesses.** The guesses are not evenly spread, and that is the useful
