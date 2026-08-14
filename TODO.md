@@ -1538,10 +1538,28 @@ means the nodes grouped together barely reference each other.
       `_yt_search`, `_ytmusic_search`), `channels.py` (`play_latest/random_from_channel`),
       `localplay.py` (`play_file`, `now_playing`, `stop_music`). **`stop_music` lives in a different
       module from `play_music`** — the stop path cannot see what the play path started.
-- [ ] **J3.6 — Four independent answers to "what is broken right now". (P2)**
-      `reliability.health_probe`, `Signal.health_signals`, `hud_snapshot._health`,
-      `diagnose.summary`. Nothing guarantees they agree; a component can be degraded in one and
-      healthy in another.
+- [x] **J3.6 — DONE 2026-08-14. Two of the four were never independent; the two that were had
+      genuinely diverged, and writing the test found a third defect.**
+      They are not duplicates and deleting three would lose real coverage: `health.check()` is
+      structural and runs on every proactive tick (`validate_vault()` — is the path there);
+      `reliability.health_probe()` is functional and scheduled (a real search, a real 1-token
+      completion) and catches a present-but-unreadable vault; `hud._health()` is the status page
+      and serves the probe's on-disk result because it answers a synchronous HTTP handler;
+      `diagnose` answers a different question entirely (what has ERRORED recently).
+      Fixed: (1) the probe decided "the vault is up" by substring-matching English
+      (`"couldn't" not in r.lower()[:30]`), which broke both ways — reword the tool's failure and a
+      dead vault reads healthy, while a legitimate "I couldn't find anything matching…" from a
+      HEALTHY vault reported it down and paged the owner. It uses the typed `tool_failed()` now
+      (same defect class as J7.3). (2) `hud._health()` rebuilt the probe-log path by hand instead
+      of asking `reliability`; two spellings of one location is how a status page serves nothing
+      while the probe writes happily elsewhere — and its `except: pass` hides that. The
+      `.jarvis`→`.afon` rename is exactly that shape of move. It imports the path now.
+      (3) The new test itself was making two live model calls per run (health_probe probes the LLM
+      for real, deliberately) — that would have gone red on a flaky uplink and reported a
+      health-agreement bug that did not exist. Client stubbed; 21s and hermetic.
+      `bench/test_health_agreement.py` 10/10 asserts the only guarantee the owner cares about:
+      **when a component is genuinely broken, no surface calls it healthy** — not that they use the
+      same words or run the same probe.
 - [ ] **J3.7 — Nine health/reliability communities, no facade. (P2)** reliability · voice_health ·
       uptime_watch · diagnose · errors · Metrics · watch_audio_liveness · singleton · _supervisor.
 - [ ] **J3.8 — Composio is split router/catalog with a third `_configured()`. (P2)** Community 110

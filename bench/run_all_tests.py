@@ -159,6 +159,8 @@ TESTS = [
      "test_layering.py", "offline", ["checks passed ==="]),
     ("Park switch: a parked deployment stays parked — every entry point honours the lock",
      "test_maintenance_lock.py", "offline", ["checks passed ==="]),
+    ("Health agreement (J3.6): when a component is broken, no surface reports it healthy",
+     "test_health_agreement.py", "offline", ["checks passed ==="]),
     ("Error taxonomy (J7.3): WHY a tool failed is a value, not a sentence to grep",
      "test_error_taxonomy.py", "offline", ["checks passed ==="]),
     ("Fire paths (J2.8): every autonomous job REPORTS what it did — none may go silent",

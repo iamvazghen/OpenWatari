@@ -53,9 +53,23 @@ async def health_probe() -> list[dict]:
     probes = []
 
     async def _vault() -> bool:
+        """Is the vault actually READABLE — deliberately a live search, not `validate_vault()`.
+
+        J3.6: `health.check()` answers the same question structurally (is the path configured and
+        present). Two definitions of "the vault is up" is how one surface calls a component healthy
+        while another pages the owner about it, so the difference is written down rather than
+        discovered: this one is functional and catches a present-but-unreadable vault; that one is
+        cheap and runs on every tick. They must never DISAGREE about a broken vault, which
+        bench/test_health_agreement.py asserts.
+        """
+        from afon.brain.tools.base import tool_failed
         from afon.brain.tools.vault import search_vault
         r = await search_vault({"query": "afon", "limit": 1})
-        return bool(r and "couldn't" not in r.lower()[:30])
+        # Typed predicate, not prose. This was `"couldn't" not in r.lower()[:30]`, which broke both
+        # ways: reword the tool's failure sentence and a dead vault reads healthy, while a genuine
+        # "I couldn't find anything matching…" — data, from a perfectly healthy vault — reported the
+        # vault DOWN and paged the owner. Same defect class as the J7.3 error taxonomy.
+        return not tool_failed(r)
 
     async def _telegram() -> bool:
         # Mirror TelegramBridge.enabled (token AND authorized chat) via settings directly. The old code

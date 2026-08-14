@@ -125,10 +125,14 @@ def _health() -> list[dict]:
     handler, so it reads the last on-disk probe result rather than re-probing per poll.
     """
     import json
-    from pathlib import Path
+
+    # Ask reliability where its log is; do NOT rebuild the path here (J3.6). Two independent
+    # spellings of the same location is how the status page ends up serving nothing while the probe
+    # writes happily somewhere else — and the `except` below swallows it, so the page just shows no
+    # components rather than an error. The .jarvis -> .afon rename is exactly that shape of move.
+    from afon.brain.reliability import _last_probe_path as probe_path
 
     out: list[dict] = []
-    probe_path = Path.home() / ".afon" / "health_probe.json"
     try:
         entries = json.loads(probe_path.read_text(encoding="utf-8"))
         for p in (entries[-1]["probes"] if entries else []):
