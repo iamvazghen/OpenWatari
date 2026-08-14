@@ -48,6 +48,24 @@ async def _check_ticker() -> tuple[bool, str]:
         return False, f"ticker unreachable ({type(e).__name__})"
 
 
+def _check_pc_link() -> tuple[bool, str]:
+    """The laptop executor. Down means device control, the camera and the screen are all unreachable.
+
+    Reported, but deliberately NOT a proactive signal (see ``health_signals``): a closed laptop is a
+    normal state of the world, not a fault to be paged about. It belongs in the snapshot because the
+    alternative — a spoken "all systems nominal" while half the body is unreachable — is the exact
+    overclaim J3.6 was about.
+    """
+    try:
+        from afon.brain.pc_link import PC_LINK
+
+        if PC_LINK.active():
+            return True, f"laptop connected ({PC_LINK.host() or 'unknown host'})"
+        return False, "laptop executor not connected — device control, camera and screen are dark"
+    except Exception as e:  # noqa: BLE001
+        return False, f"pc-link check error: {type(e).__name__}"
+
+
 def _check_cache() -> tuple[bool, str]:
     try:
         from afon.brain.cache import CACHE
@@ -57,23 +75,45 @@ def _check_cache() -> tuple[bool, str]:
         return False, f"cache error: {type(e).__name__}"
 
 
+#: How each component is said out loud. The KEYS are the coverage claim: `summarize()` names exactly
+#: what this snapshot looked at, so a component added here cannot silently fall out of the sentence
+#: (and one that is never added cannot be implied by it).
+_SPOKEN = {"vault": "your vault", "ticker": "reminders", "cache": "the cache",
+           "pc_link": "the laptop"}
+
+
 async def check() -> dict:
-    """A full health snapshot: {component: {ok, detail}}."""
+    """A health snapshot of the components this process can see: {component: {ok, detail}}.
+
+    Deliberately NOT "everything": the edge's own organs — microphone, speaker, wake word — live in
+    another process on another machine and are watched there (``edge/voice_health.py``,
+    ``edge/audio_watchdog.py``). A cross-host facade would mean the brain importing edge internals,
+    which the layering gate forbids for good reason. What this owes the owner instead is an honest
+    account of its own coverage; see ``summarize``.
+    """
     vault_ok, vault_msg = await _check_vault()
     ticker_ok, ticker_msg = await _check_ticker()
     cache_ok, cache_msg = _check_cache()
+    pc_ok, pc_msg = _check_pc_link()
     return {
         "vault": {"ok": vault_ok, "detail": vault_msg},
         "ticker": {"ok": ticker_ok, "detail": ticker_msg},
         "cache": {"ok": cache_ok, "detail": cache_msg},
+        "pc_link": {"ok": pc_ok, "detail": pc_msg},
     }
 
 
 def summarize(snapshot: dict) -> str:
-    """A one-line spoken summary of a health snapshot."""
+    """A one-line spoken summary of a health snapshot.
+
+    It used to open with "All systems nominal" over a three-component check — an overclaim the owner
+    can act on, and the same defect class as a status page that shows green because it never asked.
+    It now names its coverage, so "healthy" is scoped to what was actually looked at.
+    """
     bad = [name for name, s in snapshot.items() if not s.get("ok")]
     if not bad:
-        return "All systems nominal, sir — vault, cache, and reminders are all healthy."
+        seen = ", ".join(_SPOKEN.get(n, n) for n in snapshot)
+        return f"Everything I can see is healthy, sir — {seen}."
     parts = [f"{name} ({snapshot[name]['detail']})" for name in bad]
     return "I'm partly degraded, sir: " + "; ".join(parts) + "."
 
@@ -96,4 +136,6 @@ async def health_signals() -> list[Signal]:
             key="health-ticker", kind="health", urgency=0.65,
             message="Sir, your always-on reminder host isn't responding — recurring reminders may not fire.",
         ))
+    # No signal for pc_link on purpose: a closed laptop is a normal state of the world. It is
+    # reported in the snapshot and spoken when he ASKS how he is, never pushed at him.
     return signals

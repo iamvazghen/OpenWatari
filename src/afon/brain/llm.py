@@ -163,6 +163,29 @@ def _recover_textual_toolcall(err: Exception):
     return ChatCompletionMessage(role="assistant", content=None, tool_calls=tcs)
 
 
+#: The wire markers for a fully exhausted failover chain. These are CONSTANTS because the sentence
+#: is load-bearing outside this process: bench/run_all_tests.py reads a child's stdout and uses this
+#: text to tell "no reachable model in this environment" (SKIP) from a real failure (FAIL). A
+#: subprocess can only communicate in text, so the coupling cannot be removed — but it can be named,
+#: and bench/test_llm_chain_exhausted.py asserts the harness and this module still agree (J7.2).
+CHAIN_EXHAUSTED = "all LLM models failed"
+VISION_CHAIN_EXHAUSTED = "all vision models failed"
+
+
+class ChainExhausted(RuntimeError):
+    """Every model in the failover chain refused — Afon has lost the ability to think, not just one call.
+
+    A distinct type because three consumers must tell it apart from an ordinary call failure: the
+    brain (apologise, do not retry into the same wall), the error journal (its own operation, with
+    every model's error attached), and the test harness (SKIP, not FAIL).
+
+    Subclasses ``RuntimeError`` deliberately — the same adoption trick as ``ToolResult(str)`` in
+    J7.3. Every existing caller already catches ``RuntimeError`` or ``Exception``, so the type is
+    purely additive: nothing changes behaviour, and callers that WANT the distinction can now ask
+    for it by type instead of by reading the message.
+    """
+
+
 class _EmptyResponse(Exception):
     """A model returned 200 but with no usable choice (some proxies wrap errors in a 200)."""
 
@@ -466,7 +489,7 @@ class LLMClient:
         _err.record_op("agentic", "llm_chain_exhausted", ok=False,
                        detail=f"all {failures} model(s) failed; last: {type(last_err).__name__}: {last_err}",
                        context={"errors": str(errors)[:200]})
-        raise RuntimeError(f"all LLM models failed; last error: {last_err}")
+        raise ChainExhausted(f"{CHAIN_EXHAUSTED}; last error: {last_err}")
 
     async def stream_with_tools(
         self,
@@ -609,7 +632,7 @@ class LLMClient:
                 self._mark_failure(model, e)
                 logger.warning(f"LLM stream '{model}' failed ({type(e).__name__}); trying next")
                 continue
-        raise RuntimeError(f"all LLM models failed; last error: {last_err}")
+        raise ChainExhausted(f"{CHAIN_EXHAUSTED}; last error: {last_err}")
 
     async def see(
         self,
@@ -653,7 +676,7 @@ class LLMClient:
                 last_err = e
                 logger.warning(f"vision model '{model}' failed ({type(e).__name__}); trying next")
                 continue
-        raise RuntimeError(f"all vision models failed; last error: {last_err}")
+        raise ChainExhausted(f"{VISION_CHAIN_EXHAUSTED}; last error: {last_err}")
 
     async def stream(
         self,
@@ -720,4 +743,4 @@ class LLMClient:
                 self._mark_failure(model, e)
                 logger.warning(f"LLM stream '{model}' failed ({type(e).__name__}); trying next")
                 continue
-        raise RuntimeError(f"all LLM models failed; last error: {last_err}")
+        raise ChainExhausted(f"{CHAIN_EXHAUSTED}; last error: {last_err}")

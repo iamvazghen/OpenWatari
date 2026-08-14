@@ -1566,15 +1566,74 @@ means the nodes grouped together barely reference each other.
       `bench/test_health_agreement.py` 10/10 asserts the only guarantee the owner cares about:
       **when a component is genuinely broken, no surface calls it healthy** — not that they use the
       same words or run the same probe.
-- [ ] **J3.7 — Nine health/reliability communities, no facade. (P2)** reliability · voice_health ·
-      uptime_watch · diagnose · errors · Metrics · watch_audio_liveness · singleton · _supervisor.
-- [ ] **J3.8 — Composio is split router/catalog with a third `_configured()`. (P2)** Community 110
-      (`composio.py`) and 108 (`composio_catalog.py`); `_configured()` also defined independently in
-      `phone.py`.
-- [ ] **J3.9 — Camera has three detection paths and two capture paths. (P2)** `_detect_boxes`,
-      `_detect_faces`, `_gray_faces` in `camera.py`; capture via `_capture_burst` (camera.py) *and*
-      `_capture_jpeg` / `_camera_capture_local` (community 141, `look_around`). The I1 second factor
-      picked one of these; nothing says it picked the right one.
+- [x] **J3.7 — DONE 2026-08-14. Eight of the nine are not the same question; the ninth thing was
+      real and a facade would only have fixed it by accident.** The nine split three ways:
+      - **Different hosts.** `voice_health`, `watch_audio_liveness`, `_supervisor` are EDGE organs,
+        in another process on another machine. A facade spanning them and the brain's checks means
+        the brain importing edge internals — which `test_layering.py` (J8.4) forbids, correctly.
+        That is a process boundary, not a missing abstraction.
+      - **Different questions.** `Metrics` counts; `diagnose` reports what recently ERRORED, from
+        the journal; `errors` types failures; `singleton` stops two of something. Merging any pair
+        loses information.
+      - **The same question twice** — brain component health, asked structurally (`health.check()`)
+        and functionally (`health_probe()`). J3.6 settled that one, and the guarantee was agreement
+        rather than sameness.
+      What was left is what the facade would have papered over: **coverage honesty.**
+      `summarize()` opened with *"All systems nominal, sir"* over a three-component check that never
+      looked at the laptop, the LLM chain, or the edge. The owner can act on that sentence, and
+      spoken it is worse than on a status page — there is no component list beside it to contradict
+      it. Now it names its coverage ("Everything I can see is healthy, sir — your vault, reminders,
+      the cache, the laptop"), and `_SPOKEN` makes the coverage claim and the component list the
+      same object, so a check added later cannot fall out of the sentence.
+      Also added `pc_link` to the snapshot: a dark laptop means device control, camera and screen
+      are all unreachable, which is not "nominal". It raises **no** proactive signal — a closed
+      laptop is a normal state of the world, so he says it when asked and never pages about it.
+      `test_phasex_audit_health_modes.py`'s "summarises as nominal" assertion encoded the defect
+      and was updated to assert the scoped contract instead.
+      *gate:* `bench/test_health_coverage.py` 11/11.
+- [x] **J3.8 — DONE 2026-08-14. The duplication was a false positive; the split hid a real cache
+      bug, and that is what got fixed.** Both halves of the finding, adjudicated:
+      - **The third `_configured()` is not a duplicate.** `phone.py`'s checks three Twilio vars,
+        `composio.py`'s checks `composio_api_key`. J3.10 already ruled on this exact class — the
+        graph sees the NAME. Merging them would have been the bug. No change made, and this is
+        recorded so the finding does not come back a third time.
+      - **The router/catalog split is correct and already shares its primitives.**
+        `composio_catalog.refresh()` imports `_context`/`_get` from the tool module rather than
+        re-implementing them; the split is tool-surface vs prompt-cache, which is a layer boundary,
+        not duplication.
+      What the split DID hide: `_context()` memoised on its own return values —
+      `if _user_id is not None and _active_toolkits is not None` — so the cache key was the payload
+      rather than whether the lookup succeeded. That breaks in both directions:
+      - a failed lookup with `composio_user_id` set produced `(uid, empty set)`, indistinguishable
+        from a genuine "no connected apps", and was cached **for the process lifetime** — one
+        network blip or a rotated key disabled toolkit scoping until the next brain restart, with
+        the cause swallowed by a bare `except: pass`;
+      - a **successful** lookup that resolved no user id never engaged the memo at all, so every
+        `composio_find_tools` re-hit `/connected_accounts` from inside the turn, while the owner
+        waited.
+      Fixed with an explicit `_context_resolved` flag: memoise on success, retry on failure, and
+      log the failure at debug instead of discarding it. `refresh()` now checks `_configured()`
+      first — unconfigured, it used to fall through and log a WARNING on every daily refresh, an
+      alarm for a state nobody broke. `test_composio_router.py`'s two memo resets were updated to
+      clear the new flag; without that they would have kept passing while testing nothing.
+      *gate:* `bench/test_composio_context_cache.py` 10/10.
+- [x] **J3.9 — DONE 2026-08-14. Three detection paths is a miscount; the real gap was that nothing
+      said which path the second factor uses.** Read the bodies:
+      - **One frontal detector.** `_detect_boxes` is it. `_detect_faces` (count) and `_gray_faces`
+        (100×100 identity crops) are thin consumers of it, so detection changes reach counting and
+        recognition together — the property you want, and previously unasserted.
+      - **`_person_evidence` is not a detector of the same kind and must not become one.** It
+        answers OCCUPANCY with profile/upper-body cascades that are useless for identity. A profile
+        crop matched against frontal refs is noise that surfaces as a false "I recognise you".
+      - **Two capture paths, both correct.** `_capture_burst` (open once, N frames) for presence and
+        identity, because one frame is a coin flip when the owner glances away; `_capture_jpeg` (one
+        well-exposed frame) for `look_around`, where the VLM sees a single image and a burst is pure
+        waste.
+      So the resolution is an assertion, not a merge — the failure mode here is silent (presence
+      quietly downgraded to a single frame, or identity quietly fed from the occupancy cascade),
+      and it would read as "recognition got worse" months later with no bisect point.
+      *gate:* `bench/test_camera_routing.py` 12/12 — pins the detector's two consumers, that
+      evidence yields no recognition crop, and that presence↔burst / look_around↔single hold.
 - [x] **J3.10 — DONE 2026-08-10. Marked VERIFIED, but only 2 of the 6 are real; the rest are name
       collisions and merging them would be a BUG.** Read every body before touching anything:
       | helper | verdict |
@@ -1842,8 +1901,24 @@ root cause, both silent — nothing errored, the app simply started fresh.
       `bench/_harness.py` (J3.1) was cited as though it exists rather than as the proposal it is;
       `brain/tools/mynews.py` read as a live orphan after it had been removed by hand. All four
       corrected. 10/10.
-- [ ] **J5.2 — README (community 75, 22 nodes, cohesion 0.09) barely connects to code. (P2)** The
-      feature tour can drift arbitrarily far from the tool registry with nothing objecting.
+- [x] **J5.2 — DONE 2026-08-14. The tour is now anchored to the registry, and the anchor is tested
+      against planted drift rather than assumed.** README is not unrelated to the code — 47 of its
+      backticked identifiers are live tool names — so it goes stale by *drifting*, which is the
+      failure that had already happened once: a `glasses/` bridge advertised as shipped and "on" for
+      weeks after the scaffold was deleted. `test_doc_paths.py` catches the path version of that;
+      nothing caught the capability version.
+      Three claims are gated now, each of which has been wrong here before:
+      - a backticked `snake_case` name one edit from a real tool (the rename that README missed);
+      - a capability bullet naming something not callable — resolved against **registry + agent
+        built-ins**, because `delegate_to_fleet` is a built-in schema added in `agent.py` and a
+        naive registry check would call the correct README wrong;
+      - `pip install .[x]` naming an extras group that no longer exists in `pyproject.toml`.
+      Deliberately NOT "every backticked word must resolve": README talks about shells and
+      third-party packages, and that version of the rule produces a wall of false positives and gets
+      switched off within a week.
+      Verified by planting two regressions (`look_arond` for `look_around`, and a `glasses_stream`
+      bullet): both were caught. A gate that has never been shown to fail is not yet a gate.
+      *gate:* `bench/test_readme_claims.py` 6/6.
 - [x] **J5.3 — CLOSED 2026-08-13. The skill doc was already right; README was not.** Verified:
       `glasses/` was deleted in 2d078f4 ("delete unused client stubs") and
       `skills/web-and-typescript.md` says so outright ("`glasses/` no longer exists … do not offer
@@ -1990,9 +2065,26 @@ root cause, both silent — nothing errored, the app simply started fresh.
       cluster (all per-attempt retries inside a loop that reports its own outcome).
       Suites re-run green: finetune 40/40, phase9_memory 27/27, phase10_proactive 44/44,
       memory_behavioral 18/18.
-- [ ] **J7.2 — Exception types are structural graph participants. (P2)** `RuntimeError` and
-      `Exception` appear as *nodes* in communities 17, 42, 98 and 164. Control flow routes through
-      generic exceptions rather than domain errors.
+- [x] **J7.2 — DONE 2026-08-14. One of those generic exceptions was carrying the single most
+      consequential state in the system, in English.** `RuntimeError` as a graph node is mostly
+      benign: the fail-quiet `except Exception` handlers are deliberate degradation, and J7.3
+      already gave tool failures a taxonomy. But the *raise* side had one real case —
+      `raise RuntimeError(f"all LLM models failed; last error: …")`, four sites — and three
+      consumers need to tell that condition apart from an ordinary call failure: the brain
+      (apologise, don't retry into the same wall), the error journal (`llm_chain_exhausted`, with
+      every model's error attached), and **the test harness**.
+      The harness is the bite: `run_all_tests.py` reads a child's stdout and greps for the literal
+      words *"all LLM models failed"* to decide whether an offline run is a SKIP or a real FAIL.
+      A harness in one file matching a sentence written in another, with nothing connecting them —
+      reword the message and every offline suite run silently flips classification, in either
+      direction. The same prose-matching class as J3.6 and J7.3.
+      Now: `ChainExhausted(RuntimeError)` plus `CHAIN_EXHAUSTED` / `VISION_CHAIN_EXHAUSTED`
+      constants. Subclassing RuntimeError is the same adoption trick as `ToolResult(str)` — every
+      existing caller already catches `RuntimeError` or `Exception`, so the type is purely additive
+      and callers that want the distinction can now ask by type instead of reading the message.
+      The text coupling to the harness cannot be removed (a subprocess speaks only text) but it is
+      now named and asserted, and llm.py may spell the marker exactly once — at the constant.
+      *gate:* `bench/test_llm_chain_exhausted.py` 10/10.
 - [x] **J7.3 — DONE 2026-08-12. `ErrorKind` + `ToolResult` in `brain/tools/base.py`;
       `bench/test_error_taxonomy.py` (34/34).**
       Eight kinds, each annotated with the DECISION it licenses, because a taxonomy that does not
@@ -2307,6 +2399,22 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       every row outside every window and it reported "no activity recorded for today". That reads
       exactly like a product bug and is not one. The shim now moves both clocks by the same whole
       number of days, leaving durations and `time.monotonic()` alone.
+
+### L3e · A test that PASSES and still turns the suite red (observed 2026-08-14)
+
+- [ ] **`test_no_result_sentinels.py` printed `=== 12/12 checks passed ===` and then exited
+      `3221225477` (0xC0000005, an access violation) during interpreter shutdown.** The runner
+      caught it correctly and said so — *"no failing check printed — the child exited non-zero after
+      its summary"* — and the suite went red at 150/1/0 on a run where nothing was actually broken.
+      Not reproducible: three consecutive standalone runs exited 0. Seen once in ~8 full runs.
+      This is a native-teardown crash, not a Python one, so it will not appear in any traceback:
+      the candidates are the C extensions this particular test drags in through the tool imports
+      (cv2, onnxruntime, faiss, torch). **Do not chase it by re-running until it passes** — that
+      converts a real intermittent into an invisible one. The next step when it recurs is to capture
+      which extension is loaded at exit (`sys.modules` dump in an `atexit` hook) and pin the
+      teardown order, or run that one test in a subprocess that is allowed to `os._exit(0)` after a
+      clean summary. Record every recurrence here with the date and the exit code, so the rate is a
+      measured number rather than a memory.
 
 ### L3c · The "echo" had TWO causes, and the second one was the real bug (2026-08-10)
 

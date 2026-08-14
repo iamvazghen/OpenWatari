@@ -56,8 +56,11 @@ async def test_find_and_run() -> None:
     from afon.config import settings
 
     settings.composio_api_key = "test-key"
+    # Clear the memo the way a fresh process would. `_context_resolved` is the actual memo key since
+    # J3.8 — clearing only the values leaves the cache live and this test silently stops testing.
     cx._user_id = None
     cx._active_toolkits = None
+    cx._context_resolved = False
 
     async def fake_get(path, params=None):
         if path == "/connected_accounts":
@@ -91,6 +94,7 @@ async def test_find_and_run() -> None:
 
     settings.composio_api_key = None
     cx._user_id = cx._active_toolkits = None
+    cx._context_resolved = False
     out3 = await cx.composio_find_tools({"query": "x"})
     from afon.brain.tools.base import is_not_configured
     check("no key -> graceful not-configured note", is_not_configured(out3), out3)

@@ -43,9 +43,14 @@ def _catalog_path() -> Path:
 async def refresh() -> dict:
     """Fetch every tool across every ACTIVE toolkit from Composio. Cached on disk."""
     try:
-        from afon.brain.tools.composio import _context, _get
+        from afon.brain.tools.composio import _configured, _context, _get
     except ImportError as e:
         logger.warning(f"composio_catalog.refresh: imports failed ({e})")
+        return {}
+    if not _configured():
+        # An unset key is a configuration state, not a fault. Falling through to _context() logged a
+        # warning on every daily refresh — an alarm for something nobody broke (J3.8).
+        logger.debug("composio_catalog.refresh: no API key configured, skipping")
         return {}
     try:
         _, active = await _context()

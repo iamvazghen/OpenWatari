@@ -58,7 +58,11 @@ def main() -> None:
     check("snapshot has vault/cache/ticker", {"vault", "cache", "ticker"} <= set(snap))
     healthy = {"vault": {"ok": True, "detail": ""}, "cache": {"ok": True, "detail": ""},
                "ticker": {"ok": True, "detail": ""}}
-    check("all-ok summarises as nominal", "nominal" in summarize(healthy).lower())
+    # J3.7: the healthy line must be SCOPED, not "all systems nominal" — that sentence claimed
+    # coverage this check never had (no laptop, no LLM chain, no edge). test_health_coverage.py owns
+    # the full contract; this keeps the neighbouring assertion honest about the same thing.
+    check("all-ok summarises as healthy without claiming everything",
+          "healthy" in summarize(healthy).lower() and "all systems" not in summarize(healthy).lower())
     degraded = {"vault": {"ok": False, "detail": "missing"}, "cache": {"ok": True, "detail": ""},
                 "ticker": {"ok": True, "detail": ""}}
     check("a fault is named in the summary", "vault" in summarize(degraded).lower())

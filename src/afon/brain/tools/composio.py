@@ -27,9 +27,15 @@ from afon.config import settings
 _API = "https://backend.composio.dev/api/v3"
 _NEEDS = "a Composio API key (AFON_COMPOSIO_API_KEY) and at least one connected app"
 
-# Process-lifetime caches (resolved lazily on first use).
+# Process-lifetime caches (resolved lazily on first use). `_context_resolved` is the memo key, and
+# it is a separate flag ON PURPOSE (J3.8): memoising on the VALUES instead breaks in both directions.
+# A failed lookup with a configured user id yields (uid, empty set) — indistinguishable from a real
+# "no connected apps", so a network blip disabled toolkit scoping until the next restart. And a
+# SUCCESSFUL lookup that resolves no user id never engages the memo at all, so every find_tools call
+# re-hits /connected_accounts inside the turn. Memoise on success; retry on failure.
 _user_id: str | None = None
 _active_toolkits: set[str] | None = None
+_context_resolved: bool = False
 
 # Strong keyword -> toolkit slug. Only scopes when the toolkit is actually connected (checked at use);
 # a miss just falls through to the global search + fan-out. Keep short — obvious 1:1 signals only.
@@ -67,23 +73,26 @@ async def _post(path: str, body: dict) -> dict:
 
 async def _context() -> tuple[str | None, set[str]]:
     """Resolve the owner's Composio user_id + ACTIVE toolkit slugs (cached)."""
-    global _user_id, _active_toolkits
-    if _user_id is not None and _active_toolkits is not None:
-        return _user_id, _active_toolkits
+    global _user_id, _active_toolkits, _context_resolved
+    if _context_resolved:
+        return _user_id, _active_toolkits or set()
     uid = settings.composio_user_id
     toolkits: set[str] = set()
     try:
         data = await _get("/connected_accounts", {"limit": 500})
-        for a in data.get("items", []):
-            if a.get("status") == "ACTIVE":
-                slug = (a.get("toolkit") or {}).get("slug")
-                if slug:
-                    toolkits.add(slug)
-                if not uid:
-                    uid = a.get("user_id")
-    except Exception:  # noqa: BLE001 — degrade; a context miss just means an unscoped search
-        pass
-    _user_id, _active_toolkits = uid, toolkits
+    except Exception as e:  # noqa: BLE001 — degrade; a context miss just means an unscoped search
+        # Deliberately NOT memoised: this is not an answer, it is the absence of one. Serving it
+        # from cache would keep the search unscoped for the life of the process (J3.8).
+        logger.debug(f"composio context lookup failed, will retry ({type(e).__name__}: {e})")
+        return uid, toolkits
+    for a in data.get("items", []):
+        if a.get("status") == "ACTIVE":
+            slug = (a.get("toolkit") or {}).get("slug")
+            if slug:
+                toolkits.add(slug)
+            if not uid:
+                uid = a.get("user_id")
+    _user_id, _active_toolkits, _context_resolved = uid, toolkits, True
     return uid, toolkits
 
 
