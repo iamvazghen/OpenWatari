@@ -29,6 +29,7 @@ from afon.brain.tools import (
     groups_for_text,
     tool_handlers,
 )
+from afon.brain.tools.base import bound_tool_result
 
 # Short spoken filler per tool so a longer turn is never dead air. These are the BASE
 # acknowledgements; _ack_for() adds context from the arguments where it helps ("…for the rabbit
@@ -1473,7 +1474,8 @@ class AfonAgent:
                     reasoning=("the owner affirmed this action before it ran" if gated
                                else f"{out['name']} is a read/low-risk tool outside the confirm tier"),
                 )
-            messages.append({"role": "tool", "tool_call_id": c["id"], "content": str(out["result"])})
+            messages.append({"role": "tool", "tool_call_id": c["id"],
+                             "content": bound_tool_result(str(out["result"]), out["name"])})
             # A confirmed consequential action consumes the grant: one "yes" authorises one action.
             if confirm_required(out["name"], out["args"]) and out["ok"]:
                 self._confirm_granted = False

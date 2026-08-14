@@ -171,6 +171,8 @@ TESTS = [
      "test_llm_chain_exhausted.py", "offline", ["checks passed ==="]),
     ("Client endpoints (J4.5): the browser clients and the brain agree on route, verb and auth",
      "test_client_endpoints.py", "offline", ["checks passed ==="]),
+    ("Tool-result ceiling (J1.4): one tool that forgets to bound its output cannot cost the turn",
+     "test_tool_result_ceiling.py", "offline", ["checks passed ==="]),
     ("Park switch: a parked deployment stays parked — every entry point honours the lock",
      "test_maintenance_lock.py", "offline", ["checks passed ==="]),
     ("Health agreement (J3.6): when a component is broken, no surface reports it healthy",

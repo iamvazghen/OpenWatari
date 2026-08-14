@@ -150,6 +150,56 @@ def main() -> int:
     check(f"all {len(registered)} registered tests report failure through the exit code",
           not silent, f"count failures but always exit 0: {silent}")
 
+    print("\n[7] every registered test exercises shipped code, or is a declared structural gate (J6.3)")
+    # J6.3 asked whether the tiny, highly-cohesive test communities are hermetic *by design* or
+    # hermetic *by accident* — a test that asserts against its own stub is a green tick over zero
+    # shipped code. Audited: none of them are. Eleven never import the package, and every one of
+    # those is a STRUCTURAL gate whose subject genuinely is text (documents, layering, shell
+    # scripts, the registry itself); two more looked isolated only because they import
+    # `deploy/uptime_watch.py`, which the graph does not treat as part of the codebase.
+    #
+    # What keeps that true: a registered test must import something the repo ships, or be named
+    # here with a reason. Adding a test then forces a one-line decision instead of allowing a
+    # stub-only test to arrive unnoticed.
+    STRUCTURAL = {
+        "check_public_clean.py": "scans the tree for secrets — its subject IS the files",
+        "test_doc_paths.py": "asserts documents cite real paths",
+        "test_systems_plan.py": "asserts the plan's own structure",
+        "test_layering.py": "parses imports; importing the layers would defeat it",
+        "test_ops_scripts.py": "parses shell scripts",
+        "test_static_correctness.py": "AST checks over the source",
+        "test_client_endpoints.py": "compares HTML clients against the server's routes as text",
+        "test_enroll_script_parse.py": "parses the markdown enrolment script",
+        "test_run_all_tests_classifier.py": "this file — asserts the runner's contract",
+    }
+    import ast as _ast
+
+    shipped_roots = (bench_dir.parent / "src", bench_dir.parent / "deploy")
+    stub_only = []
+    for name in sorted(registered):
+        path = bench_dir / name
+        if not path.exists() or name in STRUCTURAL:
+            continue
+        try:
+            tree = _ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        touches = False
+        for node in _ast.walk(tree):
+            mods = []
+            if isinstance(node, _ast.ImportFrom) and node.module:
+                mods = [node.module]
+            elif isinstance(node, _ast.Import):
+                mods = [a.name for a in node.names]
+            for mod in mods:
+                head = mod.split(".")[0]
+                if head in ("afon", "deploy") or any((r / f"{head}.py").exists() for r in shipped_roots):
+                    touches = True
+        if not touches:
+            stub_only.append(name)
+    check(f"all {len(registered)} registered tests touch shipped code or are declared structural",
+          not stub_only, f"assert against nothing the repo ships: {stub_only}")
+
     print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
     return 0 if FAIL == 0 else 1
 

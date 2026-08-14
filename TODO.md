@@ -1408,8 +1408,8 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       meant editing ten of them while reading failures that name *Gmail* and *Notion* rather than
       the contract. Now it is one constant, and the failure says what broke. Verified by rewording
       the prose, watching the two producer/predicate checks trip first, then restoring.
-- [ ] **J1.4 — half miscount, half a real unbounded path. Diagnosed 2026-08-14; the fix is now
-      `docs/SYSTEMS.md` task 03.F4.** The premise that `clip()` is "spoken-output length policy at 50
+- [x] **J1.4 — DONE 2026-08-14. Half miscount, half a real unbounded path — the second half is
+      fixed and gated (also `docs/SYSTEMS.md` 03.F4).** The premise that `clip()` is "spoken-output length policy at 50
       call sites" does not survive reading them: the limits run from 8 to 6000 characters, so it is
       a general truncation utility used for a label, an excerpt and a document — centralising it
       would flatten distinctions that are deliberate.
@@ -1420,8 +1420,17 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       above every per-tool `clip()` limit so it never fights a tool's own sizing, with the
       truncation announced in the content (a model that can see its input was cut will narrow the
       query; one that cannot answers confidently from half a document).
-      *gate (planned):* `test_tool_result_ceiling.py` — 200k bounded, ordinary results
-      byte-identical, and every `clip()` limit in the tree asserted below the ceiling.
+      Shipped as a backstop in `brain/tools/base.py` beside `clip()` — `bound_tool_result()` with
+      `settings.tool_result_ceiling` (12000, three times the widest per-tool limit), applied at
+      **both** append sites. The worker was the worse of the two and nearly missed: it keeps the
+      message list across steps, so one unbounded result is paid again on every later step of an
+      unattended task, with nobody watching. The truncation marker names the tool and the original
+      size on purpose — a model that can see its input was cut narrows the query, one that cannot
+      answers confidently from half a document, which is the failure this repo calls fabrication.
+      Rollback is a settings value, not a revert.
+      *gate:* `bench/test_tool_result_ceiling.py` 15/15 — 200k bounded, ordinary results
+      byte-identical, both paths asserted, and all 31 `clip()` limits in the tree checked below the
+      ceiling so the backstop can never become the active policy.
 - [ ] **J1.5 — `LLMClient` betweenness 0.080, bridging vision / camera / multimodal / 4 test files.
       (P2)** Model access has no seam: `camera.py` and `multimodal.py` reach the LLM directly rather
       than through the agent, which is why vision changes keep touching the routing layer.
@@ -2094,12 +2103,23 @@ root cause, both silent — nothing errored, the app simply started fresh.
       Durable guard: `test_registry_complete.py` now AST-parses every bench file and fails on any
       `test_*` function that is defined and never invoked. Proved it fails on a planted orphan
       before trusting it. **Registration was never the real invariant — execution is.**
-- [ ] **J6.3 — Audit the very-high-cohesion tiny test communities. (P2)** 0.47–0.80 with 3–5 nodes:
-      test_self_repair, test_no_result_sentinels, check_public_clean, test_identity,
-      test_iphone_client, test_local_voice, test_pc_suspend, test_security_hardening,
-      test_setup_wizard, test_camera, verify_multilingual. Isolated means they touch almost nothing
-      real — worth separating hermetic-*by design* from hermetic-*by accident* (asserting against
-      stubs rather than the shipped path).
+- [x] **J6.3 — DONE 2026-08-14. Audited all 156 registered tests. None are hermetic by accident,
+      and the two that looked worst were a graph artefact.** The question was the right one — a test
+      asserting against its own stub is a green tick over zero shipped code, which is exactly J6.5's
+      failure in a different disguise. The audit (AST, every import including in-function ones):
+      - **Eleven never import the package at all, and all eleven are structural gates whose subject
+        genuinely IS text**: documents citing real paths, layering, shell scripts, secrets in the
+        tree, the HTML clients against the server's routes, the registry itself. Importing the
+        layers would defeat `test_layering.py`, not improve it.
+      - **`test_deadmans_switch.py` and `test_uptime_watch.py` looked isolated for a different
+        reason**: they import `deploy/uptime_watch.py`, which the graph does not treat as part of
+        the codebase. That is a **graphify manifest gap, not a test gap** — it belongs to J8.2.
+      - `test_setup_wizard.py` reads as import-free to a naive scan because it imports the wizard
+        *inside* a function. It exercises the real module.
+      Gated so it stays true: a registered test must import something the repo ships (`src/` or
+      `deploy/`) or be named in a declared structural list with a reason — adding a test now forces
+      a one-line decision instead of letting a stub-only test arrive unnoticed.
+      *gate:* `bench/test_run_all_tests_classifier.py` [7], 12/12.
 - [ ] **J6.4 — `check()`/`main()` as universal names is the root cause of J2's depressed scores.
       (P1)** Fixing J3.1 fixes this; listed separately because the *benefit* is graph legibility, not
       code volume.

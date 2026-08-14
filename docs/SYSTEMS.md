@@ -629,13 +629,14 @@ cannot own the turn.
 - [x] 03.F1 Typed failure contract everywhere — `tool_failed()`, `is_not_configured()`, no
       prose-matching. *gate:* `test_no_result_sentinels.py`, `test_tool_failure_guard.py`
 - [x] 03.F2 Missing-argument handling asks rather than fabricates. *gate:* `test_missing_arg.py`
-- [ ] 03.F4 **A ceiling on tool results at the boundary.** `agent.py` appends `str(result)` into
+- [x] 03.F4 **A ceiling on tool results at the boundary.** `agent.py` appends `str(result)` into
       the message list with no cap, so one oversized scrape or document read enters the next
       prefill whole — on the path that is already the dominant per-turn cost. A backstop above every
       per-tool `clip()` limit (so it never fights a tool's own sizing), announced in the content so
       the model can narrow rather than answer from half a document. This is the real half of J1.4.
-      *gate:* new `test_tool_result_ceiling.py` — 200k bounded, ordinary results byte-identical, and
-      every `clip()` limit in the tree asserted below the ceiling.
+      Shipped at **both** append sites — the live turn and the autonomous worker, which was the
+      worse of the two because its loop keeps the message list across steps.
+      *gate:* `test_tool_result_ceiling.py` 15/15.
 - [ ] 03.F3 **Catalogue narrowing is measured, not assumed.** Per-turn tool count and token cost land
       in the trace; the 58-tool prefill is the number to beat (TODO K2).
       *gate:* `test_speed.py` asserts a hard ceiling on presented-catalogue tokens.
@@ -3283,7 +3284,7 @@ green, `E` = elite green.
 |---|---|---|---|---|---|
 | S01 | Brain / Core Intelligence | structured badly | 1/3 | 0/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 2/3 | 0/3 | 0/1 |
-| S03 | Tool Utilization | complete for now | 2/4 | 0/4 | 0/1 |
+| S03 | Tool Utilization | complete for now | 3/4 | 0/4 | 0/1 |
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
@@ -3332,8 +3333,8 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals at the moment of writing: 65 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite
-tasks — 65 of 360.** The floors are the furthest along because the last three weeks of work were
+**Totals at the moment of writing: 66 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite
+tasks — 66 of 360.** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
 derived from the checkboxes in the sections above and must be re-derived, not edited by hand.
 

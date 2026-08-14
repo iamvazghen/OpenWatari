@@ -370,6 +370,12 @@ class Settings(BaseSettings):
     # missing integration. Flip a key in .env to light each one up.
     http_timeout_seconds: int = 20
 
+    # J1.4 — the backstop on a single tool result entering the message list. Deliberately WELL above
+    # every per-tool clip() limit (the widest is vault_read_max_chars at 4000): this must never fight
+    # a tool's own sizing decision, only catch the one that forgot. Raise it if a legitimate tool
+    # genuinely needs more; that is the rollback, and no code change is required.
+    tool_result_ceiling: int = 12000
+
     # Obsidian vault (read/search the LOCAL mirror). vault_path is defined above.
     vault_search_max_results: int = 6
     vault_read_max_chars: int = 4000

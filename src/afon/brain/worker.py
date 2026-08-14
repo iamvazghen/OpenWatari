@@ -23,6 +23,7 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from afon.brain.proactive import confirm_required
+from afon.brain.tools.base import bound_tool_result
 
 _TAG_RE = re.compile(r"<\s*/?\s*(tool_call|function|tool_response|arg_key|arg_value)\s*>|<\|[^>]*\|>",
                      re.IGNORECASE)
@@ -140,7 +141,10 @@ class TaskWorker:
                             logger.warning(f"work_on_task tool {name} failed: {type(e).__name__}")
                             result = f"tool {name} errored ({type(e).__name__}); work around it."
                     used.append(name)
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                # Bounded before it enters the list (J1.4): this loop KEEPS the messages, so an
+                # unbounded result is paid again on every later step of an unattended task.
+                messages.append({"role": "tool", "tool_call_id": tc.id,
+                                 "content": bound_tool_result(result, name)})
             if on_progress and used:
                 on_progress(f"step {step + 1}: used {', '.join(used)}")
         else:

@@ -200,3 +200,29 @@ async def http_patch(url: str, **kw: Any) -> httpx.Response:
 def clip(text: str, limit: int) -> str:
     text = (text or "").strip()
     return text if len(text) <= limit else text[:limit].rstrip() + " …(truncated)"
+
+
+#: The backstop, not a policy (J1.4). ``clip()`` above is a per-tool sizing decision — the limits
+#: across the tree run from 80 to 4000 characters because a label, an excerpt and a document are
+#: different things. This is the ceiling for a tool that made no such decision at all.
+TOOL_RESULT_CEILING = settings.tool_result_ceiling
+
+
+def bound_tool_result(result: str, tool: str) -> str:
+    """Cap one tool result before it enters a message list, and SAY that it was capped.
+
+    Both paths that append ``{"role": "tool", ...}`` used the raw string. On the live turn that puts
+    an oversized scrape or document straight into the next request's prefill — already the dominant
+    per-turn cost. In the autonomous worker it is worse: the loop keeps the message list and pays for
+    it again on every subsequent step, with nobody watching.
+
+    The marker is not decoration. A model that can see its input was truncated, by which tool, and
+    how much there was, can narrow the query or ask for the rest; one that cannot answers
+    confidently from half a document — which is the failure mode this repo calls fabrication.
+    """
+    text = result or ""
+    if len(text) <= TOOL_RESULT_CEILING:
+        return text
+    head = text[:TOOL_RESULT_CEILING].rstrip()
+    return (f"{head}\n\n[truncated: {tool} returned {len(text)} characters, "
+            f"{TOOL_RESULT_CEILING} shown — narrow the query or ask for the rest]")
