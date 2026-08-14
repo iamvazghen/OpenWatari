@@ -15,6 +15,12 @@ each with its reason recorded so it is not re-proposed every quarter). Before ad
 read *Standing technology decisions* there. Before writing a test, read *How coherence is tested* —
 five tiers and twelve cross-system journeys, sized for three processes rather than fifty services.
 
+And the **economics**, per system: confidence (`grounded` / `reasoned` / `guess`) with the one
+measurement that would settle it, effort in engineering-days, the owner's own time, €/month, and how
+to roll it back. Totals: **424 engineering-days · 10h35m of owner time · €2–8/month added · 25
+grounded, 18 reasoned, 7 guesses** — six of the seven guesses are settled by an owner decision, not
+by engineering. The blocking owner items are listed there in one table, worst first.
+
 **Goal:** behavioral production-readiness **≥ 95/100 overall (no category < 90)** and **all 22 subsystems
 genuinely Strong** — objectively, from real test/benchmark runs, never a relabel.
 
