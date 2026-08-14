@@ -1468,7 +1468,32 @@ means the nodes grouped together barely reference each other.
       runtime-preferences store and home-location resolution share one community for no reason.
 
 ### J3 · Duplication the graph makes visible
-- [ ] **J3.1 — 112 of 157 bench files define their own `check()`; 129 define `main()`; no shared
+- [x] **J3.1 + J6.4 — DONE 2026-08-14 as an adjudication plus one real gate. The duplication is
+      structural, not accidental, and merging it would break the thing that makes these tests
+      useful.** Each bench file is executed by the runner as a **subprocess**, and must therefore
+      run standalone — `uv run python bench/test_x.py` with no harness on the path, no conftest, no
+      import of a sibling. That is exactly why `check()` and `main()` are re-declared 112 and 129
+      times: a shared `bench/_harness.py` does not exist and should not — it would make every test
+      depend on a module that the failure it is diagnosing might itself have broken. It also depresses J2's cohesion scores by name
+      collision alone (J6.4's own diagnosis), which is a measurement artefact, not a defect.
+      **But the duplication does re-implement a contract 112 times, and one omission is invisible.**
+      The runner passes a test on `exit == 0 AND every needle present`; the needle
+      (`checks passed ===`) is printed by counter-style files whether they passed or failed, so the
+      exit code is the only thing carrying the verdict. A file that counts failures and then exits 0
+      would report failing checks to the runner as a green tick — the same shape as J6.5's orphan
+      test functions, which happened for real, four times.
+      Audited all 155 registered files: **zero are in that state.** Two sound styles exist and both
+      are fine — count-and-exit, or assert-based with a literal summary printed only after the
+      asserts (a failed assert exits non-zero by itself; `test_backup_restore.py`,
+      `test_fleet_routing.py` and `test_pc_agent_refuse.py` are the three of those). What is not
+      allowed is counting failures and exiting 0 regardless, and that is now gated.
+      Deliberately added to `test_run_all_tests_classifier.py` rather than a new file: it is the
+      other half of the same contract, and `test_registry_complete.py` — the natural home — is
+      exempt from the registry it guards, so a check placed there would only run at deploy.
+      *gate:* `bench/test_run_all_tests_classifier.py` [6], 11/11. Verified discriminating against a
+      planted counter-without-exit file.
+- [x] ~~**J3.1 (original text, superseded by the entry above — the shared harness was declined with
+      reasons, not forgotten) — 112 of 157 bench files define their own `check()`; 129 define `main()`; no shared
       harness exists. (P1, VERIFIED)** This is why `main` appears as a **community hub 14 separate
       times** and why test nodes collapse into implementation communities, depressing every cohesion
       score in J2. One new `bench/_harness.py` (planned, not yet written) would delete ~112 copies
@@ -1840,9 +1865,22 @@ root cause, both silent — nothing errored, the app simply started fresh.
         `.example` is checked in;
       * **every script referenced by another script exists** (12 cross-references) — a missed rename
         otherwise surfaces only when that branch runs, which for ops scripts means during an incident.
-- [ ] **J4.5 — `clients/` (iPhone HTML/JS) is isolated and only statically checked. (P2)** Community
-      161 (`test_iphone_client.py`, 3 nodes) verifies it "statically + server injection". No edge to
-      the brain sidecar it actually talks to.
+- [x] **J4.5 — DONE 2026-08-14. The clients are now checked against the brain they actually call.**
+      Two surfaces a human touches without Afon's voice: `clients/iphone/index.html` POSTs audio to
+      `/talk`, `clients/hud/index.html` GETs `/hud.json`. The existing test verifies the page in
+      isolation, which cannot see a renamed route, a route that moved between `do_GET` and
+      `do_POST`, or an auth scheme the server stopped accepting.
+      That break is unusually quiet: the page still loads, the fetch returns 404/401, and the client
+      shows its own polite error — indistinguishable from "the brain is down". The owner concludes
+      the phone client is flaky and nobody bisects it.
+      Three couplings now asserted: **route** (every fetched path is a route in `server.py`),
+      **verb** (`/talk` is served by `do_POST`, `/hud.json` by `do_GET` — verified discriminating:
+      each handler body contains one and not the other), and **auth** (`_post_authorized` accepts
+      BOTH the `Authorization: Bearer` the iPhone sends and the `?token=` the HUD appends, because
+      a plain page poll cannot set headers; tightening it to headers only would 401 the HUD and look
+      like a token problem).
+      Static by construction — reads two HTML files and the server module as text, starts no brain
+      and opens no port. *gate:* `bench/test_client_endpoints.py` 9/9.
 - [x] **J4.6 + J4.7 — DONE 2026-08-12, and the linter found a live one.**
       `skills/research-method.md` rung 3 offered "**`scrape_url` / `read_page`**" and `read_page`
       has never been a tool — a third of that rung pointed at nothing, and Afon following it would
