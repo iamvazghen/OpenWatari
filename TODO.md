@@ -9,6 +9,12 @@ system, each with a floor, ordered raises, and a named verification gate on ever
 together define the finish line. Neither supersedes the other, and a task may live in either — but
 a status only moves when the gate named in `docs/SYSTEMS.md` passes in a recorded suite run.
 
+It also owns the **stack decisions**: per system, what Afon runs on, what to add and why, and what
+was declined and why (Postgres, Kubernetes, LangGraph, Celery, Vault, NeMo Guardrails and the rest —
+each with its reason recorded so it is not re-proposed every quarter). Before adding a dependency,
+read *Standing technology decisions* there. Before writing a test, read *How coherence is tested* —
+five tiers and twelve cross-system journeys, sized for three processes rather than fifty services.
+
 **Goal:** behavioral production-readiness **≥ 95/100 overall (no category < 90)** and **all 22 subsystems
 genuinely Strong** — objectively, from real test/benchmark runs, never a relabel.
 
@@ -1396,9 +1402,20 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       meant editing ten of them while reading failures that name *Gmail* and *Notion* rather than
       the contract. Now it is one constant, and the failure says what broke. Verified by rewording
       the prose, watching the two producer/predicate checks trip first, then restoring.
-- [ ] **J1.4 — `clip()` has 50 edges — a truncation helper is the 4th-largest hub. (P2)** Spoken-
-      output length policy is applied at 50 scattered call sites instead of once at the speech
-      boundary. Every new tool must remember to call it; nothing catches one that forgets.
+- [ ] **J1.4 — half miscount, half a real unbounded path. Diagnosed 2026-08-14; the fix is now
+      `docs/SYSTEMS.md` task 03.F4.** The premise that `clip()` is "spoken-output length policy at 50
+      call sites" does not survive reading them: the limits run from 8 to 6000 characters, so it is
+      a general truncation utility used for a label, an excerpt and a document — centralising it
+      would flatten distinctions that are deliberate.
+      The second half is right and was unguarded: **nothing catches a tool that forgets.**
+      `agent.py` appends `str(out["result"])` into the message list with **no ceiling at all**, so
+      one oversized scrape or document read enters the next request's prefill whole — on the path
+      that is already the dominant per-turn cost (K2). The fix is a backstop at the boundary, set
+      above every per-tool `clip()` limit so it never fights a tool's own sizing, with the
+      truncation announced in the content (a model that can see its input was cut will narrow the
+      query; one that cannot answers confidently from half a document).
+      *gate (planned):* `test_tool_result_ceiling.py` — 200k bounded, ordinary results
+      byte-identical, and every `clip()` limit in the tree asserted below the ceiling.
 - [ ] **J1.5 — `LLMClient` betweenness 0.080, bridging vision / camera / multimodal / 4 test files.
       (P2)** Model access has no seam: `camera.py` and `multimodal.py` reach the LLM directly rather
       than through the agent, which is why vision changes keep touching the routing layer.

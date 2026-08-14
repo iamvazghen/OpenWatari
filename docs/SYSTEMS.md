@@ -8,10 +8,11 @@ and "elite in production" concretely mean, and which test decides. Where a task 
 `TODO.md`, this document cites it rather than restating it. **Together the two define the finish
 line; neither does alone.**
 
-**Written 2026-08-14.** State at that moment: hermetic suite **151 passed / 0 failed / 0 skipped**;
-last behavioural grade **84.9/100** (target ≥95, no category <90); **136 registered tools**; Afon
-**parked** by `~/.afon/MAINTENANCE` on both hosts, deliberately out of production until this plan's
-floors are met.
+**Written 2026-08-14; revised the same day** to carry the stack and testing decisions for every
+system (see *Standing technology decisions* and *How coherence is tested*). State at the time of
+writing: **158 registered tests**, last full run green; last behavioural grade **84.9/100** (target
+≥95, no category <90); **136 registered tools**; Afon **parked** by `~/.afon/MAINTENANCE` on both
+hosts, deliberately out of production until this plan's floors are met.
 
 ---
 
@@ -23,6 +24,10 @@ Status      — one of: complete-for-now · built, not well structured · half-b
 Surfaces    — the modules that own it today
 The bar     — the observable behaviour that counts as elite. Written as what the owner sees.
 Budget      — the latency / token / memory numbers it must hold
+Stack       — what it runs on today; what to ADD and why; what was DECLINED and why. A declined
+              choice is recorded with its reason so it is not re-proposed every quarter.
+Verified by — the test METHODS this system needs (corpus, fixtures, fault injection, drill),
+              beyond the specific gate named on each task.
 Floor       — make it exist and stop it lying. Nothing else in the system starts until these pass.
 Raise       — small, ordered, each independently shippable and independently verified.
 Elite       — the last mile: behaviour under real production conditions, not test conditions.
@@ -73,6 +78,144 @@ inherits. Concretely, three prohibitions apply everywhere:
 
 ---
 
+# The architecture this plan is for
+
+Every technology choice below is downstream of one fact, so it is stated once here rather than
+argued fifty times: **the fifty systems are capabilities inside three processes, not fifty
+services.**
+
+| | |
+|---|---|
+| **brain** | one Python process on one VPS (`jarvis-brain`, a systemd **user** unit with linger). Holds the agent loop, 136 tools, every memory store, the scheduler and the HTTP/WS surface. |
+| **edge** | one Python process on the laptop — the pipecat voice pipeline, wake word, VAD, STT/TTS, speaker gate. |
+| **pc_agent** | one Python process on the laptop — the hands: browser, files, apps, audio devices, camera. |
+
+Three network boundaries exist in total: **edge ↔ brain** (WebSocket), **brain ↔ pc_agent**
+(PC_LINK WebSocket), and **brain ↔ the outside world** (HTTPS to providers). Everything else that
+looks like an interface — "the proactivity engine talks to the context engine" — is a Python
+function call inside one process.
+
+That is not an accident to be fixed later. It is what makes a single-owner assistant answer in under
+two seconds, survive on one small VPS, and be debuggable by one person. A microservice topology
+would buy independent scaling that nobody needs and pay for it in latency, operational surface and
+failure modes at every hop.
+
+**So the standard distributed-systems playbook does not apply here, and applying it anyway is the
+main risk to this plan.** Contract tests between two functions in the same module are a type
+checker. A message broker between two objects on the same heap is a bug generator. Kubernetes for
+one node is a second system to keep alive. Where those techniques *do* apply — and several do, at
+exactly three boundaries — they are named in the relevant section.
+
+**Where each language earns its place.** Python is the whole system today and should stay so: the
+libraries that matter here (pipecat, SpeechBrain, OpenCV, ArcFace, the provider SDKs) are Python
+first, and a second language buys a boundary to maintain. TypeScript already exists where it belongs
+— the two browser clients, which are HTML/JS by necessity. **Rust or Go are declined outright**
+until something is *measured* too slow in Python; today the latency budget is spent on model
+inference and network round-trips, not on interpreter overhead, so a rewrite would move work from
+the slow part to the fast part.
+
+---
+
+# Standing technology decisions
+
+These answer, once, what to adopt and what to leave alone. A section may override a line here only
+by saying so and giving a reason.
+
+**Adopted — worth adding, cheap, and it closes a real gap**
+
+| Choice | Where | Why |
+|---|---|---|
+| `respx` (HTTP-layer fixtures for httpx) | S02, S20, S41 | Today's stubs monkeypatch client objects, which cannot exercise timeouts, 429 bodies or partial streams — the three cases failover exists for. |
+| `Hypothesis` (property-based tests) | S01, S03, S21 | Clause ordering, argument validation and date handling all fail on inputs nobody thought to write down. |
+| `tiktoken` | S03, S07 | The prefill budget is currently estimated. A budget you cannot measure is a hope. |
+| JSON-Schema validation before dispatch | S03 | The schemas already exist and nothing enforces them; this is what makes a one-shot repair prompt possible. |
+| Jinja2 + WeasyPrint | S06 | Real documents with no system binary on the brain host. |
+| Beancount (plain-text ledger) | S40 | Auditable, diffable, git-versioned, read-only by construction. |
+| A Prometheus-format `/metrics` rendering | S31 | A text endpoint costs nothing and makes any future scraper optional rather than required. |
+| OpenTelemetry-**compatible** correlation ids | S01, S31 | One id per turn, propagated edge → brain → tool → audit. The value is the id, not the collector. |
+| Recorded fixtures (HAR, frames, utterances, responses) | S05, S10, S11, S20, S26 | The systems that keep regressing regress against *data*, and the missing asset is almost always a corpus, not a library. |
+
+**Adopted in reduced form — the idea is right, the scale is not**
+
+| Recommended | Taken as | Why |
+|---|---|---|
+| Event-driven backbone (NATS / Kafka / Redis Streams) | The existing in-process signal bus, plus typed events on the **three** real boundaries | A broker between objects on one heap adds serialisation, a daemon and a new failure mode to a function call. |
+| Contract-first interfaces (Pact / AsyncAPI / OpenAPI) | Versioned schemas for exactly those three boundaries (`shared/protocol.py`), gated by tests | Contract testing pays where teams deploy independently. Here it pays at the wire, and only there. |
+| Full observability stack (Grafana / Loki / Tempo) | Structured JSON logs, the HUD, `/metrics`, and complete turn traces | Same questions answered, no stack to operate. Add Grafana the day he wants dashboards. |
+| Chaos engineering (Chaos Mesh, Toxiproxy) | Fault injection inside the existing hermetic tests, plus scheduled live drills | The failures worth rehearsing are provider outage, link drop, dead camera, full disk — all injectable in-process. |
+| Testcontainers / Docker Compose profiles | The hermetic suite plus three-process local runs | There are no containers to compose; the "services" are imports. |
+| Feature store + gradient boosting (Feast, LightGBM) | Logged decisions in sqlite; a model only after ~200 real outcomes | A recommender trained on a handful of events is a random number generator with a confidence interval. |
+
+**Declined — with the reason, so it is not re-proposed every quarter**
+
+| Declined | Reason |
+|---|---|
+| Kubernetes, multi-region, Consul/etcd, load balancers | One VPS, one laptop, one owner. Consensus systems coordinate many nodes; at two nodes the honest answer is a declared degraded mode (S32). |
+| Postgres + pgvector, Neo4j, InfluxDB/Timescale | Every store here is small and single-writer. sqlite is in-process, has no daemon, backs up as a file, and is already load-bearing. Revisit only when a latency budget actually fails. |
+| LangChain / LangGraph / CrewAI / AutoGen as the agent core | The loop already carries the confirm tier, typed degradation, clause completion and streaming failover. A framework rewrite re-litigates all four for no capability Afon lacks. |
+| Celery / Temporal / Prefect / Airflow | Broker plus worker tier for a queue of a handful of items; durability already comes from sqlite and restart-expiry. |
+| Keycloak / Auth0 / Vault / OPA | Exactly one principal. The confirm tier *is* the policy engine; `pass` *is* the secret store. A second authority is a sync problem, not a security gain. |
+| NeMo Guardrails | Refusals are deterministic and in code (S44). Two policy engines produce two answers to "may I", and the disagreement shows up as behaviour, not as an error. |
+| Differential privacy | It protects individuals inside an aggregate release. One subject, no release. |
+| Schemathesis | It fuzzes the OpenAPI surface *you* expose; Afon consumes APIs and exposes almost none. |
+| pytest as the runner | Deliberate, and load-bearing: `run_all_tests.py` executes each bench file as a **subprocess**, so every test runs standalone with no conftest and no shared harness that the failure under diagnosis could itself have broken (J3.1). pytest is fine *inside* a file; it is not the gate. |
+| Rust / Go rewrites | Nothing is measured CPU-bound. The latency budget is model inference and network. |
+
+---
+
+# How coherence is tested — fifty capabilities, one organism
+
+The insight worth keeping from the integration-testing proposal is the one that survives the change
+of scale: **coherence is emergent, so it is tested at the scenario and state level, not by testing
+every pair.** What changes is the machinery. There is no service mesh to spin up; there is a brain
+process, two laptop processes, and a set of stores.
+
+**Five tiers, in the order a change passes through them.**
+
+| Tier | What it proves | How it runs here |
+|---|---|---|
+| **1 · Hermetic unit** | One module's contract, including its failure shapes | A bench script with every dependency stubbed. No network, no clock, no camera. 157 of these today. |
+| **2 · Wire contract** | The three real boundaries agree | Schema tests over `src/afon/shared/protocol.py`, PC_LINK ops, and the client↔brain routes (`test_client_endpoints.py`, `test_pc_agent_routing.py`). This is where contract testing earns its keep. |
+| **3 · Cross-system scenario** | Several systems produce one coherent outcome | A journey: drive the agent with stubbed *externals* but real internals, then assert on spoken output, emitted signals **and final store state**. |
+| **4 · Behavioural** | The whole assistant, judged | `behavioral_suite.py` against the deployed brain with a real model and an LLM judge, median-5. |
+| **5 · Live drill** | Reality, once | A recorded run: unplug the VPS, churn the AirPods, sit at the desk. Logged in `TODO.md` with a date. |
+
+**The journeys (tier 3) are the coherence suite.** Each crosses many systems, and each asserts three
+things — what he said, what he emitted, and what the stores hold afterwards. Golden state snapshots
+before and after make the third assertion deterministic.
+
+| # | Journey | Systems crossed |
+|---|---|---|
+| J-01 | Morning: wake → context → brief → calendar/tasks → proactive suggestion → notification | S27 S17 S21 S16 S14 S13 |
+| J-02 | Interruption: urgent signal during focus → suppression decision → channel choice → ack | S14 S27 S13 S38 |
+| J-03 | Project: goal → decomposition → delegation → research → document → progress report | S33 S16 S39 S41 S06 S45 |
+| J-04 | Continuity: start on the phone, continue at the desk, close by voice | S07 S12 S43 S30 |
+| J-05 | Identity: owner speaks → gate → protected action → confirm → audit | S10 S11 S36 S45 |
+| J-06 | Degradation: primary model dies mid-answer → failover → the owner hears one answer | S02 S32 S31 |
+| J-07 | Memory: told a fact on Monday, asked on Friday, contradicted on Saturday | S30 S24 S45 |
+| J-08 | Device: "open my email" from the kitchen → PC_LINK → verify-after-act | S04 S12 S05 |
+| J-09 | Home: "I'm going to bed" → scene → read-back → confirmation | S28 S27 S29 |
+| J-10 | Crisis: trigger phrase → classifier → ladder → stop condition | S35 S13 S38 S36 |
+| J-11 | Recovery: kill the brain mid-task → restart → the task is still there | S22 S16 S31 |
+| J-12 | Silence: a whole day with nothing worth saying → he says nothing | S14 S13 S27 |
+
+**What each journey must assert, or it is theatre:** the spoken answer, the tool calls actually
+fired (not just the final text), the signals emitted, the final state of every store the journey
+should have written, and that **no store the journey should not have touched was written**. That
+last clause is what catches a system quietly reaching outside its lane.
+
+**Correlation ids** make the traces readable: one id per turn, generated at the edge, carried
+through the brain, stamped on every tool call, audit row and error-journal entry. This is the
+OpenTelemetry idea kept and its infrastructure declined — the value is the id and complete
+coverage, not a collector.
+
+**Chaos, at this scale**, is fault injection inside the hermetic tests (provider 500s, a dropped
+PC_LINK, a corrupt store, a full disk, a camera that returns black frames) plus scheduled live
+drills. What must be true after every one: the owner is told, the world model is not left
+inconsistent, and nothing needed a human to restart it.
+
+---
+
 # Wave plan — the order these are actually executed
 
 The fifty are not fifty independent projects; several are load-bearing for the rest. Execute in
@@ -106,6 +249,16 @@ a lookup.
 **Budget.** Pure-chat turn ≤1 LLM call, ≤2k prefill tokens. Tool turn p50 ≤2.5s to first audio,
 p95 ≤5s. Planning overhead ≤120ms of wall clock outside the model.
 
+**Stack.** Today: a custom async agent loop (`src/afon/brain/agent.py`) with clause planning, a
+confirm tier, typed tool results and streaming failover — all of which a framework rewrite would
+have to re-litigate. **Add:** Hypothesis, for property tests over generated multi-clause utterances
+(hand-written cases keep missing orderings — the 51.5 combination score is an ordering problem).
+**Declined:** LangGraph / CrewAI as the planner. They would replace a loop that already carries four
+safety properties with one that carries none of them, for no capability Afon lacks.
+
+**Verified by.** Stubbed-LLM unit tests · property tests over clause orderings · journeys J-01/J-03
+· behavioural median-5 on the deployed brain.
+
 **Floor**
 - [x] 01.F1 One completion loop, not two — multi-intent and clause paths unified (TODO K1).
       *gate:* `test_clause_completion.py`, `test_clause_routing.py`
@@ -134,6 +287,10 @@ p95 ≤5s. Planning overhead ≤120ms of wall clock outside the model.
 - [ ] 01.E1 Multi-intent combinations ≥90 (last measured **51.5** — the one remaining real lever to
       95). *gate:* `behavioral_suite.py` combination category, median-5.
 - [ ] 01.E2 Overall behavioural ≥95, no category <90. *gate:* G-J.
+- [ ] 01.E3 **The twelve journeys run green** (tier 3 above): each asserts the spoken answer, the
+      tools actually fired, the signals emitted, the final state of every store it should have
+      written — and that no store it should not have touched was written.
+      *gate:* new `test_journeys.py`, one case per journey, hermetic externals and real internals.
 
 **Cross-refs** TODO Part K1, Part A, B06.
 
@@ -149,6 +306,17 @@ spent only where it changes the answer.
 
 **Budget.** First-token failover ≤1.2s. Fallback switch adds ≤400ms to the turn. Thinking-tier
 escalation fires on <15% of turns.
+
+**Stack.** Today: the `openai` SDK against an OpenAI-compatible chain, with hand-rolled failover,
+first-token watchdog, health marking and thinking-tier escalation. **Add:** `respx` to fixture the
+provider at the HTTP layer — the current stubs monkeypatch the client object, which cannot exercise
+timeouts, 429 bodies or partial streams, the three things failover exists for.
+**Declined:** LiteLLM / OpenRouter as the router. Both are good products; adopting one moves the
+failover semantics that were tuned in K5a (first-token stall, permanent-vs-transient benching) into
+a dependency whose policy we would then have to fight.
+
+**Verified by.** A provider-failure matrix built from `respx` fixtures · latency percentiles from
+`bench/llm_bench.py` · chaos: kill the primary mid-stream and assert one continuous answer.
 
 **Floor**
 - [x] 02.F1 Fast failover on first-token stall, not on request timeout (TODO K5a).
@@ -188,10 +356,27 @@ leaning on them.
 **Budget.** Catalogue presented per turn ≤20 tools / ≤2.5k tokens (today: 58 tools ≈10k — the
 dominant per-turn cost). Tool-call error rate <2% of calls.
 
+**Stack.** Today: an in-process registry of 136 handlers with OpenAI-format schemas, typed results
+(`ToolResult`/`ErrorKind`) and learned per-tool reliability. **Add:** JSON-Schema validation of
+arguments *before* dispatch — the schemas already exist, nothing enforces them, and that is what
+makes the one-shot repair prompt possible.
+**Declined:** FastAPI tool endpoints. Tools run in the brain's own process; an HTTP hop would add
+latency, a port and an auth surface to something that is a function call.
+
+**Verified by.** Per-tool contract tests · failure injection per `ErrorKind` · a presented-catalogue
+token ceiling in `test_speed.py` · chaining assertions.
+
 **Floor**
 - [x] 03.F1 Typed failure contract everywhere — `tool_failed()`, `is_not_configured()`, no
       prose-matching. *gate:* `test_no_result_sentinels.py`, `test_tool_failure_guard.py`
 - [x] 03.F2 Missing-argument handling asks rather than fabricates. *gate:* `test_missing_arg.py`
+- [ ] 03.F4 **A ceiling on tool results at the boundary.** `agent.py` appends `str(result)` into
+      the message list with no cap, so one oversized scrape or document read enters the next
+      prefill whole — on the path that is already the dominant per-turn cost. A backstop above every
+      per-tool `clip()` limit (so it never fights a tool's own sizing), announced in the content so
+      the model can narrow rather than answer from half a document. This is the real half of J1.4.
+      *gate:* new `test_tool_result_ceiling.py` — 200k bounded, ordinary results byte-identical, and
+      every `clip()` limit in the tree asserted below the ceiling.
 - [ ] 03.F3 **Catalogue narrowing is measured, not assumed.** Per-turn tool count and token cost land
       in the trace; the 58-tool prefill is the number to beat (TODO K2).
       *gate:* `test_speed.py` asserts a hard ceiling on presented-catalogue tokens.
@@ -225,6 +410,14 @@ any room, with a confirm for anything destructive and a refusal for anything cat
 disconnected PC says so instead of silently succeeding.
 
 **Budget.** PC_LINK round-trip p95 ≤400ms on LAN. Reconnect after a link drop ≤5s.
+
+**Stack.** Today: a WebSocket control link (`pc_link` ↔ `pc_agent`) carrying 12 typed ops, with the
+confirm tier in front of the destructive ones. **Add:** a device simulator fixture so link-down,
+slow-ack and half-open states are testable without the laptop.
+**Declined:** MQTT/Zigbee here — that belongs under Home Assistant in S28, not in the PC channel.
+
+**Verified by.** Op-routing tests · link-down and half-open injection · verify-after-act assertions ·
+a recorded live run of ten real commands.
 
 **Floor**
 - [x] 04.F1 Twelve operations over PC_LINK with typed results. *gate:* `test_pc_agent_routing.py`
@@ -261,6 +454,15 @@ him.
 
 **Budget.** Page open→readable text p95 ≤6s. Scrape fallback chain resolves in ≤3 attempts.
 
+**Stack.** Today: Playwright driving a real browser on the laptop through PC_LINK, with an
+httpx/BeautifulSoup scrape chain behind it. **Add:** recorded HAR/HTML fixtures so page-shape
+regressions are deterministic instead of "the web changed".
+**Declined:** Browserbase / ScrapingBee. A cloud browser loses the owner's logged-in session, which
+is the entire reason the browser path exists rather than plain HTTP.
+
+**Verified by.** Fixture replay · a corpus of blocked / paywalled / JS-empty pages · session
+persistence across an interruption.
+
 **Floor**
 - [x] 05.F1 Twelve browser operations over PC_LINK with a persistent session.
       *gate:* `test_pc_agent_routing.py`, `test_screenshot_transport.py`
@@ -292,6 +494,15 @@ him.
 formatted, in the right place, with a version history — and Afon can revise it later by name.
 
 **Budget.** Generation ≤1 LLM call per document section; write + verify ≤500ms.
+
+**Stack.** Today: three ad-hoc writers (vault markdown, Notion, email drafts). **Add:** Jinja2 for
+templates and WeasyPrint for markdown→PDF (pure-Python, no system binary on the VPS); `python-docx`
+only where a real .docx is demanded.
+**Declined:** Pandoc / headless LibreOffice as a dependency — a system binary on the brain host for a
+format nobody has yet asked for.
+
+**Verified by.** Snapshot tests of rendered output · read-back verification before success is
+reported · round-trip for every destination · template-fidelity assertions.
 
 **Floor** *(this system has no spine today — the floor is one narrow real capability, gated)*
 - [ ] 06.F1 A single `create_document(kind, title, body, destination)` tool that owns creation for
@@ -330,6 +541,15 @@ silently drops the sentence that mattered.
 **Budget.** Context assembly ≤80ms. Working context ≤6k tokens, hard-capped, with the trim decision
 logged.
 
+**Stack.** Today: in-process history with a trim heuristic, plus the sqlite stores. **Add:**
+`tiktoken` for exact budget accounting — the trim currently estimates, which is why the ceiling is a
+hope rather than a guarantee.
+**Declined:** Redis for session state. One brain process; an external cache adds an operational
+failure mode to something that fits in memory and must survive restart via sqlite anyway.
+
+**Verified by.** Long-conversation replay · a reference-resolution corpus ("it", "that one") ·
+concurrent-session isolation · the cross-device journey J-04.
+
 **Floor**
 - [ ] 07.F1 Session identity is explicit: one session id per conversation, carried across edge
       reconnects and across devices. *gate:* new `test_session_identity.py`
@@ -364,6 +584,13 @@ above every other voice that the threshold is not a compromise.
 
 **Budget.** Owner median similarity ≥0.60 (today **0.47**), non-owner median ≤0.30, separation ≥0.25.
 
+**Stack.** Today: SpeechBrain ECAPA embeddings, enrolled from the live mic. This is exactly what a
+from-scratch design would choose, so nothing changes. **Add:** a capture-time quality scorer (SNR,
+duration, spectral variety) that rejects a bad sample on the spot.
+
+**Verified by.** An enrolment corpus scored per condition (near / far / headset / with music) ·
+separation report owner-vs-stranger · replay-attack samples.
+
 **Floor**
 - [ ] 08.F1 **Re-enrol on good audio** — the current profile is below target and every downstream
       identity decision inherits that. *gate:* `test_phase5_identity_bench.py` — owner median ≥0.60.
@@ -396,6 +623,15 @@ above every other voice that the threshold is not a compromise.
 dim, front and three-quarter — and a new reference can be added in one command.
 
 **Budget.** Owner match ≥0.65 cosine on ArcFace, impostor ≤0.35, at ≤120ms per frame.
+
+**Stack.** Today: OpenCV detection with ArcFace embeddings via `uniface`, LBP kept as a fallback.
+**Add:** nothing. InsightFace was recommended and ArcFace *is* InsightFace's model family — the
+current package is the same embedding with a far smaller install, and a second face stack would
+double the risk of mixing embedding spaces, which is the precise bug `test_face_arcface_backend.py`
+exists to prevent.
+
+**Verified by.** Capture-quality rejection tests · per-condition match scores · non-owner separation
+· a non-destructive re-enrolment restore.
 
 **Floor**
 - [ ] 09.F1 **Enrol on ArcFace.** The backend is wired and tested but only the legacy LBP references
@@ -431,6 +667,14 @@ guessing in either direction.
 **Budget.** Gate decision ≤150ms after end-of-utterance. Owner false-reject <2%, stranger
 false-accept <1%.
 
+**Stack.** Today: ECAPA scoring the utterance (not the room) behind a warm-up-safe gate. **Add:**
+a labelled corpus — owner, household, stranger, television — because the missing asset here is data,
+not a library; the threshold cannot be derived without it. `pyannote` diarization only if two-speaker
+attribution is genuinely needed.
+
+**Verified by.** FAR/FRR against the corpus · broadcast-audio rejection · threshold *derived* from
+measured separation rather than a constant · a week of live scores.
+
 **Floor**
 - [x] 10.F1 The gate scores the **utterance**, not the room (N2, fixed 2026-08-11).
       *gate:* `test_speaker_gate_scoping.py`
@@ -464,6 +708,14 @@ false-accept <1%.
 it can say "I can't tell", but it may never assert absence it cannot see. A photograph does not pass.
 
 **Budget.** Verify ≤400ms per attempt, ≤120ms per frame for embedding.
+
+**Stack.** Today: ArcFace + Haar cascades, with a separate occupancy path that never feeds
+identity. **Add:** passive liveness by frame differencing (blink / micro-motion) — cheap, local, and
+the missing precondition before the camera is allowed to be load-bearing.
+**Declined for now:** a paid anti-spoof SDK, until the cheap check is measured and found wanting.
+
+**Verified by.** A spoof corpus (printed photo, phone screen, video replay) · multi-frame fusion ·
+backlight/profile/glasses fixtures · agreement with the voice verdict.
 
 **Floor**
 - [x] 11.F1 "Nobody there" and "can't tell" are different answers; the confirm gate fails open on
@@ -501,6 +753,14 @@ conversation. A device that goes away does not take the session with it.
 
 **Budget.** Handoff ≤1s. Duplicate-answer rate 0%.
 
+**Stack.** Today: WebSocket sessions to the brain with per-device profiles. **Add:** an explicit
+capability registry (camera / speaker / screen) so routing stops guessing.
+**Declined:** MQTT or NATS as a device bus. There are at most three clients and the brain's WS server
+already multiplexes them; a broker is another always-on process to keep alive for no extra reach.
+
+**Verified by.** Double-wake arbitration · handoff latency · capability negotiation · flaky-link
+simulation with forced reconnects.
+
 **Floor**
 - [x] 12.F1 Device profiles and edge-lite clients. *gate:* `test_edge_lite.py`,
       `test_phase6_multidevice.py`
@@ -515,6 +775,11 @@ conversation. A device that goes away does not take the session with it.
       speaker, a screen. *gate:* new `test_device_capabilities.py`
 - [ ] 12.R3 Graceful degradation to a text-only or push-only device.
       *gate:* `test_edge_lite.py` extended.
+- [ ] 12.R4 **The wire is versioned.** `src/afon/shared/protocol.py` carries the edge↔brain message
+      shapes; nothing asserts that a brain and an edge of different vintages agree, which is the one
+      place contract testing genuinely pays here (three boundaries, deployed separately).
+      *gate:* new `test_protocol_contract.py` — every message type round-trips, unknown fields are
+      tolerated, and a version bump is required when a required field changes.
 
 **Elite**
 - [ ] 12.E1 Walk from desk to kitchen mid-sentence; the answer follows without a repeat.
@@ -533,6 +798,15 @@ conversation. A device that goes away does not take the session with it.
 Afon knows whether a notification was *seen*, and escalates only what deserves it.
 
 **Budget.** Push delivery p95 ≤3s. Duplicate notifications 0/day (was 7–8/day before the dedup fix).
+
+**Stack.** Today: ntfy push plus Telegram, with quiet hours and repeat suppression. **Add:** an
+acknowledgement channel — ntfy action buttons or a Telegram callback — because "delivered vs seen"
+is the floor gap and neither transport reports it by default.
+**Declined:** FCM/APNs. They need an app, certificates and a store presence; ntfy already reaches the
+same phone through the same lock screen.
+
+**Verified by.** A delivery matrix per channel and urgency · dedup regression · escalation with a
+stop condition · a week of owner-graded interruptions.
 
 **Floor**
 - [x] 13.F1 Push + Telegram delivery with quiet hours and suppression.
@@ -567,6 +841,15 @@ chose to. Ignored suggestions become rarer suggestions of that kind. Nothing aut
 silently.
 
 **Budget.** Tick ≤200ms in-process. ≤6 unprompted interventions/day by default.
+
+**Stack.** Today: an in-process signal engine with urgency, value, budget, quiet hours and
+learned ignore-penalties. **Add:** nothing.
+**Declined:** LightGBM plus a feature store. At one user and a few hundred decisions, a threshold
+model that can be *explained back to him* beats a gradient-boosted one he cannot argue with — and
+S45 requires the explanation.
+
+**Verified by.** Per-kind reachability (a dormant kind is a bug) · acceptance replay over logged
+decisions · timing backtest · behavioural proactivity category.
 
 **Floor**
 - [x] 14.F1 Signals, urgency, value, quiet hours, budget, ignore-penalty learning.
@@ -605,6 +888,15 @@ reason attached and a memory of whether it landed.
 
 **Budget.** Recommendation ≤1 LLM call plus one memory query; ≤600ms.
 
+**Stack.** Today: nothing general — `coaching` and memory resurfacing are the nearest neighbours.
+**Add:** log first. A decisions table in the existing sqlite recording context, candidates, choice
+and outcome; a ranker only once ~200 real outcomes exist.
+**Declined (for now):** Feast, LightGBM, Surprise. A recommender trained on a handful of events is a
+random number generator with a confidence interval.
+
+**Verified by.** Reason-cites-its-data assertion · refusal when there is no basis · offline replay of
+logged acceptances once the log has depth.
+
 **Floor** *(convert zero into one: a single domain, end to end)*
 - [ ] 15.F1 A `recommend(domain, context)` tool covering **one** domain first — next task to work on
       — sourced from `objectives.py` + `tasks.py` + calendar, with an explicit reason.
@@ -640,6 +932,16 @@ being asked. Nothing is silently dropped.
 
 **Budget.** Queue operations ≤50ms. Background task heartbeat every ≤60s with progress in the HUD.
 
+**Stack.** Today: a sqlite queue, an in-process worker with restart/expiry semantics, and Notion
+as the owner-facing mirror. **Add:** a dependency edge and a deadline-aware ordering — both fit the
+existing table.
+**Declined:** Celery / Dramatiq / Temporal. Each adds a broker and worker tier to a queue holding a
+handful of items; durability already comes from sqlite, and Temporal's real value (long-running
+durable workflows across failures) is answered here by restart-expiry plus the approval gate.
+
+**Verified by.** Dependency ordering · restart/expiry · external-pointer health (the Notion id went
+stale for weeks) · a multi-day task carried to completion.
+
 **Floor**
 - [x] 16.F1 Local queue, background worker, restart/expiry semantics.
       *gate:* `test_task_todos.py`, `test_background_tasks.py`, `test_task_restart_expiry.py`
@@ -674,6 +976,12 @@ else.
 
 **Budget.** Assembled in ≤8s, spoken in ≤90s, ≤1 LLM call per section.
 
+**Stack.** Today: the scheduler plus a digest assembler over calendar, tasks, news and reminders.
+**Add:** nothing.
+
+**Verified by.** Source-down degradation (a failed section, not a failed brief) · empty-section
+behaviour · adaptive-timing backtest against the wake log.
+
 **Floor**
 - [x] 17.F1 Digest at 06:00 with calendar, tasks, news, reminders. *gate:* `test_daily_digest.py`
 - [x] 17.F2 No duplicate delivery. *gate:* `test_daily_digest.py`, `test_acknowledgements.py`
@@ -704,6 +1012,14 @@ else.
 he never talks over himself; barge-in works at conversational volume.
 
 **Budget.** Device switch recovery ≤2s. Watchdog detects a dead stream ≤30s. Barge-in latency ≤300ms.
+
+**Stack.** Today: pipecat with PortAudio, Silero VAD, a liveness watchdog and device-change
+recovery. **Add:** Krisp AEC only if the current echo suppression is measured insufficient — it is
+paid and owner-blocked, so measure first.
+**Not applicable:** PipeWire/PulseAudio — the edge is Windows.
+
+**Verified by.** A device-churn soak (connect/disconnect AirPods for a day) · echo corpus · barge-in
+latency · an inaudible output probe proving the speaker really plays.
 
 **Floor**
 - [x] 18.F1 Watchdog for stale streams on device change. *gate:* `test_audio_watchdog.py`
@@ -737,6 +1053,12 @@ correct description, and fails loudly and typed when its account is not connecte
 
 **Budget.** MCP tool discovery does not add to per-turn prefill unless the tool is in the narrowed
 family (see S03.R1).
+
+**Stack.** Today: httpx against the Composio REST API plus a cached catalogue for the prompt.
+**Add:** nothing beyond the cache fix already made.
+
+**Verified by.** Unconnected-account contract (`is_not_configured`, never a plausible sentence) ·
+memo-on-success tests · catalogue token accounting · server health with last-success timestamps.
 
 **Floor**
 - [x] 19.F1 Connect flow, account listing, routing. *gate:* `test_composio_connect.py`,
@@ -773,6 +1095,15 @@ connection — and never invents an answer in the meantime.
 **Budget.** External call p95 ≤2s with a 1-retry policy; total turn budget unaffected by any single
 slow provider (hard timeout).
 
+**Stack.** Today: httpx per integration with a typed not-configured contract. **Add:** `respx`
+fixtures per provider, and **one** retry/timeout policy object instead of per-module constants —
+`tenacity` if a library is wanted, but the policy matters more than the library.
+**Declined:** Schemathesis. It fuzzes *your* OpenAPI surface; Afon consumes APIs and exposes almost
+none, so the useful contract test here is a recorded-response fixture, not a fuzzer.
+
+**Verified by.** Per-provider fixtures · quota and timeout injection · response-shape drift check ·
+zero fabricated answers in the behavioural honesty category.
+
 **Floor**
 - [x] 20.F1 Typed "not configured" contract across all integrations.
       *gate:* `test_no_result_sentinels.py`, `test_phase11_integrations.py`
@@ -807,6 +1138,15 @@ rotation, `.env` → password-store migration.
 being eaten, and intervenes before the day is lost rather than reporting it afterwards.
 
 **Budget.** Schedule reasoning ≤300ms, no LLM call for conflict detection.
+
+**Stack.** Today: Google Calendar plus `routines.json` and mode/interruption logic. **Add:** a
+greedy time-blocker first.
+**Declined until proven necessary:** OR-Tools / PuLP. Constraint solvers earn their keep on
+combinatorial problems; this is one person's day with a handful of blocks, and a solver's output that
+the owner cannot follow is worse than a greedy plan he can.
+
+**Verified by.** A conflict corpus (double-booked, no travel time, no breaks) · timezone and DST
+cases through the faketime shim · adherence log over a month.
 
 **Floor**
 - [ ] 21.F1 **`routines.json` holds the owner's real routines.** It is effectively empty today — the
@@ -844,6 +1184,15 @@ backup within an hour.
 
 **Budget.** Process restart ≤30s. Checkpoint restore ≤5min. Backup age ≤24h at all times.
 
+**Stack.** Today: backup/checkpoint/phoenix/ragnarok protocols, systemd on the VPS and Task
+Scheduler on the laptop, plus daily freshness restarts. **Add:** a *scheduled restore* drill — an
+untested backup is a rumour.
+**Not applicable:** Kubernetes probes. There is no cluster; systemd `Restart=` and the watchdogs are
+the same mechanism at this scale.
+
+**Verified by.** Restore drill on a schedule · config rollback · state-corruption repair · a blind
+three-failure drill.
+
 **Floor**
 - [x] 22.F1 Backup, checkpoint and restore protocols with drills.
       *gate:* `test_backup_restore.py`, `test_protocol_drills.py`
@@ -876,6 +1225,15 @@ systemd user unit, `deploy/vps/afon_ticker.py`, `src/afon/brain/tools/notify.py`
 the message is held and answered later rather than lost.
 
 **Budget.** Cold reach-to-first-word ≤4s. Uptime ≥99.5% monthly excluding deliberate parks.
+
+**Stack.** Today: a systemd **user** unit with linger, a ticker for recurring work, and an ntfy
+spool that holds messages while down. **Add:** an outside-in uptime probe, because self-reported
+uptime is not uptime.
+**Declined:** multi-region Kubernetes. One owner, one VPS, one laptop — the redundancy that matters
+here is degraded-mode behaviour (S32), not more regions.
+
+**Verified by.** External probe · degraded-mode answers with no LLM · announced maintenance windows ·
+a 30-day log with every interruption explained.
 
 **Floor**
 - [x] 23.F1 Brain runs 24/7 on the VPS with linger and a ticker.
@@ -912,6 +1270,15 @@ think is going on with X", he answers with entities and relations, dated.
 
 **Budget.** World-model consultation ≤50ms, in-process, no LLM call.
 
+**Stack.** Today: a sqlite triple store with semantic recall over Jina embeddings. **Add:**
+temporal validity ("true from / true until") on facts — the actual gap.
+**Declined:** Neo4j or Postgres+AGE. A graph server for a store of a few thousand edges, on a host
+that must also run the brain, buys query power nothing is currently asking for and costs a daemon,
+a backup path and a migration.
+
+**Verified by.** An entity-resolution corpus · belief-revision cases · provenance on every answer ·
+"what's going on with X" as a scored behavioural scenario.
+
 **Floor**
 - [ ] 24.F1 Entity resolution: one person, one node, regardless of spelling or channel
       (`resolve_contact` covers part of this today). *gate:* `test_proper_nouns.py`,
@@ -944,6 +1311,15 @@ sycophantic. He reads the room — brief when the owner is busy, fuller when he 
 warmth is earned rather than performed.
 
 **Budget.** Persona costs ≤900 prompt tokens and is byte-stable for cache hits (see S02.R2).
+
+**Stack.** Today: markdown persona and operating rules, an affect model feeding TTS prosody, and
+relationship memory. **Add:** nothing.
+**Declined:** NeMo Guardrails. Refusals here are deterministic and live in code (S44); a second
+policy engine would create two answers to "may I", and the disagreement would surface as
+inconsistent behaviour rather than an error.
+
+**Verified by.** Persona-parity gate between template and shipped persona · register-per-channel
+tests · voice grading · behavioural conversation category.
 
 **Floor**
 - [x] 25.F1 Persona, operating rules and affect→TTS wired and at template parity.
@@ -979,6 +1355,15 @@ sounds like — and fuses those into one situational read rather than three unre
 
 **Budget.** A perception snapshot ≤500ms total, ≤1 vision call, cached for 60s.
 
+**Stack.** Today: OpenCV capture, a VLM for description, activity and presence signals. **Add:** a
+small local audio-scene classifier (speech / music / TV / silence) — the speaker gate needs it and
+nothing else provides it.
+**Declined:** YOLO / Detectron2. Object detection answers a question nobody has asked; the VLM covers
+"what am I looking at" at far lower operational cost.
+
+**Verified by.** A fixture day of frames and clips · freshness stamps (stale perception is never
+presented as current) · fusion assertions · anomaly cases.
+
 **Floor**
 - [x] 26.F1 Vision on demand with a VLM path. *gate:* `test_vision.py`, `test_screenshot_transport.py`
 - [ ] 26.F2 A single `perceive()` snapshot that returns presence + visual + activity together, so
@@ -1010,6 +1395,12 @@ doing, and how his day has gone — and Afon can state which context he assumed.
 
 **Budget.** Context read ≤30ms in-process; never an LLM call.
 
+**Stack.** Today: presence, modes, activity and location tools, each consulted separately. **Add:**
+one assembled context object per turn — the gap is a shape, not a library.
+
+**Verified by.** Context-object assertions (assembled once, passed down) · disclosure when the
+assumption changes the answer · rapid-switch and false-positive rates.
+
 **Floor**
 - [ ] 27.F1 One context object — location, presence, activity, mode, time-of-day, calendar state —
       assembled once per turn and passed down, not re-derived per tool.
@@ -1040,6 +1431,13 @@ doing, and how his day has gone — and Afon can state which context he assumed.
 confirmed by *reading the device state back*, and never surprise anyone else in the flat.
 
 **Budget.** Device command → verified state ≤3s.
+
+**Stack.** Today: the Home Assistant REST API behind a confirm-gated tool. **Add:** nothing — HA
+*is* the abstraction layer, and MQTT/Zigbee2MQTT/Z-Wave belong under it, not beside it. Adding a
+second path to the same bulbs is how two sources of truth about a light switch appear.
+
+**Verified by.** Read-back verification (report the observed state, not the command sent) ·
+offline-device handling · confirm gating on anything that affects other people · a week of scenes.
 
 **Floor**
 - [ ] 28.F1 **Home Assistant token** installed and the connection verified live. This is the single
@@ -1075,6 +1473,15 @@ confirmed by *reading the device state back*, and never surprise anyone else in 
 are visible, listable, pausable, and every autonomous run leaves a report.
 
 **Budget.** Rule evaluation ≤20ms per tick; scheduler drift ≤5s.
+
+**Stack.** Today: macros, routines, a skills runtime, the scheduler and human approval gates.
+**Add:** dry-run and a declared failure policy per automation.
+**Declined:** Temporal / Prefect / Airflow. These are seconds-long automations on one host; durability
+comes from sqlite and the approval ledger. A workflow server is a second brain to operate, monitor
+and recover — and S31 would then have to watch it.
+
+**Verified by.** The full operator matrix in both directions · dry-run output · failure-policy
+behaviour · a month of owner-authored automations with a monthly report.
 
 **Floor**
 - [x] 29.F1 The parsed comparison operator is actually applied — `== 0` and `!= 0` no longer mean
@@ -1112,6 +1519,15 @@ provenance and a date. Nothing the owner said last week is lost because it was s
 host.
 
 **Budget.** Unified recall p95 ≤300ms. Auto-recall adds one store round-trip per turn, never N.
+
+**Stack.** Today: sqlite for every layer (facts, journal, vectors, graph, tasks) with Jina
+embeddings for L5. **Add:** a recall facade over the seven stores.
+**Declined:** Postgres + pgvector. A database server for one user's few hundred megabytes, on the
+brain host, with a migration that would run straight through the laptop/VPS divergence this system
+is trying to end. Revisit only if recall latency fails its budget on sqlite.
+
+**Verified by.** Precision@3 over a query corpus · contradiction handling · retention/rotation ·
+`profile_memory_recall.py` against the budget · cross-host consistency.
 
 **Floor**
 - [ ] 30.F1 **Resolve the two-host split.** Laptop and VPS hold divergent learned state; he is
@@ -1156,6 +1572,15 @@ healthy.
 
 **Budget.** Health tick ≤150ms. Probe schedule ≤1/5min. HUD render ≤200ms.
 
+**Stack.** Today: an in-process metrics module, scheduled probes, a HUD and a typed error journal
+with turn correlation. **Add:** a Prometheus-format `/metrics` rendering (a text endpoint costs
+nothing and makes any scraper optional) and JSON-line structured logs.
+**Optional, owner's call:** Grafana/Loki. Useful the day he wants dashboards; until then the HUD and
+the journal answer the same questions without a stack to maintain.
+
+**Verified by.** The agreement gate (no surface calls a broken component healthy) · injected faults ·
+a loop registry proving no background work is invisible · self-repair success rate.
+
 **Floor**
 - [x] 31.F1 Four health surfaces that **agree**: structural check, functional probe, HUD, and the
       error journal (J3.6). *gate:* `test_health_agreement.py`
@@ -1172,6 +1597,10 @@ healthy.
       *gate:* `test_self_repair.py`
 - [ ] 31.R3 A weekly self-report: what broke, what repaired itself, what needs the owner.
       *gate:* `test_protocol_reports.py` extended.
+- [ ] 31.R4 **One correlation id per turn**, generated at the edge and stamped on every brain stage,
+      tool call, audit row and error-journal entry — so a single owner action can be read end to end.
+      The OpenTelemetry idea, without adopting a collector.
+      *gate:* new `test_correlation_id.py` — one turn, one id, no orphaned rows.
 
 **Elite**
 - [ ] 31.E1 A month where every incident was self-detected before the owner noticed.
@@ -1189,6 +1618,15 @@ VPS, one edge, no replication. **Surfaces** `src/afon/brain/llm.py`,
 losing the laptop degrades him to cloud-only; both are announced, and neither is silent.
 
 **Budget.** Failover detection ≤30s. Degraded mode announced within one turn.
+
+**Stack.** Today: model-chain failover, a process supervisor and singleton enforcement. **Add:**
+an explicit degraded-mode matrix and a host-liveness exchange so each host knows the other's state.
+**Declined:** Kubernetes, Consul, etcd, multi-region databases. Consensus systems solve coordination
+between many nodes; there are two, and the honest answer at two nodes is a declared degraded mode
+plus a reconciliation rule.
+
+**Verified by.** Mode drills (brain down, edge down, network down) · promotion test · split-brain
+reconcile · a live hour with the VPS pulled.
 
 **Floor**
 - [x] 32.F1 LLM provider failover chain. *gate:* `test_brain_llm.py`, `test_resilience.py`
@@ -1225,6 +1663,14 @@ and connects daily work to them without being asked. A stalled objective is rais
 
 **Budget.** Objective review ≤1 LLM call weekly; daily attribution is in-process.
 
+**Stack.** Today: objectives with progress notes, a backlog and the worker. **Add:** milestones
+and target dates so "stalled" becomes computable.
+**Declined:** NetworkX for the goal graph. The hierarchy is a handful of nodes; a dict of parents is
+clearer to read, cheaper to test and impossible to get subtly wrong.
+
+**Verified by.** Stall detection · conflict cases (two objectives, same hours) · attribution from
+turn to objective · a quarter with nothing going stale unnoticed.
+
 **Floor**
 - [x] 33.F1 Objectives with progress notes and deferred items. *gate:* `test_objectives.py`
 - [ ] 33.F2 Milestones and target dates, so "stalled" is computable rather than felt.
@@ -1256,6 +1702,14 @@ says something useful about it at the right moment, without nagging and without 
 doctor.
 
 **Budget.** Daily aggregation ≤1 external call per source; no per-turn cost.
+
+**Stack.** Today: a Google Fit tool (dark), screen-time and activity signals, wellbeing coaching.
+**Add:** a small time-series table in the existing sqlite.
+**Declined:** InfluxDB / TimescaleDB. A time-series database for one person's daily metrics is a
+daemon, a retention policy and a backup path for data that is a few thousand rows a year.
+
+**Verified by.** Ingestion reliability · threshold accuracy · the stated boundary (observations and
+patterns, never diagnosis) · nudge acceptance over a month.
 
 **Floor**
 - [ ] 34.F1 **Enable the fitness data source** and verify a real read; today the tool exists and the
@@ -1293,6 +1747,15 @@ mis-classifies one.
 
 **Budget.** Emergency path ≤3s to first outward action, no LLM dependency on the critical path.
 
+**Stack.** Today: system-level protocols and owner escalation. **Add:** a deterministic classifier
+with a manual trigger phrase, and a **local** contact list — the critical path must not depend on the
+LLM chain or on network reachability. Twilio for the call rung (owner-blocked).
+**Declined:** a learned classifier. False positives here are expensive and unexplainable ones are
+unacceptable; rules the owner can read are the correct trade.
+
+**Verified by.** A 50-prompt false-positive corpus · ladder drill with a stop condition · offline
+contact resolution · two rehearsed drills, one voice-triggered and one silence-triggered.
+
 **Floor**
 - [ ] 35.F1 An explicit emergency classifier with a **conservative** threshold and a manual trigger
       phrase, on a path that does not depend on the LLM chain.
@@ -1328,6 +1791,16 @@ happens at all; everything that happened is on the record; and there is always a
 him.
 
 **Budget.** Authorisation decision ≤50ms, no network call.
+
+**Stack.** Today: a documented confirm tier over every mutating tool, deterministic catastrophic
+refusal, an audit trail, voice+face factors, `pass` as the single secret store, and a park switch.
+**Add:** an adversarial prompt corpus and session-scoped elevation.
+**Declined:** Keycloak / Auth0 / Vault / OPA. There is exactly one principal. The confirm tier *is*
+the policy engine and `pass` *is* the secret manager; adding an identity provider would create a
+second authority to keep in sync with the first.
+
+**Verified by.** 30 adversarial attempts, zero successes · elevation-scope tests · audit completeness
+· guest-mode reduction by construction.
 
 **Floor**
 - [x] 36.F1 A documented confirm tier covering every mutating tool.
@@ -1367,6 +1840,15 @@ it" and get a real answer — and can delete any of it in one command.
 
 **Budget.** Retention sweep runs daily, ≤30s.
 
+**Stack.** Today: secret scrubbing in the error path, local-first biometrics, a public-clean guard.
+**Add:** a **generated** data inventory (from the code, not written by hand) and per-store retention
+enforced by the hygiene job.
+**Declined:** differential privacy. DP protects individuals inside an aggregate release; there is one
+subject and no release — it would be ceremony, not protection.
+
+**Verified by.** Inventory generation covering every store · forget-then-requery verification ·
+egress log · a five-minute privacy report the owner can act on.
+
 **Floor**
 - [ ] 37.F1 **A data inventory**: every store, what personal data it holds, where it lives, who can
       read it. Generated from the code, not written by hand.
@@ -1401,6 +1883,14 @@ it" and get a real answer — and can delete any of it in one command.
 answer, and can draft or send in the owner's voice with the owner's approval.
 
 **Budget.** Inbox sweep ≤5s across all channels; drafting ≤1 LLM call.
+
+**Stack.** Today: Gmail, Telegram, channels and contact resolution. **Add:** a unified
+"what's waiting" view deduplicated by thread — the missing piece is a model, not an API.
+**Conditional:** Microsoft Graph / WhatsApp Business only if the owner actually uses them; each is a
+consent and review surface, not just a client library.
+
+**Verified by.** Triage corpus graded against what he really answered · thread awareness · approval
+before send · a week where he never opens the mail client first.
 
 **Floor**
 - [x] 38.F1 Email and Telegram send/read, with contact resolution.
@@ -1437,6 +1927,14 @@ trusted.
 **Budget.** Delegation overhead ≤1s; no delegated task runs unmonitored for more than its declared
 period.
 
+**Stack.** Today: a bridge to the external OpenClaw fleet plus a local background worker.
+**Add:** tracking and verification — every delegation is a task with a deadline and a checked result.
+**Declined:** AutoGen / CrewAI. The delegation target is an existing fleet with its own protocol and
+its own agents; a second multi-agent framework inside Afon would duplicate it and own nothing.
+
+**Verified by.** Tracking assertions (nothing fire-and-forget) · timeout and takeback · result
+verified before it is reported as fact · ten real delegations over a month.
+
 **Floor**
 - [x] 39.F1 Reachable delegation to the external fleet router. *gate:* fleet live check in
       `run_all_tests.py` (gated on authorisation).
@@ -1471,9 +1969,20 @@ afford this / what did I spend on that" from data rather than memory. He never m
 
 **Budget.** Portfolio snapshot ≤2s, cached daily.
 
+**Stack.** Today: read-only price lookups. **Add:** a Beancount plain-text ledger the owner
+controls — auditable, diffable, versioned by git, no server, and read-only by construction, which is
+exactly the property this system needs.
+**Declined:** Plaid / TrueLayer / brokerage APIs. Write access to money is out of scope by decision,
+and read access via bank aggregation is a large consent and credential surface for one person's
+balances.
+
+**Verified by.** Valuation snapshots with as-of times · staleness reporting · an assertion that the
+finance family contains **no** mutating tool · monthly brief review.
+
 **Floor** *(deliberately small, deliberately read-only)*
-- [ ] 40.F1 A local holdings file the owner controls, read by a `portfolio_snapshot` tool that values
-      it with the existing price tools. *gate:* new `test_portfolio.py`
+- [ ] 40.F1 A Beancount ledger the owner controls, read by a `portfolio_snapshot` tool that values it
+      with the existing price tools. Plain text, so it is diffable, git-versioned and auditable by
+      him without Afon. *gate:* new `test_portfolio.py`
 - [ ] 40.F2 **No transaction capability, by construction** — asserted, not merely absent.
       *gate:* `test_portfolio.py` [no mutating tool in the finance family]
 - [ ] 40.F3 Values carry their as-of time and source; a stale price says so.
@@ -1507,6 +2016,14 @@ than smoothed, and a note of what he could not establish.
 
 **Budget.** A research task declares a budget in calls and minutes before it starts, and honours it.
 
+**Stack.** Today: a typed search/scrape fallback chain plus research skills. **Add:** citation
+objects (claim → source → retrieved-at) and source weighting.
+**Conditional:** Tavily / Exa / Serper — measure the free chain first; a paid search API is easy to
+add later and impossible to justify before the failure rate is known.
+
+**Verified by.** Citations that resolve · contradiction surfacing rather than smoothing · declared
+budget honoured and early stops reported · three owner-graded research questions.
+
 **Floor**
 - [x] 41.F1 Search/scrape with a typed fallback chain. *gate:* `test_web_fallback.py`
 - [ ] 41.F2 **Citations are mandatory** for factual claims sourced from the web, and are checked to
@@ -1539,6 +2056,14 @@ several playback paths is actually running — and "stop" always stops the thing
 
 **Budget.** Play/stop round trip ≤600ms.
 
+**Stack.** Today: local playback, a Telegram music room and channel control. **Add:** one owner of
+playback state so "what's playing" has a single answer.
+**Declined for now:** Chromecast/AirPlay bridges — multi-room sync is a real feature but it needs
+hardware the owner does not currently use.
+
+**Verified by.** Routing tests across both paths · single playing-state source · ducking and
+resume-after-call · a week with no false "nothing is playing".
+
 **Floor**
 - [x] 42.F1 **Stop routes to whichever path is playing** — desktop or music room; the two now ask
       each other (fixed 2026-08-13). *gate:* `test_localplay_routing.py`
@@ -1569,6 +2094,13 @@ several playback paths is actually running — and "stop" always stops the thing
 arrived, knows he left, and picks up where the conversation stopped without being re-briefed.
 
 **Budget.** Presence state change detected ≤10s.
+
+**Stack.** Today: presence tracking, arrival detection and a listening pulse. **Add:** fused
+presence (voice + face + device activity) and context migration.
+**Declined:** an MQTT presence protocol — same reason as S12; the WS link already carries it.
+
+**Verified by.** Fusion tests · long-absence handling · migration drill across devices · a day
+without re-establishing context.
 
 **Floor**
 - [x] 43.F1 Presence tracking and arrival detection. *gate:* `test_presence.py`,
@@ -1602,6 +2134,14 @@ model is answering; he never fabricates; and when he declines he says so plainly
 can do.
 
 **Budget.** Safety checks are in-process and add ≤10ms.
+
+**Stack.** Today: deterministic catastrophic refusal independent of the model, approval gates,
+anti-fabrication verification and a safe-by-construction worker. **Add:** graded refusals and a
+stated precedence order for value conflicts, plus a red-team corpus.
+**Declined:** NeMo Guardrails — a second policy source; see S25.
+
+**Verified by.** Refusal grading (refuse / confirm / proceed-with-note) · precedence cases ·
+third-party impact checks · safety and honesty at 100 across five consecutive runs.
 
 **Floor**
 - [x] 44.F1 Deterministic catastrophic refusal, model-independent.
@@ -1637,6 +2177,13 @@ and why *now*. Nothing Afon does autonomously is unexplainable after the fact.
 **Budget.** "Why did you do that" answers from the audit trail in ≤300ms, no LLM call needed for the
 factual part.
 
+**Stack.** Today: proactive action reports with reasoning, a scrubbed audit trail, `diagnose` and
+the HUD. **Add:** `why` as a first-class question about the last turn, answered from the audit trail
+without an LLM call for the factual part.
+
+**Verified by.** Why-last-turn tests · confidence reported where it varies · source attribution in
+spoken answers · replay of any turn from the last 30 days.
+
 **Floor**
 - [x] 45.F1 Autonomous actions produce reports with reasoning. *gate:* `test_proactive_report.py`
 - [x] 45.F2 A full audit trail with scrubbed values. *gate:* `test_phasex_audit_health_modes.py`
@@ -1665,6 +2212,15 @@ factual part.
 overbooked, at this rate the deadline slips. Every prediction is scored afterwards.
 
 **Budget.** Forecast computation in-process, ≤200ms, no LLM call.
+
+**Stack.** Today: nothing — `anticipation.py` is a calendar look-ahead. **Add:** one predictor
+with a scoring ledger, using statsmodels or plain regression.
+**Declined until a naive baseline is beaten:** Prophet / NeuralProphet / Chronos / Nixtla. A
+foundation forecasting model over 30 days of one person's calendar is decoration; the honest first
+step is a baseline and a ledger that proves you beat it.
+
+**Verified by.** Backtest against the naive baseline · calibration of stated confidence · suppression
+below the confidence floor · a month of scored predictions.
 
 **Floor** *(one predictor, honestly scored, before any second one)*
 - [ ] 46.F1 A single predictor: **will today's plan fit the day**, from calendar + task estimates +
@@ -1696,6 +2252,14 @@ overbooked, at this rate the deadline slips. Every prediction is scored afterwar
 of categories that actually matter, and no more.
 
 **Budget.** Inventory query ≤100ms, local store.
+
+**Stack.** Today: nothing. **Add:** one sqlite table (item, quantity, location, consumed-at) and
+one category the owner picks. Barcode scanning via the phone camera only once the table is in daily
+use.
+**Declined:** a digital twin / CAD integration. That is S49's problem and it is parked.
+
+**Verified by.** Depletion estimation against real consumption · reorder trigger timing · a
+no-invention assertion (unknown stock stays unknown) · a quarter with nothing running out unannounced.
 
 **Floor** *(one category, one store, no framework)*
 - [ ] 47.F1 A local inventory store with add/consume/query, seeded with **one** category the owner
@@ -1729,6 +2293,14 @@ what comes back, and remains the single voice the owner hears.
 
 **Budget.** Coordination overhead ≤10% of the total task time.
 
+**Stack.** Today: one-way delegation to the fleet plus the local worker. **Add:** a shared work
+record in sqlite with claim-and-lock, and deterministic result merging.
+**Declined:** NATS / Redis Streams / a shared vector memory. Coordination infrastructure is sized for
+many agents; there are two participants and one owner-facing voice.
+
+**Verified by.** Double-claim prevention · merge determinism (disagreement surfaced, never averaged)
+· failure isolation · one genuinely multi-worker job end to end.
+
 **Floor** *(depends on S39's tracking floor)*
 - [ ] 48.F1 A shared work record: every delegated unit has an id, an owner, a state, and a result
       slot that both sides write to. *gate:* new `test_coordination.py`
@@ -1758,6 +2330,14 @@ what comes back, and remains the single voice the owner hears.
 **The bar.** If and when hardware exists, Afon prepares and queues jobs, and **never** starts a
 machine without a physical-presence confirmation.
 
+**Stack.** Today: nothing, deliberately. When hardware exists the likely shape is `cadquery` or the
+FreeCAD API for geometry, generated G-code, and OctoPrint or a CNC controller API for the machine —
+with ROS2 only if there is a robot rather than a machine. None of it is written until 49.F1 answers
+which machine.
+
+**Verified by.** Dry-run/simulation before any live command · interlock verification · the decision
+record existing at all.
+
 **Floor** *(do not build until hardware exists; these are the preconditions, recorded so the shape
 is agreed in advance)*
 - [ ] 49.F1 A decision record naming the first machine, its control surface, and its safety
@@ -1785,6 +2365,16 @@ right next step is a decision, not code.
 version of Afon — and can be read by a human without Afon's help.
 
 **Budget.** Export runs monthly, ≤10min, verified.
+
+**Stack.** Today: the Obsidian vault (VPS-authoritative), backups, checkpoints and the audit
+trail. **Add:** a portable export (plain markdown + JSON) with integrity hashes — readable by a human
+with no codebase, which is the actual requirement.
+**Declined as a requirement:** S3 versioned object storage. Useful as an off-site copy later; the
+preservation property comes from the format being open and the export being restorable, not from
+where the bytes sit.
+
+**Verified by.** Cold-start rebuild on an empty machine · integrity verification · retrieval across
+versions · scheduled portable-restore drill.
 
 **Floor**
 - [ ] 50.F1 **A portable export**: memory, decisions, documents and audit summary written as plain
@@ -1817,9 +2407,9 @@ green, `E` = elite green.
 
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
-| S01 | Brain / Core Intelligence | structured badly | 1/3 | 0/4 | 0/2 |
+| S01 | Brain / Core Intelligence | structured badly | 1/3 | 0/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 2/3 | 0/3 | 0/1 |
-| S03 | Tool Utilization | complete for now | 2/3 | 0/4 | 0/1 |
+| S03 | Tool Utilization | complete for now | 2/4 | 0/4 | 0/1 |
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
@@ -1828,7 +2418,7 @@ green, `E` = elite green.
 | S09 | Face Enrollment | not enrolled | 0/2 | 0/3 | 0/1 |
 | S10 | Voice Recognition | structured badly | 2/3 | 0/3 | 0/1 |
 | S11 | Face Recognition | structured badly | 2/3 | 0/3 | 0/1 |
-| S12 | Multi-Device | structured badly | 2/3 | 0/3 | 0/1 |
+| S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
 | S13 | Notifications | structured badly | 2/3 | 0/3 | 0/1 |
 | S14 | Proactivity | complete for now | 2/3 | 0/3 | 0/1 |
 | S15 | Recommendations | missing | 0/3 | 0/3 | 0/1 |
@@ -1847,7 +2437,7 @@ green, `E` = elite green.
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
 | S30 | Persistent Memory | structured badly | 0/3 | 0/4 | 0/1 |
-| S31 | Self-Monitoring | complete for now | 3/4 | 0/3 | 0/1 |
+| S31 | Self-Monitoring | complete for now | 3/4 | 0/4 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
@@ -1868,8 +2458,8 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals at the moment of writing: 65 of 156 floor tasks green, 0 of 150 raise tasks, 0 of 50 elite
-tasks — 65 of 356.** The floors are the furthest along because the last three weeks of work were
+**Totals at the moment of writing: 65 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite
+tasks — 65 of 360.** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
 derived from the checkboxes in the sections above and must be re-derived, not edited by hand.
 
