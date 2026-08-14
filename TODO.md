@@ -3,6 +3,12 @@
 **This is the canonical roadmap.** `docs/MASTER-PLAN.md` is the superseded 2026-06-24 snapshot
 and is not maintained; where the two disagree, this file wins (J5.1).
 
+**Companion:** `docs/SYSTEMS.md` (2026-08-14) is the 50-system master plan — one section per
+system, each with a floor, ordered raises, and a named verification gate on every task. It owns the
+*shape of done* per system; this file owns the dated findings and the running task ledger. The two
+together define the finish line. Neither supersedes the other, and a task may live in either — but
+a status only moves when the gate named in `docs/SYSTEMS.md` passes in a recorded suite run.
+
 **Goal:** behavioral production-readiness **≥ 95/100 overall (no category < 90)** and **all 22 subsystems
 genuinely Strong** — objectively, from real test/benchmark runs, never a relabel.
 

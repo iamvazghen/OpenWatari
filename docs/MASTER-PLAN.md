@@ -6,7 +6,8 @@
 > has never existed, and that claim reached four other files before `ls bench/` caught it.
 > `bench/test_doc_paths.py` now fails if either roadmap cites a path that is not in the tree.
 > Anything here that is still open lives in `TODO.md`; anything that disagrees with `TODO.md`
-> is stale by definition.
+> is stale by definition. The per-system plan — floors, raises, and the gate that decides each —
+> is `docs/SYSTEMS.md` (2026-08-14). Read that with `TODO.md`; this file is history.
 
 Date: 2026-06-24. **This file replaces all previous docs** (ROADMAP, FINISH-AND-OPENAFON-ROADMAP,
 AUDIT, PHASE-VERIFICATION, BENCHMARKS, TESTING, TASK-QUEUE-PLAN, EXPANSION-PLAN, multi-device, and the

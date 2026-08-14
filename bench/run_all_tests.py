@@ -157,6 +157,8 @@ TESTS = [
      "test_doc_paths.py", "offline", ["checks passed ==="]),
     ("Layering (J8.4): base layers import nothing upward, edge<->brain crossings are declared, no cycles",
      "test_layering.py", "offline", ["checks passed ==="]),
+    ("Systems plan: 50 sections, a gate on every task, and a scoreboard that matches the checkboxes",
+     "test_systems_plan.py", "offline", ["checks passed ==="]),
     ("Park switch: a parked deployment stays parked — every entry point honours the lock",
      "test_maintenance_lock.py", "offline", ["checks passed ==="]),
     ("Health agreement (J3.6): when a component is broken, no surface reports it healthy",
