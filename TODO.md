@@ -1533,6 +1533,24 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
 ### J2 · Cohesion — communities that should be split
 Baseline: the eight worst are all **core** subsystems, not peripheral ones. Cohesion below ~0.10
 means the nodes grouped together barely reference each other.
+**RE-MEASURED 2026-08-16. Cohesion is now baselined (J8.1) and every number below has moved;
+three of these entries describe communities that no longer exist in the shape they name.**
+
+| entry | then | now | verdict |
+|---|---|---|---|
+| J2.1 `TaskWorker` | 49 nodes, 0.05 | 22 nodes, **0.117** | shrank and tightened — re-scope before acting |
+| J2.2 `notion.py` | 65 nodes, 0.08 | 65 nodes, 0.082 | **unchanged and real** — the best J2 candidate |
+| J2.3 `routines.py` | 42 nodes, 0.06 | 43 nodes, 0.076 | still open |
+| J2.4 `AfonAgent` | 29 nodes, 0.05 | 46 nodes, 0.059 | grew; still the structural half of J1.1 |
+| J2.5 `WorldModel` | 30 nodes, 0.07 | absorbed — no community of that name | re-scope |
+| J2.6 `Presence` | 17 nodes, 0.104 | 64 nodes, 0.056 | absorbed two neighbours; density fell on size |
+| J2.9 `errors.py` | 0.10 | 19 nodes, **0.152** | tightened, likely by J7.3's taxonomy work |
+| J2.10 `http_get` | 0.09 | 31 nodes, **0.125** | tightened |
+
+Cohesion is *density*, so a community that grew lost density without getting worse — the J8.1 gate
+now measures internal degree for exactly this reason. **J2.2 is the one to do first**: it is the
+only entry whose size and score both held still across four graph rebuilds.
+
 - [ ] **J2.1 — Community 53 "TaskWorker": 49 nodes, cohesion 0.05 — the worst in the graph. (P1)**
       Largest-but-one community *and* joint-lowest cohesion: the objectives/worker/queue surface has
       no internal structure at all.
