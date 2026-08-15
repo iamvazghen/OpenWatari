@@ -18,6 +18,15 @@ REMOTE="${AFON_VPS_DIR:-/home/openclaw/afon}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Opt-in, and off by default: see the drift block below for what it will and will not delete.
+PRUNE=0
+for arg in "$@"; do
+  case "$arg" in
+    --prune) PRUNE=1 ;;
+    *) echo "unknown argument: $arg (only --prune is accepted)"; exit 2 ;;
+  esac
+done
+
 # The brain's systemd unit. Overridable for the same reason REMOTE is: the rename left this
 # script pointing at `afon-brain` while the VPS still ran `jarvis-brain`, and a deploy cannot
 # succeed against a unit that does not exist.
@@ -74,15 +83,59 @@ echo "==> verifying the VPS matches local, by content (J4.1)"
 # that should fail loudly keeps working from a stale copy, while every local test passes. Catching
 # that before the restart means the running process is never pointed at a tree we already know is
 # wrong. Aborting here leaves the brain up on its current code — no worse than not deploying.
-if ! REMOTE="$REMOTE" bash scripts/verify_vps_sync.sh; then
-  echo
-  echo "DRIFT — not restarting the brain."
-  echo "  STALE files are the dangerous ones: deleted locally, still importable on the VPS."
-  echo "  Remove them deliberately, then re-run:"
-  echo "    ssh $VPS \"cd '$REMOTE' && rm <path>\""
-  echo "  Automatic pruning is deliberately NOT done here: deleting files on a live"
-  echo "  always-on brain is a decision, not a deploy step."
-  exit 1
+DRIFT="$(mktemp)"
+trap 'rm -f "$DRIFT"' EXIT
+if ! REMOTE="$REMOTE" DRIFT_OUT="$DRIFT" bash scripts/verify_vps_sync.sh; then
+  stale_n=$(grep -c '^STALE' "$DRIFT" || true)
+  other_n=$(grep -cE '^(MISSING|DIFFERS)' "$DRIFT" || true)
+  remote_n=$(awk -F'\t' '$1=="REMOTE_FILES"{print $2}' "$DRIFT")
+
+  # H2.13, resolved. Deleting on a live always-on brain stays a DECISION — it just no longer has to
+  # be a manual `ssh … rm` and a second full deploy. `--prune` is opt-in, and it can only ever
+  # remove files the verifier classified as STALE: present on the VPS, absent locally, therefore
+  # importable code that no longer exists in the repo. That is the actual hazard — not the wasted
+  # bytes, but a deleted module still working on the host while every local test passes.
+  #
+  # It refuses in the two cases where deleting would be wrong rather than merely bold:
+  #   * ANY missing/differing file means the sync itself did not land, and the remote tree is not
+  #     something to start removing files from — abort, unchanged.
+  #   * An implausibly large stale list is the signature of a broken LOCAL enumeration (a bad
+  #     REMOTE dir, a failed `find`), where "everything is stale" and pruning wipes the deployment.
+  #     A real refactor deletes a handful of files; a quarter of the tree is a bug in this script.
+  # The mechanism swap the TODO proposed (`rsync --delete`, or extract-and-swap) is deliberately
+  # NOT taken: both replace a transfer that cannot half-apply with one that can, to solve a problem
+  # the existing verifier already detects exactly. Reusing its answer costs no new failure mode.
+  if [[ "$PRUNE" -eq 1 && "$other_n" -eq 0 && "$stale_n" -gt 0 ]] &&
+     ! awk -F'\t' '$1=="STALE"{print $2}' "$DRIFT" | grep -qE '(^/|\.\.)'; then
+    if (( stale_n > 25 || (remote_n > 0 && stale_n * 4 > remote_n) )); then
+      echo
+      echo "REFUSING TO PRUNE: $stale_n of $remote_n remote files look stale."
+      echo "  That is too much of the tree to be a refactor. Check AFON_VPS_DIR points at the"
+      echo "  brain's directory and that the local trees enumerated correctly, then prune by hand."
+      exit 1
+    fi
+    echo
+    echo "==> --prune: removing $stale_n stale file(s) of $remote_n on the VPS"
+    awk -F'\t' '$1=="STALE"{print $2}' "$DRIFT" | sed 's/^/    rm /'
+    awk -F'\t' '$1=="STALE"{print $2}' "$DRIFT" |
+      ssh "$VPS" "cd '$REMOTE' && xargs -d '\n' -r rm -f --"
+    echo "==> re-verifying after prune (a prune that did not converge is not a deploy)"
+    if ! REMOTE="$REMOTE" bash scripts/verify_vps_sync.sh; then
+      echo "STILL DRIFTING after prune — not restarting the brain."
+      exit 1
+    fi
+  else
+    echo
+    echo "DRIFT — not restarting the brain."
+    echo "  STALE files are the dangerous ones: deleted locally, still importable on the VPS."
+    if [[ "$other_n" -eq 0 && "$stale_n" -gt 0 ]]; then
+      echo "  All of it is stale-only, so this run can clean it up for you:"
+      echo "    scripts/deploy_vps.sh --prune"
+    fi
+    echo "  Or remove them deliberately, then re-run:"
+    echo "    ssh $VPS \"cd '$REMOTE' && rm <path>\""
+    exit 1
+  fi
 fi
 
 echo "==> restarting the brain + health check"

@@ -55,6 +55,19 @@ differing=$(LC_ALL=C join -t$'\t' -j 1 -o 0,1.2,2.2 "$L" "$R" | awk -F'\t' '$2 !
 [ -n "$stale"     ] && { echo "STALE on VPS (deleted locally):"; echo "$stale" | sed 's/^/  /'; drift=1; }
 [ -n "$differing" ] && { echo "CONTENT DIFFERS:";  echo "$differing" | sed 's/^/  /'; drift=1; }
 
+# Optional machine-readable report, for the one caller that needs to ACT on the drift rather than
+# just read it (`deploy_vps.sh --prune`, H2.13). The three kinds are kept apart on purpose: only
+# STALE is safely deletable, and REMOTE_FILES gives the caller a denominator to sanity-check the
+# proportion against — a stale list that is most of the tree means the LOCAL side failed to
+# enumerate, and acting on it would wipe the deployment.
+if [ -n "${DRIFT_OUT:-}" ]; then
+  : > "$DRIFT_OUT"
+  printf '%s\n' "$missing"   | while IFS= read -r f; do [ -n "$f" ] && printf 'MISSING\t%s\n' "$f"; done >> "$DRIFT_OUT"
+  printf '%s\n' "$stale"     | while IFS= read -r f; do [ -n "$f" ] && printf 'STALE\t%s\n'   "$f"; done >> "$DRIFT_OUT"
+  printf '%s\n' "$differing" | while IFS= read -r f; do [ -n "$f" ] && printf 'DIFFERS\t%s\n' "$f"; done >> "$DRIFT_OUT"
+  printf 'REMOTE_FILES\t%s\n' "$(wc -l < "$R" | tr -d ' ')" >> "$DRIFT_OUT"
+fi
+
 rm -f "$L" "$R"
 [ "$drift" -eq 0 ] && echo "=== VPS matches local exactly (content-verified) ===" || echo "=== DRIFT DETECTED ==="
 exit "$drift"

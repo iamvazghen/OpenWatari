@@ -151,6 +151,8 @@ TESTS = [
      "test_face_arcface_backend.py", "offline", ["checks passed ==="]),
     ("Ops scripts (J4.4): the deploy parses, its gates stay in order, the restart stays LAST",
      "test_ops_scripts.py", "offline", ["checks passed ==="]),
+    ("Deploy prune (H2.13): --prune removes stale code on the brain, and refuses everything else",
+     "test_deploy_prune.py", "offline", ["checks passed ==="]),
     ("Skill docs (J4.6/J4.7): no doc may name a tool Afon cannot call — it fails silently mid-turn",
      "test_skill_docs_resolve.py", "offline", ["checks passed ==="]),
     ("Roadmap docs (J5.1): one canonical roadmap, and no doc cites a path that isn't in the tree",

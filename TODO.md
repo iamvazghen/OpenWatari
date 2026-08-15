@@ -1100,10 +1100,31 @@ schema, no schema without a handler, and all 20 lazy tool groups have activation
       `when` argument ('today'/'tomorrow'/'this week') and answer properly. This predates H2.4 (the
       tool was always current-only); H2.4 only made it visible. NEW CAPABILITY, so it is listed rather
       than folded into a description task — owner's call.~~
-- [ ] **H2.13 — `deploy_vps.sh` never deletes; the VPS accumulates orphans.** *(PARTLY CLOSED
-      2026-08-08: orphans are now DETECTED — J4.1 wired `verify_vps_sync.sh` into the deploy, and a
-      stale file aborts the run before the brain restarts, printing the exact `rm`. What remains is
-      the mechanism change below, which is still a deliberate decision rather than a passing fix.)* `scripts/deploy_vps.sh:31`
+- [x] **H2.13 — CLOSED 2026-08-15. `scripts/deploy_vps.sh --prune` + `bench/test_deploy_prune.py`
+      (22/22). The decision: keep the transfer, act on the verifier's answer.**
+      The remaining half was a decision, and the TODO's own suggestion is the one I did **not**
+      take. `rsync -a --delete` and extract-to-a-fresh-dir-and-swap both replace a transfer that
+      cannot half-apply with one that can — a new failure mode, on the always-on brain, to solve a
+      problem `verify_vps_sync.sh` already detects **exactly**. Reusing its answer costs nothing new:
+      the verifier now also writes a machine-readable drift report (`DRIFT_OUT`, one `KIND<TAB>path`
+      row per file plus a `REMOTE_FILES` denominator), and `--prune` deletes precisely the rows it
+      classified `STALE`.
+      Deleting on a live brain stays a **decision** — it is opt-in, off by default, and an
+      unrecognised flag aborts rather than deploying without it (a typo'd `--prunee` that silently
+      deployed would look exactly like a successful prune). It refuses in the two cases where
+      deleting is wrong rather than merely bold: **any** missing/differing file means the sync did
+      not land, and that is not a tree to start removing files from; and an implausible proportion
+      (>25 files, or >25% of the remote tree) is the signature of a broken *local* enumeration — a
+      wrong `AFON_VPS_DIR`, a failed `find` — where "everything is stale" and pruning wipes the
+      deployment. After the delete it re-verifies, and only a clean re-verify reaches the restart.
+      **Verified by exercising, not reading.** The ceiling expression is lifted out of the script by
+      the test and evaluated against five (stale, remote) pairs, so weakening it fails here instead
+      of during the deploy that wipes a tree. The drift report runs end-to-end against a stub `ssh`
+      that answers byte-identical-plus-one-extra-file — the shape of a rename left half-deployed —
+      which is what caught that an empty MISSING list would otherwise emit a blank row. Four planted
+      regressions (weakened ceiling, dropped missing/differing guard, prune-on-by-default, blank
+      rows) each turn it red.
+      *Original entry:* `scripts/deploy_vps.sh:31`
       pipes `tar -czf - src/afon …` into `tar -xzf -` on the target, which OVERWRITES and ADDS but
       never removes. A file deleted or renamed locally therefore lives on the brain forever. Found via
       H2.7: after a green deploy the VPS had BOTH `brain/mynews.py` and the old
@@ -1119,6 +1140,7 @@ schema, no schema without a handler, and all 20 lazy tool groups have activation
       changing the deploy mechanism risks leaving the brain half-updated if extraction fails midway,
       and that is a decision to make deliberately rather than in passing. Until then, a tree diff after
       any deploy that removes a file is the cheap mitigation.
+      *(That instinct held up: the mechanism was left alone, and the closure above explains why.)*
 - [x] **H2.12 — DONE 2026-08-08. `if_then` now applies the operator it parses.**
       Subjects resolve to a VALUE (int for booleans/counts, str for `weekday`) instead of a bare
       truthy flag — that is the whole fix, since an operator needs something to compare against.
