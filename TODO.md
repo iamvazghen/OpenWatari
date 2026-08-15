@@ -1343,11 +1343,18 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       `brain_client.py`, a file rename and 4 new test files. The check compares commits, so an
       entire session of uncommitted work reads as "fresh". Freshness must compare the working
       tree (mtime or `git status`), not the commit.
-- [ ] **J0.2 — 607 INFERRED edges (9%) at 0.65 average confidence are unverified. (P1)** At that
-      confidence roughly a third are wrong and nobody knows which third. `AfonAgent` alone carries
-      **48** inferred edges, `LLMClient` **11** — i.e. the two most structurally important nodes are
-      also the two most speculatively connected. Verify or prune; an unverified edge on a god node
-      corrupts every path query through it.
+- [ ] **J0.2 — re-measured 2026-08-15: 307 INFERRED edges (5.5%) at 0.54 average confidence. (P1)**
+      At that confidence roughly a third are wrong and nobody knows which third. Verify or prune;
+      an unverified edge on a god node corrupts every path query through it.
+      **Two corrections to the original entry, both found while doing J8.2.** (1) The count is 307,
+      not 607, and the average is 0.54, not 0.65 — J8.3 removed `bench/` and took half of them with
+      it, and nothing re-measured afterwards. (2) More importantly, **they are not what the entry
+      implies.** Every one is `_origin: ast` — a *heuristic* from the AST extractor, not an LLM
+      guess: 256 `indirect_call` (a function passed as an argument, scored 0.5), 39 `uses`, 12
+      `calls`. That makes the fix a different job than "verify semantic edges": these are
+      mechanically checkable, and the 0.5 ones are checkable in bulk. The per-god-node counts
+      (`AfonAgent` 48, `LLMClient` 11) are from the old graph and need re-measuring before they
+      are used to justify anything.
 - [x] **J0.3 — CLOSED 2026-08-09 by J8.3.** With `bench/` out of the graph, `bench/* → src/*` edges
       cannot be surfaced as surprising at all — the heuristic no longer has the input.
       *Original finding:* All five entries are
@@ -2191,11 +2198,39 @@ root cause, both silent — nothing errored, the app simply started fresh.
 - [ ] **J8.1 — Record today's per-community cohesion as a baseline and gate regressions. (P2)**
       Without a baseline, "improve cohesion" is unfalsifiable. With one, a PR that makes a community
       worse can be told so.
-- [ ] **J8.2 — Give graphify explicit routing manifests instead of leaving it to inference. (P1)**
-      The `LOCAL_HANDLERS` merge, the tool registry and the lazy-group map are all *data* the graph
-      currently has to guess at — which is a large part of the 607 inferred edges in J0.2. Emitting
-      them as a manifest converts guesses into extracted edges and directly enables J4.2, J4.3
-      and J4.6.
+- [x] **J8.2 — CLOSED 2026-08-15. `scripts/routing_manifest.py` + `bench/test_routing_manifest.py`
+      (17/17), wired into the post-commit hook. 183 routing edges the graph did not have.**
+      **The premise needed correcting first: this was framed as a slice of J0.2's inferred edges,
+      and it is a different problem.** Those edges are AST heuristics (a function passed as an
+      argument, scored 0.5) and not one of them is a routing table. The tables were not being
+      guessed at badly; an AST extractor cannot follow a dict *value* to its callee at all, and the
+      result was **no edge**. Measured before the fix: `pc_agent` had 38 outbound edges, 10 of them
+      calls, and **not one reached any of the 23 PC ops it dispatches**. "What runs when the brain
+      sends `screenshot`?" was unanswerable from the graph, and "what breaks if I change
+      `_screenshot_local`?" answered *nothing*. Same fix, stronger reason.
+      Three tables, read from the LIVE objects rather than re-typed — a hand-maintained copy of a
+      routing table is worse than no manifest, because it goes wrong silently:
+      `pc_agent.LOCAL_HANDLERS` (23), `tools.tool_handlers()` (136), `tools._LAZY_GROUPS` (24).
+      All 183 resolve to real nodes; the manifest lands at `graphify-out/routing-manifest.json`
+      and the edges are injected into `graph.json` marked `_origin: manifest`.
+      **Two judgement calls worth recording.** (1) The relation is `indirect_call`, not a new
+      `routes_to`: a dispatch through a table *is* an indirect call, and `indirect_call` is one of
+      the relations `graphify affected` walks by default. A bespoke relation would have been more
+      truthful and never queried — barely better than the missing edge. (2) The gate does **not**
+      fail on a stale graph. A handler newer than the graph is normal here (commits are rare by
+      policy, per J0.1), so `resolve()` separates *the graph has not caught up* from *the graph has
+      never seen this module*, and only the second is red. A check that is red by design is one
+      people stop reading.
+      **The hook needed the same lesson J0.6 taught:** `graphify update` rewrites `graph.json` from
+      the AST alone, so it drops these edges on every commit — silently, with the queries simply
+      going back to "nothing calls this". The injector now runs immediately after it, into the same
+      `.last-update.log`, and the test asserts that ordering.
+      **And the first version of that hook check did not bite.** It searched the file for
+      `routing_manifest.py`, which the hook's own explanatory comment contains — so deleting the
+      command left the test green. Caught by planting the regression rather than by reading it. It
+      now matches the invocation line among non-comment lines only. This keeps recurring: a check
+      is not verified until something has been broken in front of it.
+      Enables J4.2 / J4.3 / J4.6 as intended.
 - [x] **The graph hook was one commit from freezing silently — caught 2026-08-09 by checking, not
       by trusting.** After J8.3 removed 1043 bench nodes, every rebuild was *smaller* than the graph
       on disk, and `graphify update` **refuses to shrink a graph without `--force`** (a good guard:

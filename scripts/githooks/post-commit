@@ -16,7 +16,18 @@
 #
 # `scripts/graph_fresh.py` is the backstop that catches a frozen graph regardless of this log,
 # because it compares mtimes rather than trusting that the rebuild happened.
+#
+# The second command is not optional either. `graphify update` REWRITES graph.json from the AST
+# alone, which drops the routing edges scripts/routing_manifest.py injects (TODO J8.2) — the ones
+# that connect a tool name or a PC op to the function that actually runs it. Without this line the
+# graph would lose them on every commit and nobody would see it happen: the queries would just
+# quietly go back to answering "nothing calls this". It is idempotent, so it also runs after an
+# update that refused to write.
 command -v graphify >/dev/null 2>&1 || exit 0
 ROOT=$(git rev-parse --show-toplevel)
-( cd "$ROOT" && graphify update > graphify-out/.last-update.log 2>&1 & )
+( cd "$ROOT" && {
+    graphify update > graphify-out/.last-update.log 2>&1
+    command -v python >/dev/null 2>&1 &&
+      python scripts/routing_manifest.py >> graphify-out/.last-update.log 2>&1
+  } & )
 exit 0
