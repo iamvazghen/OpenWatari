@@ -23,11 +23,29 @@
 # graph would lose them on every commit and nobody would see it happen: the queries would just
 # quietly go back to answering "nothing calls this". It is idempotent, so it also runs after an
 # update that refused to write.
+# The third drops the inferred edges that resolve to the wrong FILE (TODO J0.2) — 15 of 307,
+# every one a bare local name colliding with a same-named symbol elsewhere in the tree, e.g.
+# llm.py's nested `_push()` landing on the VPS ticker's `push`. graphify's name resolution is not
+# this repo's to fix, so it is corrected after each rebuild instead.
+#
+# Then cluster-only, because the two steps above changed the edges and GRAPH_REPORT.md/graph.html
+# are rendered from the PREVIOUS ones. Skipping it is how the routing edges spent a day present in
+# graph.json and invisible in the page a person actually reads.
+#
+# The fourth names the communities GRAPH_REPORT.md silently drops for being under 3 nodes (TODO
+# J0.5) — 33 of 188 today. It rewrites its own section rather than appending, so it is safe after
+# every rebuild. Not a gate: the cohesion GATE is bench/test_cohesion_baseline.py, which the suite
+# runs, because a hook that cannot block a commit is the wrong place to fail a check.
 command -v graphify >/dev/null 2>&1 || exit 0
 ROOT=$(git rev-parse --show-toplevel)
 ( cd "$ROOT" && {
     graphify update > graphify-out/.last-update.log 2>&1
     command -v python >/dev/null 2>&1 &&
       python scripts/routing_manifest.py >> graphify-out/.last-update.log 2>&1
+    command -v python >/dev/null 2>&1 &&
+      python scripts/graph_prune.py >> graphify-out/.last-update.log 2>&1
+    graphify cluster-only . >> graphify-out/.last-update.log 2>&1
+    command -v python >/dev/null 2>&1 &&
+      python scripts/cohesion_baseline.py --thin >> graphify-out/.last-update.log 2>&1
   } & )
 exit 0

@@ -168,6 +168,8 @@ def main() -> int:
         "test_layering.py": "parses imports; importing the layers would defeat it",
         "test_ops_scripts.py": "parses shell scripts",
         "test_deploy_prune.py": "runs the deploy's shell guards; its subject is bash, not Python",
+        "test_cohesion_baseline.py": "asserts the code graph's own metric; its subject is graph.json",
+        "test_graph_prune.py": "asserts the code graph's edges; its subject is graph.json",
         "test_static_correctness.py": "AST checks over the source",
         "test_client_endpoints.py": "compares HTML clients against the server's routes as text",
         "test_enroll_script_parse.py": "parses the markdown enrolment script",

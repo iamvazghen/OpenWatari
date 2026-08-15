@@ -1365,9 +1365,34 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       `brain_client.py`, a file rename and 4 new test files. The check compares commits, so an
       entire session of uncommitted work reads as "fresh". Freshness must compare the working
       tree (mtime or `git status`), not the commit.
-- [ ] **J0.2 — re-measured 2026-08-15: 307 INFERRED edges (5.5%) at 0.54 average confidence. (P1)**
-      At that confidence roughly a third are wrong and nobody knows which third. Verify or prune;
-      an unverified edge on a god node corrupts every path query through it.
+- [x] **J0.2 — CLOSED 2026-08-15. Verified all 307, pruned the 15 that were wrong.
+      `scripts/graph_prune.py` + `bench/test_graph_prune.py` (11/11), wired into the post-commit
+      hook. 292 inferred edges remain, every one grounded.**
+      The entry said "roughly a third are wrong and nobody knows which third". Both halves were
+      testable, and both were wrong — **the fraction was 5%, and it is now known exactly which**.
+      **All 307 are grounded.** For every edge, the target's name appears literally at the source
+      line the edge cites — checked mechanically, 307 of 307, and the check is now part of the
+      gate. 0.5 is graphify's prior for a *category* of evidence (a name in a collection literal,
+      a name passed as an argument), not a per-edge probability of being false. Nothing was
+      invented, so "verify the semantics" was never the job.
+      **15 resolve to the wrong FILE**, and that is one mechanical defect, not fifteen judgement
+      calls: a bare local name colliding with a same-named symbol elsewhere in the tree.
+      `llm.py:339` calls a nested `_push()` and the graph pointed it at the VPS ticker's `push`.
+      `agent.py` calls a nested `_run()` three times and landed on `tools/coding.py`.
+      `autostart.py` calls its own `install()` and `status()` and landed on `shared/errors.py` and
+      `brain/modes.py`. **13 of the 15 have a local definition of that exact name** — proof of
+      misresolution rather than uncertainty; the other two are `getattr(obj, "name")` string probes
+      no extractor can resolve.
+      So one rule replaces a verification project: *an INFERRED edge crossing into a file the
+      source never imports is unsupported.* It keeps all 231 same-file and all 61 import-backed
+      cross-file edges, and never touches an EXTRACTED one — the gate plants an unsupported edge in
+      both flavours to prove that boundary holds.
+      **The cohesion gate built the same day cross-checked it**: internal edge share went 0.791 ->
+      0.792 (removing cross-community noise) with no community losing cohesion. The bug is
+      graphify's name resolution, not Afon's code, so the prune runs from the post-commit hook
+      after each rebuild, followed by `cluster-only` — otherwise GRAPH_REPORT.md and graph.html
+      keep rendering the edges that were just removed, which is how the routing edges from J8.2
+      spent a day present in graph.json and invisible on the page a person reads.
       **Two corrections to the original entry, both found while doing J8.2.** (1) The count is 307,
       not 607, and the average is 0.54, not 0.65 — J8.3 removed `bench/` and took half of them with
       it, and nothing re-measured afterwards. (2) More importantly, **they are not what the entry
@@ -1415,9 +1440,16 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       `deploy/termux/install.sh`, `deploy/vps/install.sh`, `pre-push`, `post-commit` all
       disconnected — "the graph cannot answer *what does a deploy touch*, which is exactly the
       question that would have caught H2.13."
-- [ ] **J0.5 — 42 thin communities (<3 nodes) are silently omitted from the report. (P2)** 16% of
-      the graph's communities are invisible in the artefact the review is based on. Either render
-      them or state their names, so "not in the report" stops meaning "doesn't exist".
+- [x] **J0.5 — CLOSED 2026-08-15. `cohesion_baseline.py --thin` names them inside
+      GRAPH_REPORT.md, and the post-commit hook re-runs it after every rebuild.** The report says
+      "33 thin omitted" (was 42) and never said *which*, so a reviewer working from the artefact
+      read "not in the report" as "does not exist". Now the report carries a **Thin communities
+      (omitted above)** section naming all 33 with their first members.
+      Written *into the report* rather than printed to a terminal, because a listing nobody re-runs
+      is not visibility; the section is rewritten in place, not appended, so it survives
+      `graphify update` regenerating the file. The gate asserts the hook's **invocation line among
+      non-comment lines** — the J8.2 lesson: a substring search for the filename stays green after
+      someone deletes the line the hook's own comment explains.
 - [x] **J0.6 — CLOSED 2026-08-09: the premise was wrong, and it was marked VERIFIED.**
       `scripts/githooks/post-commit` (this repo sets `core.hooksPath`, so `.git/hooks/` holds
       nothing but `.sample` files — which is what I first looked at, and briefly concluded there
@@ -2243,9 +2275,37 @@ root cause, both silent — nothing errored, the app simply started fresh.
       Better to state that in a check than to let someone discover it.
 
 ### J8 · Cohesion program (cross-cutting — how to stop this recurring)
-- [ ] **J8.1 — Record today's per-community cohesion as a baseline and gate regressions. (P2)**
-      Without a baseline, "improve cohesion" is unfalsifiable. With one, a PR that makes a community
-      worse can be told so.
+- [x] **J8.1 — CLOSED 2026-08-15. `scripts/cohesion_baseline.py` + `bench/cohesion_baseline.json`
+      + `bench/test_cohesion_baseline.py` (18/18). 188 communities recorded, internal edge share
+      0.791.** Without a baseline, "improve cohesion" is unfalsifiable. With one, a PR that makes a
+      community worse can be told so.
+      **First: the metric had to be graphify's, not a lookalike.** Cohesion is not in graph.json —
+      only in GRAPH_REPORT.md's prose — so it was reverse-engineered as internal edge density,
+      2E/(N(N-1)), and then checked against *every* cohesion line the report prints: **147 of 147
+      agree to the 2 decimals shown**. The test re-runs that comparison, because a gate whose metric
+      has quietly drifted from the one Part J's ten findings quote is worse than no gate.
+      **The hard part was identity, not measurement.** Louvain communities are not stable objects.
+      `Presence` was 17 nodes at 0.104 in the 2026-08-02 report and is 53 at 0.07 today, having
+      absorbed two neighbours — no code got worse. So communities are matched to the baseline by
+      **membership overlap**, never by name (two communities share a name today) or index (they
+      renumber on every re-cluster), and two rules refuse a comparison that is not like-for-like:
+      - **overlap < 0.6** → the members dispersed; NOT COMPARABLE.
+      - **size changed > 25%** → cohesion is *density*, which falls with size at a constant
+        edges-per-node ratio, so the two numbers are different measurements. NOT COMPARABLE.
+      `internal_edge_share` (0.791) is the number that survives reshuffling and is gated too, so a
+      wholesale re-cluster cannot hide a real loss behind unmatched communities.
+      **Re-clustering is deterministic**, measured: re-running `graphify cluster-only .` on the same
+      graph moved **0 of 2995 nodes**. The instability is between *graph versions*, which is exactly
+      what the two rules above are for.
+      **Each rule was planted-and-checked, and one did not survive it.** `MIN_OVERLAP` was
+      unfalsifiable at first: the merge case that was supposed to exercise it was being caught by
+      the size rule, so setting it to 0.0 changed nothing. Replaced with a dispersal case sized to
+      breach one rule and clear the other — now `0.0` fails the suite. Wrong density formula: 3
+      checks fail. No size rule: 1 check fails.
+      The baseline lives under `bench/` rather than `graphify-out/` for two reasons: `graphify-out/`
+      is gitignored wholesale, so a gate based there would have nothing to say about a commit; and
+      `bench/` is in `.graphifyignore` (J8.3), so **recording a baseline cannot add a node to the
+      graph it measures**.
 - [x] **J8.2 — CLOSED 2026-08-15. `scripts/routing_manifest.py` + `bench/test_routing_manifest.py`
       (17/17), wired into the post-commit hook. 183 routing edges the graph did not have.**
       **The premise needed correcting first: this was framed as a slice of J0.2's inferred edges,
