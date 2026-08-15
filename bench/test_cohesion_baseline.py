@@ -5,8 +5,9 @@
   1. its cohesion is graphify's cohesion — not a lookalike that has drifted from the number
      GRAPH_REPORT.md prints and Part J's ten findings quote;
   2. a community that genuinely gets mushier is caught;
-  3. a community that merely re-clustered is NOT called a regression, because a gate that cries
-     wolf on Louvain reshuffling is one nobody leaves switched on.
+  3. a community that merely re-clustered — or simply GREW — is NOT called a regression, because a
+     gate that cries wolf on Louvain reshuffling is one nobody leaves switched on. This is why the
+     red light is internal degree while the reported number stays cohesion.
 
 (3) is the one that decides whether this survives. Louvain communities are not stable objects:
 `Presence` went from 17 nodes at 0.104 to 53 nodes at 0.07 between two graphs with no code
@@ -114,7 +115,7 @@ def main() -> int:
 
     print("\n[4] a re-cluster is not a regression")
     # Merge the two largest communities — the classic Louvain move between graph versions, and the
-    # one that scores exactly 0.5 Jaccard when the sizes match, which is why the floor is 0.6.
+    # one that scores exactly 0.5 Jaccard when the sizes match, which is why the floor sits above.
     big = sorted(cur["communities"], key=lambda c: -c["size"])[:2]
     merged = copy.deepcopy(cur)
     merged["communities"] = [c for c in merged["communities"] if c not in big] + [{
@@ -129,13 +130,13 @@ def main() -> int:
           and {c["name"] for c in big} <= merged_names,
           f"regressions {[b['name'] for b, _, _, _ in regs][:3]}, orphans {sorted(merged_names)[:3]}")
 
-    # The third reshuffle shape, and the only one the SIZE rule cannot see: a community's members
-    # disperse into several others, each of which stays a normal size. Planting `MIN_OVERLAP = 0.0`
-    # is what showed the merge case above was being caught by size alone, leaving the overlap floor
-    # untested — a constant nothing exercises is a constant nobody can trust.
-    # Built from synthetic communities on purpose: `compare()` reads only name/size/cohesion/
-    # members, and hand-picked sizes are the only way to breach one rule while staying clear of
-    # the other. Doing it on the real graph kept tripping both at once.
+    # A community's members disperse into several others, each of which stays a normal size and
+    # normally connected. Only the overlap floor can see this one — and it took two attempts to
+    # isolate: planting `MIN_OVERLAP = 0.0` showed the earlier fixtures were being caught by the
+    # other rule, leaving the floor itself untested. A constant nothing exercises is a constant
+    # nobody can trust.
+    # Synthetic on purpose: `compare()` reads only name/size/cohesion/degree/members, and
+    # hand-picked numbers are the only way to breach one rule while staying clear of the other.
     def synth(name, ids, cohesion):
         return {"name": name, "size": len(ids), "cohesion": cohesion, "members": sorted(ids)}
 
@@ -143,41 +144,41 @@ def main() -> int:
     others = {f"r{r}": [f"r{r}n{i}" for i in range(36)] for r in range(4)}
     small = {"internal_edge_share": 0.8,
              "communities": [synth("A", gone, 0.30)] + [synth(k, v, 0.30) for k, v in others.items()]}
+    # 0.26 over 46 members is the same INTERNAL DEGREE as 0.30 over 40 — chosen so the degree rule
+    # has nothing to say and the overlap floor is the only thing that can flag the dispersal.
     dispersed = {"internal_edge_share": 0.8,
-                 "communities": [synth(k, v + gone[i * 10:(i + 1) * 10], 0.05)
+                 "communities": [synth(k, v + gone[i * 10:(i + 1) * 10], 0.26)
                                  for i, (k, v) in enumerate(others.items())]}
     regs, _, orph = CB.compare(small, dispersed)
     reasons = {b["name"]: why for b, _, _, why in orph}
     check("a community whose members dispersed is caught by membership, not called a regression",
           reasons.get("A") == "membership" and not any(b["name"] == "A" for b, *_ in regs),
           f"reasons {reasons}, regressions {[b['name'] for b, *_ in regs]}")
-    check("and every recipient is a size the size rule would have accepted for A",
-          all(abs(c["size"] - 40) <= 40 * CB.MAX_SIZE_DRIFT for c in dispersed["communities"]),
-          f"sizes {[c['size'] for c in dispersed['communities']]} vs A's 40 — if one is outside "
-          "the size rule, that rule could be doing the work instead of the overlap floor")
+    a_degree = CB.degree(small["communities"][0])
+    check("and no recipient's degree moved enough for the degree rule to be doing the work",
+          all(abs(CB.degree(c) - a_degree) <= a_degree * CB.MAX_DEGREE_DROP
+              for c in dispersed["communities"]),
+          f"A {a_degree:.2f} vs recipients "
+          f"{[round(CB.degree(c), 2) for c in dispersed['communities']]} — if a recipient's "
+          "degree also collapsed, this proves nothing about overlap")
 
-    # The other reshuffle shape, and the one only the SIZE rule catches: a community keeps its
-    # members — overlap stays well above the floor — but absorbs enough new ones that density
-    # falls on arithmetic alone, since it is 2E/(N(N-1)). `Presence` did exactly this, 17 nodes at
-    # 0.104 to 53 at 0.07. Calling that a regression is the false alarm that gets a gate disabled.
-    grown = copy.deepcopy(cur)
-    target = grown["communities"][0]
-    donor = next(c for c in grown["communities"][1:]
-                 # Big enough to breach the size rule, small enough that membership overlap stays
-                 # above the floor — otherwise the two rules are not being told apart.
-                 if target["size"] * 0.3 < c["size"] < target["size"] * 0.6)
-    target["members"] = sorted(set(target["members"]) | set(donor["members"]))
-    target["size"] = len(target["members"])
-    target["cohesion"] = round(target["cohesion"] * 0.6, 4)
-    was = cur["communities"][0]
-    regs, _, orph = CB.compare(cur, grown)
-    check("absorbing nodes is judged on shape, not on the density that dilutes with size",
-          was["name"] in {b["name"] for b, *_ in orph}
-          and not any(b["name"] == was["name"] for b, _, _, _ in regs),
-          f"size {was['size']} -> {target['size']}")
-    check("and it got there on size, not because membership stopped matching",
-          CB.overlap(was["members"], target["members"]) >= CB.MIN_OVERLAP,
-          "the membership rule would have caught it anyway, so this proves nothing about size")
+    # The reshuffle shape that no membership rule can catch, because membership barely moves: a
+    # community grows a little and stays exactly as interconnected. Density MUST fall — it is
+    # 2E/(N(N-1)) — so a gate on cohesion calls this a regression. It is the real case that came
+    # back from the first commit after this landed: `voice_health.py` 18 -> 21 nodes, cohesion
+    # 0.183 -> 0.148, internal degree 3.11 -> 2.96.
+    was = dict(synth("W", [f"w{i}" for i in range(18)], 0.183))
+    was["degree"] = round(2 * 28 / 18, 4)
+    grew = dict(synth("W", [f"w{i}" for i in range(21)], 0.148))
+    grew["degree"] = round(2 * 31 / 21, 4)
+    regs, _, orph = CB.compare({"internal_edge_share": 0.8, "communities": [was]},
+                               {"internal_edge_share": 0.8, "communities": [grew]})
+    check("a community that grew while staying as interconnected is not a regression",
+          not regs and not orph,
+          f"cohesion {was['cohesion']} -> {grew['cohesion']} but degree "
+          f"{CB.degree(was):.2f} -> {CB.degree(grew):.2f}")
+    check("and cohesion alone would have called it one, which is why degree is what is gated",
+          grew["cohesion"] - was["cohesion"] < -CB.TOLERANCE)
 
     print("\n[5] the check is wired to run")
     runner = (ROOT / "bench" / "run_all_tests.py").read_text(encoding="utf-8")

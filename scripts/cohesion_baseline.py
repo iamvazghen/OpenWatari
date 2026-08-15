@@ -15,8 +15,14 @@ on a metric that has quietly drifted from the one the report shows is worse than
 they carry an index and a name derived from their dominant node, and both move when the graph
 changes. `Presence` was 17 nodes at 0.104 in the 2026-08-02 report and 53 nodes at 0.07 today,
 having absorbed two neighbours — no code got worse. So communities are matched to the baseline by
-membership overlap (Jaccard >= 0.5), and a community that reshuffled past that is reported as NOT
-COMPARABLE rather than as a regression. A gate that cries wolf on re-clustering gets switched off.
+membership overlap, and a community that reshuffled past MIN_OVERLAP is reported as NOT COMPARABLE
+rather than as a regression. A gate that cries wolf on re-clustering gets switched off.
+
+**And the red light is internal degree, not cohesion.** Density falls with size by arithmetic, so
+the first commit after this file landed produced four "regressions" that were communities growing
+by two or three nodes while staying exactly as interconnected. Both numbers are recorded and both
+are printed — cohesion because it is what the report and Part J quote — but only degree fails a
+build. See MAX_DEGREE_DROP.
 
 `internal_edge_share` — the fraction of edges that stay inside a community — is the number that
 survives reshuffling, so it is gated too, and it is the one to watch if matching ever collapses.
@@ -40,18 +46,24 @@ GRAPH = ROOT / "graphify-out" / "graph.json"
 # which is ignored wholesale — a gate whose baseline is untracked has nothing to say about a PR.
 BASELINE = ROOT / "bench" / "cohesion_baseline.json"
 
-# Two ticks of the 2 decimals GRAPH_REPORT.md prints. Anything under one tick is invisible in the
-# artefact the review is based on, so gating tighter than that would fail on rounding.
+# Two ticks of the 2 decimals GRAPH_REPORT.md prints. Used for the aggregate share, which is a
+# ratio and does not drift with size.
 TOLERANCE = 0.02
 # Below this overlap, "the same community" is not a claim worth making about a Louvain partition.
-# This rule and the size rule below catch different things, which is why both exist: a community
-# whose members were swapped out keeps its size exactly, and only overlap sees that.
-MIN_OVERLAP = 0.6
-# Cohesion is edge DENSITY, 2E/(N(N-1)), which is not size-invariant: a community that grows by
-# x% at a constant edges-per-node ratio loses roughly x% of its density with nothing having got
-# worse. So a size change large enough to move density by more than TOLERANCE on its own makes the
-# two numbers different measurements, not a before and after. 0.02 on a typical 0.07 is ~25%.
-MAX_SIZE_DRIFT = 0.25
+# Two equal communities merging score exactly 0.5, so the floor sits above that. 0.7 rather than
+# 0.6 was measured on the re-cluster this file's first commit caused: at 0.6 a community that shed
+# 12 of its 38 members read as a regression, at 0.7 it is correctly NOT COMPARABLE, and coverage
+# only falls from 170 to 161 of 192 communities.
+MIN_OVERLAP = 0.7
+# What the per-community gate actually compares: INTERNAL DEGREE, 2E/N — edges per member inside
+# the community. Cohesion itself is DENSITY, 2E/(N(N-1)), which falls with size by construction,
+# so gating on it fails on arithmetic. Measured, not assumed: the first commit after this landed
+# grew four communities by 2-3 nodes each and the density gate called all four regressions —
+# `voice_health.py` 18 -> 21 nodes read as 0.183 -> 0.148, while its internal degree moved 3.11 ->
+# 2.96, under 5%. Their members had not become any less connected to each other.
+# So cohesion is still recorded and reported, because it is the number GRAPH_REPORT.md prints and
+# Part J's findings quote — but the red light is degree.
+MAX_DEGREE_DROP = 0.15  # 3x the largest movement seen across a real re-cluster
 # graphify's own cutoff for printing a community in GRAPH_REPORT.md, and the heading it drops them
 # under ("33 thin omitted"). `--thin` names them beneath this marker (J0.5).
 MIN_REPORTED = 3
@@ -89,6 +101,8 @@ def measure(graph: dict) -> dict:
             "name": names[c],
             "size": n,
             "cohesion": round(intra[c] / possible, 4) if possible else 0.0,
+            "internal_edges": intra[c],
+            "degree": round(2 * intra[c] / n, 4) if n else 0.0,
             "members": sorted(ids),
         })
     out.sort(key=lambda e: (-e["size"], e["name"]))
@@ -125,15 +139,21 @@ def compare(base: dict, cur: dict) -> tuple[list, list, list]:
             orphans.append((b, round(score, 2), best["name"] if best else "-", "membership"))
             continue
         pool.remove(best)
-        if abs(best["size"] - b["size"]) > b["size"] * MAX_SIZE_DRIFT:
-            orphans.append((b, round(score, 2), best["name"], f"size {b['size']}->{best['size']}"))
-            continue
-        delta = best["cohesion"] - b["cohesion"]
-        if delta < -TOLERANCE:
+        was, now = degree(b), degree(best)
+        delta = (now - was) / was if was else 0.0
+        if delta < -MAX_DEGREE_DROP:
             regressions.append((b, best, round(delta, 4), round(score, 2)))
-        elif delta > TOLERANCE:
+        elif delta > MAX_DEGREE_DROP:
             improvements.append((b, best, round(delta, 4), round(score, 2)))
     return regressions, improvements, orphans
+
+
+def degree(entry: dict) -> float:
+    """Internal edges per member. Derived when absent so an older baseline still compares."""
+    if "degree" in entry:
+        return entry["degree"]
+    n = entry["size"]
+    return entry["cohesion"] * (n - 1) if n > 1 else 0.0
 
 
 def main() -> int:
@@ -178,10 +198,12 @@ def main() -> int:
     print(f"cohesion: {len(cur['communities'])} communities, internal edge share "
           f"{cur['internal_edge_share']:.3f} (baseline {base['internal_edge_share']:.3f})")
     for b, c, d, s in regressions:
-        print(f"  WORSE  {b['name']!r} {b['cohesion']:.3f} -> {c['cohesion']:.3f} ({d:+.3f}), "
+        print(f"  WORSE  {b['name']!r} internal degree {degree(b):.2f} -> {degree(c):.2f} "
+              f"({d:+.0%}), cohesion {b['cohesion']:.3f} -> {c['cohesion']:.3f}, "
               f"size {b['size']} -> {c['size']}, overlap {s}")
     for b, c, d, s in improvements:
-        print(f"  better {b['name']!r} {b['cohesion']:.3f} -> {c['cohesion']:.3f} ({d:+.3f})")
+        print(f"  better {b['name']!r} internal degree {degree(b):.2f} -> {degree(c):.2f} "
+              f"({d:+.0%})")
     for b, s, near, why in orphans:
         print(f"  NOT COMPARABLE {b['name']!r} (size {b['size']}) — best overlap {s} with {near!r}, "
               f"{why} changed; re-clustered, not regressed")
@@ -189,7 +211,8 @@ def main() -> int:
     if regressions or share_drop > TOLERANCE:
         if share_drop > TOLERANCE:
             print(f"\nFAIL: edges leaving their community — internal share fell {share_drop:.3f}")
-        print(f"\nFAIL: {len(regressions)} communities lost more than {TOLERANCE} cohesion.\n"
+        print(f"\nFAIL: {len(regressions)} communities lost more than {MAX_DEGREE_DROP:.0%} of "
+              f"their internal degree.\n"
               "If the change is deliberate, re-record with --record and say why in the commit.")
         return 1
     print("OK: no community lost cohesion beyond tolerance.")

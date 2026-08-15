@@ -2288,20 +2288,27 @@ root cause, both silent — nothing errored, the app simply started fresh.
       `Presence` was 17 nodes at 0.104 in the 2026-08-02 report and is 53 at 0.07 today, having
       absorbed two neighbours — no code got worse. So communities are matched to the baseline by
       **membership overlap**, never by name (two communities share a name today) or index (they
-      renumber on every re-cluster), and two rules refuse a comparison that is not like-for-like:
-      - **overlap < 0.6** → the members dispersed; NOT COMPARABLE.
-      - **size changed > 25%** → cohesion is *density*, which falls with size at a constant
-        edges-per-node ratio, so the two numbers are different measurements. NOT COMPARABLE.
+      renumber on every re-cluster): below **0.7** overlap the members have dispersed and the
+      comparison is refused as NOT COMPARABLE.
+      **And the red light is internal degree (2E/N), not cohesion — the first version had this
+      wrong and the very next commit proved it.** Cohesion is *density*, 2E/(N(N-1)), which falls
+      with size by arithmetic. Adding two files re-clustered the graph, and the density gate
+      called four growing communities regressions: `voice_health.py` 18 → 21 nodes read as 0.183 →
+      0.148 while its edges-per-member moved 3.11 → 2.96, under 5%. Nothing about them had got
+      less interconnected. Both numbers are recorded and printed — cohesion because it is what the
+      report and Part J quote — but only a **>15% degree drop** fails a build. Same run set the
+      overlap floor: at 0.6 a community that shed 12 of its 38 members read as a regression, at
+      0.7 it is correctly NOT COMPARABLE, and coverage only falls from 170 to 161 of 192.
       `internal_edge_share` (0.791) is the number that survives reshuffling and is gated too, so a
       wholesale re-cluster cannot hide a real loss behind unmatched communities.
       **Re-clustering is deterministic**, measured: re-running `graphify cluster-only .` on the same
       graph moved **0 of 2995 nodes**. The instability is between *graph versions*, which is exactly
       what the two rules above are for.
-      **Each rule was planted-and-checked, and one did not survive it.** `MIN_OVERLAP` was
-      unfalsifiable at first: the merge case that was supposed to exercise it was being caught by
-      the size rule, so setting it to 0.0 changed nothing. Replaced with a dispersal case sized to
-      breach one rule and clear the other — now `0.0` fails the suite. Wrong density formula: 3
-      checks fail. No size rule: 1 check fails.
+      **Each rule is planted-and-checked, and the overlap floor needed two attempts.** It was
+      unfalsifiable at first — every fixture meant to exercise it was being caught by the other
+      rule, so setting `MIN_OVERLAP = 0.0` changed nothing. It now takes a dispersal fixture whose
+      recipients hold the same internal degree, so only overlap can flag it. Today: `0.0` fails 3
+      checks, no degree gate fails 1, a wrong density formula fails 1.
       The baseline lives under `bench/` rather than `graphify-out/` for two reasons: `graphify-out/`
       is gitignored wholesale, so a gate based there would have nothing to say about a commit; and
       `bench/` is in `.graphifyignore` (J8.3), so **recording a baseline cannot add a node to the
