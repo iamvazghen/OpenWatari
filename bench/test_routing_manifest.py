@@ -72,6 +72,7 @@ def main() -> int:
         print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
         return 1
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    edges += RM.ops_edges(graph)
     parts = RM.resolve(edges, graph)
     # `stale` is NOT a failure: this repo commits rarely by policy, so a handler can legitimately
     # be newer than the graph. `unmapped` means the graph has never seen the module at all, which
@@ -123,6 +124,41 @@ def main() -> int:
         check("it runs after `graphify update`, not before", update[0] < call[0])
         check("its output lands in the log a person can read",
               ".last-update.log" in code[call[0]])
+
+    print("\n[5] the ops layer is connected by invocations, not by mentions (J0.4)")
+    ops = RM.ops_edges(graph)
+    by_src = {(e["table"], e["context"]) for e in ops}
+    # The question J0.4 wanted answerable: what does a deploy touch? Both are shell COMMANDS, so
+    # nothing in the graph connected them and the most dangerous file in the repo sat at degree 1.
+    check("the deploy reaches the two gates it runs",
+          ("scripts/deploy_vps.sh", "ops:preflight.sh") in by_src
+          and ("scripts/deploy_vps.sh", "ops:verify_vps_sync.sh") in by_src, str(sorted(by_src)))
+    check("the post-commit hook reaches what it invokes",
+          ("scripts/githooks/post-commit", "ops:routing_manifest.py") in by_src)
+    # NOT checked here: that `.py` files are excluded as sources. The exclusion is real and stays
+    # in the script (a .py's edges come from its imports; reading it adds only docstring mentions),
+    # but no .py under scripts/ currently names a prefixed path outside a comment, so an assertion
+    # about it passes whether the filter exists or not. Planting the regression proved that. A
+    # green tick over nothing is what J6.3 was about, so there is no tick.
+    #
+    # A path named in a comment is a cross-reference, not an invocation. These files explain
+    # themselves at length, so admitting comments would put unverified edges on the ops layer —
+    # the exact defect J0.2 is about — purely to inflate a count.
+    check("a path mentioned only in a comment produces no edge",
+          "scripts/graph_fresh.py" in hook
+          and ("scripts/githooks/post-commit", "ops:graph_fresh.py") not in by_src,
+          "post-commit discusses graph_fresh.py at length without running it")
+    check("no self-edges", all(e["source"] != e["target"] for e in ops))
+    # `deploy_vps.env` and `deploy_vps.sh` slug identically once the extension is dropped, and the
+    # first version of this drew preflight -> the deploy SCRIPT off a mention of the env FILE.
+    # Resolution therefore goes through an exact path lookup, and the property to assert is that
+    # every edge lands on the file it names — not that one known-bad pair is absent. Checking the
+    # pair was the first attempt here and it did not bite when the bug was planted back in: the
+    # fabricated edge carries the env file's basename in its context, so it never matched.
+    src_of = {n["id"]: n.get("source_file") for n in graph["nodes"]}
+    wrong = [(e["table"], e["ref"], src_of.get(e["target"])) for e in ops
+             if src_of.get(e["target"]) != e["ref"]]
+    check("every ops edge lands on the file it actually names", not wrong, str(wrong[:3]))
 
     print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
     return 0 if FAIL == 0 else 1

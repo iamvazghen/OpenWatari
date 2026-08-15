@@ -1384,11 +1384,37 @@ commit *does* match HEAD (the staleness is uncommitted-work staleness, J0.1, not
       `coding_skills_bench`→`LLMClient`). A test file importing the code it tests is the least
       surprising edge in any codebase. Exclude test→impl edges from that heuristic or the section
       stays noise forever.
-- [ ] **J0.4 — 218 isolated nodes (<=1 edge); the entire ops layer is one of them. (P1, VERIFIED)**
-      `deploy_vps.sh`, `deploy_docs.sh`, `live-check.sh`, `install-live-check.sh`, `install-brain.sh`,
-      `verify_vps_sync.sh`, `run.sh`, `deploy/termux/install.sh`, `deploy/vps/install.sh`, `pre-push`, `post-commit`
-      — all disconnected. The graph cannot answer *"what does a deploy touch"*, which is exactly the
-      question that would have caught H2.13.
+- [x] **J0.4 — CLOSED 2026-08-15. The deploy is connected; the headline count was measuring
+      something else.** `ops_edges()` in `scripts/routing_manifest.py` now reads every shell script
+      and hook under `scripts/`/`deploy/` and emits an edge for each repo path it *invokes*.
+      `deploy_vps.sh` went from degree 1 to 3, `preflight.sh` to 7, `verify_vps_sync.sh` to 5, and
+      `graphify path "deploy_vps.sh" "verify_vps_sync.sh"` answers in one hop. The question the
+      entry wanted — *what does a deploy touch* — is answerable.
+      **The count was wrong, and in the same way J0.2's was.** Of the 1431 nodes at degree ≤1 on
+      today's graph, **801 are `rationale_*` nodes** — doc-comment nodes that carry exactly one
+      `rationale_for` edge *by construction* and can never have more — plus 10 `__entry` stubs.
+      Real: 616. Most of the remainder are markdown headings (`docs/` 94, `TODO.md` 70, `SOP.md` 35,
+      `skills/` 71), which are sparse for the same structural reason. "Isolated nodes" as a metric
+      counts node *kinds* before it counts anything wrong.
+      **What was deliberately NOT connected.** Only 8 edges came out of the ops layer, and that is
+      the honest number: a path named in a *comment* produces none. These scripts explain themselves
+      at length, and admitting comment mentions would have roughly doubled the count with edges
+      nobody can act on — unverified edges on the ops layer, which is precisely the defect J0.2
+      describes. Inflating a metric with the thing the neighbouring entry calls a bug is not a fix.
+      `deploy/uptime_watch.py` also stays isolated on purpose: it runs standalone off-VPS and the
+      only things importing it are bench tests, which J8.3 excluded from the graph.
+      **A check that could not fail was removed rather than kept.** The first version asserted that
+      `.py` files are excluded as ops sources; planting the regression showed it passes either way,
+      because no `.py` under `scripts/` names a prefixed path outside a comment. The exclusion stays
+      in the code; the tick does not. Same for the collision guard: asserting one known-bad pair was
+      absent did not bite when the bug was planted back in (the fabricated edge carries the *env*
+      file's basename), so it now asserts the real property — every ops edge lands on the file it
+      names. That one bites.
+      *Original entry:* 218 isolated nodes; `deploy_vps.sh`, `deploy_docs.sh`, `live-check.sh`,
+      `install-live-check.sh`, `install-brain.sh`, `verify_vps_sync.sh`, `run.sh`,
+      `deploy/termux/install.sh`, `deploy/vps/install.sh`, `pre-push`, `post-commit` all
+      disconnected — "the graph cannot answer *what does a deploy touch*, which is exactly the
+      question that would have caught H2.13."
 - [ ] **J0.5 — 42 thin communities (<3 nodes) are silently omitted from the report. (P2)** 16% of
       the graph's communities are invisible in the artefact the review is based on. Either render
       them or state their names, so "not in the report" stops meaning "doesn't exist".

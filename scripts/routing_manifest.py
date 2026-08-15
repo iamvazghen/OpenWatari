@@ -69,6 +69,61 @@ def node_id(obj: Any) -> str:
     return base if inspect.ismodule(obj) else f"{base}_{slug(obj.__name__)}"
 
 
+def file_nodes(graph: dict) -> dict[str, str]:
+    """Repo-relative path -> the graph node for that FILE (not the symbols inside it).
+
+    A file node is the one whose id is the slug of its own path. Using our own slug on both sides
+    keeps the two derivations honest about each other.
+    """
+    return {n["source_file"]: n["id"] for n in graph["nodes"]
+            if n.get("source_file")
+            and n["id"] == slug(Path(n["source_file"]).with_suffix("").as_posix())}
+
+
+# A repo-relative path mentioned inside an ops script. Requires an extension, because dropping it
+# would make `scripts/deploy_vps.env` and `scripts/deploy_vps.sh` slug to the same id — which is
+# how the first version of this drew an edge from preflight to the deploy script off a mention of
+# the env file. Resolution goes through file_nodes() by exact path for the same reason.
+_OPS_REF = re.compile(
+    r"(?<![\w/.\-])((?:scripts|deploy|src|bench|clients|skills|personality)[/\\][\w./\\-]+\.\w+)")
+
+
+def ops_edges(graph: dict) -> list[dict[str, str]]:
+    """What the ops layer touches — the other thing an AST extractor structurally cannot see.
+
+    `deploy_vps.sh` invokes `preflight.sh` and `verify_vps_sync.sh` as SHELL COMMANDS, so nothing
+    in the graph connected them: the most dangerous file in the repo sat at degree 1, and "what
+    does a deploy touch" — the question J0.4 wanted — had no answer. Only ops files are read as
+    sources; a path mentioned in application code is already an import or nothing.
+    """
+    by_path = file_nodes(graph)
+    edges: list[dict[str, str]] = []
+    for rel, src_id in sorted(by_path.items()):
+        # Shell and hooks only. A `.py` under scripts/ gets its real edges from its imports, and
+        # reading it here adds nothing but docstring mentions.
+        if not rel.startswith(("scripts/", "deploy/")) or rel.endswith(".py"):
+            continue
+        try:
+            body = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # Comment lines are dropped: these files explain themselves at length, and a path named in
+        # a comment is a cross-reference, not an invocation. Keeping them would put unverified
+        # edges on the ops layer — the exact defect J0.2 is about — to inflate a count.
+        body = "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("#"))
+        for ref in sorted(set(_OPS_REF.findall(body))):
+            target = ref.replace("\\", "/")
+            tgt_id = by_path.get(target)
+            if not tgt_id or tgt_id == src_id:
+                continue
+            edges.append({
+                "source": src_id, "target": tgt_id, "target_file": tgt_id,
+                "relation": "references", "context": f"ops:{Path(target).name}",
+                "table": rel, "owner": "", "ref": target,
+            })
+    return edges
+
+
 def build() -> list[dict[str, str]]:
     """The routing tables, read from the live objects, as edge descriptions."""
     from afon.brain import tools as T
@@ -117,10 +172,7 @@ def resolve(edges: list[dict[str, str]], graph: dict) -> dict[str, list[dict[str
     gap, and the thing worth failing on.
     """
     ids = {n["id"] for n in graph["nodes"]}
-    # A file node is one whose id is the slug of its own path; everything else is a symbol inside
-    # a file. Using our own slug on both sides keeps the two derivations honest about each other.
-    files = {n["id"] for n in graph["nodes"]
-             if n.get("source_file") and n["id"] == slug(Path(n["source_file"]).with_suffix("").as_posix())}
+    files = set(file_nodes(graph).values())
     out: dict[str, list[dict[str, str]]] = {"ok": [], "stale": [], "unmapped": []}
     for e in edges:
         if e["source"] in ids and e["target"] in ids:
@@ -164,8 +216,8 @@ def main() -> int:
         print("routing manifest: graph.json missing — run `graphify update .` first")
         return 0 if check else 1
 
-    edges = build()
     graph = json.loads(GRAPH.read_text(encoding="utf-8"))
+    edges = build() + ops_edges(graph)
     parts = resolve(edges, graph)
     print(f"routing manifest: {len(edges)} entries — {len(parts['ok'])} resolved, "
           f"{len(parts['stale'])} awaiting a rebuild, {len(parts['unmapped'])} unmapped")
