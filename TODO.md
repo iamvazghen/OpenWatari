@@ -2554,6 +2554,22 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       clean summary. Record every recurrence here with the date and the exit code, so the rate is a
       measured number rather than a memory.
 
+### L3f · Editing a shell script from Windows silently breaks it (observed 2026-08-15)
+
+- [x] **Editing `deploy_vps.sh`, `verify_vps_sync.sh` and `scripts/githooks/post-commit` rewrote
+      all three with CRLF, and the working tree is what actually runs them.** `.gitattributes`
+      already marks them `text eol=lf` and did its job — every committed blob is LF, and `git diff`
+      after the repair was **empty**. So this is invisible to review, invisible to a fresh clone,
+      and real only on this machine: a CRLF script dies with `$'\r': command not found` under any
+      invocation that is not Git Bash, which is how the VPS and the test gate run them.
+      Caught by `preflight.sh`'s LF invariant — but only at full-suite time, two commits after the
+      edit. **Git said so twice at commit** ("CRLF will be replaced by LF the next time Git touches
+      it") and I read the warnings without acting on them, which is the actual failure here.
+      Repaired with a byte-level `\r\n` → `\n` rewrite. No new check was added: `pre-push` runs the
+      full suite, so preflight already blocks a push on this, and the gap was attention, not
+      coverage. **Working rule: after editing any `.sh` or anything under `scripts/githooks/`,
+      strip CR before committing** — or read the warning git is already printing.
+
 ### L3c · The "echo" had TWO causes, and the second one was the real bug (2026-08-10)
 
 - [x] **A tool answering a bad call with a QUESTION becomes a fake answer. (P1, FIXED)** I blamed
