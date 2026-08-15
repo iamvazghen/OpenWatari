@@ -100,8 +100,15 @@ def main() -> int:
           f"{len(once['links'])} vs {len(twice['links'])}")
     check("injection removes only its own previous edges",
           len([lk for lk in twice["links"] if lk.get("_origin") != RM.ORIGIN]) == before)
-    check("no injected edge shares endpoints with an extracted one (graph is not a multigraph)",
-          len({(lk["source"], lk["target"]) for lk in once["links"]}) == len(once["links"]))
+    # Endpoint-sharing must be judged the way the GRAPH judges it. This one is undirected, so
+    # (a, b) and (b, a) are one edge — and comparing ordered pairs is how the manifest's
+    # `tool_handlers -> if_then` silently replaced the extracted `if_then -> tool_handlers` call.
+    # A rebuild reporting 191 injected and 190 present is what surfaced it.
+    pair = ((lambda s, t: (s, t)) if graph.get("directed")
+            else (lambda s, t: frozenset((s, t))))
+    check("no injected edge shares endpoints with an extracted one, as the graph counts endpoints",
+          len({pair(lk["source"], lk["target"]) for lk in once["links"]}) == len(once["links"]),
+          "an undirected graph collapses (a,b) with (b,a) — the loser is the extracted edge")
     check("injected edges are marked so they can be told from AST findings",
           all(lk["_origin"] == RM.ORIGIN and lk["source_location"] == "routing table"
               for lk in once["links"] if lk.get("_origin") == RM.ORIGIN))

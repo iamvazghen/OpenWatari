@@ -190,12 +190,22 @@ def inject(graph: dict, edges: list[dict[str, str]]) -> tuple[int, int]:
     `graph.json` is not a multigraph, so an edge whose endpoints already have one would be
     collapsed on load — silently overwriting a real extracted `calls` edge with ours. Those are
     skipped and counted rather than added: the routing fact is already represented.
+
+    The pair key follows the graph's own `directed` flag. This graph is UNDIRECTED, where (a, b)
+    and (b, a) are the same edge — and the first version of this compared ordered pairs, so the
+    manifest's `tool_handlers -> if_then` quietly replaced the extracted `if_then -> tool_handlers`
+    call. Found because a rebuild reported 191 edges injected and 190 present afterwards.
     """
+    directed = bool(graph.get("directed"))
+
+    def key(s: str, t: str):
+        return (s, t) if directed else frozenset((s, t))
+
     links = [lk for lk in graph["links"] if lk.get("_origin") != ORIGIN]
-    pairs = {(lk["source"], lk["target"]) for lk in links}
+    pairs = {key(lk["source"], lk["target"]) for lk in links}
     added = collapsed = 0
     for e in edges:
-        if (e["source"], e["target"]) in pairs:
+        if key(e["source"], e["target"]) in pairs:
             collapsed += 1
             continue
         links.append({
@@ -204,7 +214,7 @@ def inject(graph: dict, edges: list[dict[str, str]]) -> tuple[int, int]:
             "weight": 1.0, "_origin": ORIGIN,
             "source": e["source"], "target": e["target"], "confidence_score": 1.0,
         })
-        pairs.add((e["source"], e["target"]))
+        pairs.add(key(e["source"], e["target"]))
         added += 1
     graph["links"] = links
     return added, collapsed
