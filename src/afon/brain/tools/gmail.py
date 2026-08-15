@@ -59,32 +59,6 @@ async def read_email(args: dict) -> str:
         return tool_error("email read", e)
 
 
-async def email_signals():
-    """Proactive source: one daily nudge if important mail is unread (Gmail's own IMPORTANT marker,
-    not a guess). Repeat-suppressed by date. Fail-quiet — no login/empty/error -> no signals."""
-    from datetime import date
-
-    from afon.brain.proactive import Signal
-
-    if not configured():
-        return []
-    try:
-        listing = await api_get(f"{_GMAIL}/messages",
-                                params={"q": "is:important is:unread newer_than:1d", "maxResults": 5})
-        ids = [m["id"] for m in (listing.get("messages") or [])]
-        if not ids:
-            return []
-        msg = await api_get(f"{_GMAIL}/messages/{ids[0]}",
-                            params={"format": "metadata", "metadataHeaders": ["From"]})
-        headers = {h["name"].lower(): h["value"] for h in (msg.get("payload", {}).get("headers") or [])}
-        frm = headers.get("from", "someone")
-    except Exception:  # noqa: BLE001 — never throw into the tick loop
-        return []
-    msg = (f"Sir, you have {len(ids)} important email{'s' if len(ids) > 1 else ''} unread, "
-           f"the latest from {frm.split('<')[0].strip()}.")
-    return [Signal(key=f"email-{date.today()}", kind="thread", urgency=0.6, message=msg)]
-
-
 async def important_email_phrase() -> str:
     """A one-line phrase about important unread mail ('3 important emails unread, the latest from
     Jane') for the daily digest, or '' if none / not configured. Fail-quiet."""

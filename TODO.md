@@ -1554,9 +1554,21 @@ only entry whose size and score both held still across four graph rebuilds.
 - [ ] **J2.1 — Community 53 "TaskWorker": 49 nodes, cohesion 0.05 — the worst in the graph. (P1)**
       Largest-but-one community *and* joint-lowest cohesion: the objectives/worker/queue surface has
       no internal structure at all.
-- [ ] **J2.2 — Community 2 "notion.py": 65 nodes (largest), cohesion 0.08. (P1)** Mixes Notion CRUD,
+- [ ] **J2.2 — Community "notion.py": 65 nodes (largest), cohesion 0.082. (P1)** Mixes Notion CRUD,
       the autonomous backlog worker (`attempt_backlog`), world-model population (`_default_refresh`)
       and reminder cancellation (`_cancel_task_reminder`). At least three modules wearing one name.
+      **Two corrections and a first cut, 2026-08-16.** `attempt_backlog` had already moved to
+      `brain/backlog.py` — the entry describes a split that is half done. And 51 of the lines it
+      counts were **dead**: `task_signals()` is a proactive signal source that nothing registers,
+      unwired when the daily digest replaced it, referenced today by exactly one test asserting it
+      must *not* be a tick source. Deleted, along with its twin `email_signals()` in `gmail.py`
+      (26 more lines, same story) — and `skills/email-triage.md`, which still told the model
+      `email_signals` fed the proactive engine, a documentation lie of the J5 kind.
+      What is genuinely left mixed in the remaining ~875 lines is three things: the Notion HTTP
+      client and rich-text helpers, the page/task CRUD tools, and a **task-reminder JSON store**
+      (`_reminders_path`/`_load`/`_save`/`_set`/`_cancel_task_reminder`) that is a scheduler
+      concern wearing a Notion name. That store is the next slice; it is monkeypatched by
+      `bench/test_reminder_cancel_contract.py`, so moving it means moving that test's seams too.
 - [ ] **J2.3 — Community 1 "routines.py": 42 nodes, cohesion 0.06. (P1)**
 - [ ] **J2.4 — Community 4 "AfonAgent": 29 nodes, cohesion 0.05. (P1)** The structural half of J1.1.
 - [ ] **J2.5 — Community 3 "WorldModel": 30 nodes, cohesion 0.07. (P2)**

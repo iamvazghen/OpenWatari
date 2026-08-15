@@ -13,5 +13,5 @@ Drafting (`draft_email`):
 - If he says "reply to X saying Y", draft Y in his voice, don't transcribe it verbatim
   unless he says "exactly".
 
-Signals (`email_signals` feeds the proactive engine):
+Signals (`important_email_phrase()` feeds the morning digest, not the proactive tick):
 - Only genuinely important unread mail justifies speaking unprompted. A newsletter never does.

@@ -361,57 +361,6 @@ async def notion_tasks_structured() -> list[dict]:
         return []
 
 
-async def task_signals():
-    """Proactive source: one daily nudge if tasks are overdue or due today (the deadline-tracking
-    a AFON does). Repeat-suppressed by date so it nudges once, not every tick. Fail-quiet."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from afon.brain.proactive import Signal
-
-    db_id = (settings.notion_tasks_db_id or "").strip()
-    if not _configured() or not db_id:
-        return []
-    try:
-        today = datetime.now(ZoneInfo(settings.user_tz)).date()
-        p = _detect_props(await _get(f"/databases/{db_id}"))
-        if not p["date"]:
-            return []
-        data = await _post(f"/databases/{db_id}/query", {"page_size": 100})
-        overdue, due_today = [], []
-        for page in data.get("results") or []:
-            props = page.get("properties") or {}
-            if p["status"] and _is_done(_prop_value(props.get(p["status"], {}))):
-                continue
-            dstr = _prop_value(props.get(p["date"], {}))
-            if not dstr:
-                continue
-            try:
-                d = datetime.fromisoformat(dstr.replace("Z", "+00:00")).date()
-            except ValueError:
-                continue
-            title = _prop_value(props.get(p["title"], {})) or _title_of(page)
-            if d < today:
-                overdue.append(title)
-            elif d == today:
-                due_today.append(title)
-    except Exception:  # noqa: BLE001 — a broken source must never throw into the tick loop
-        return []
-    overdue = list(dict.fromkeys(overdue))
-    due_today = list(dict.fromkeys(due_today))
-    if not overdue and not due_today:
-        return []
-    bits = []
-    if overdue:
-        bits.append(f"{len(overdue)} overdue ({', '.join(overdue[:3])})")
-    if due_today:
-        bits.append(f"{len(due_today)} due today")
-    msg = "Sir, a heads-up on your tasks: " + " and ".join(bits) + "."
-    # Key by date so it's one nudge per day; urgency higher when something is actually overdue.
-    return [Signal(key=f"tasks-{today}", kind="reminder",
-                   urgency=0.7 if overdue else 0.62, message=msg)]
-
-
 async def overdue_and_today() -> tuple[list[str], list[str]]:
     """Structured (overdue_titles, due_today_titles) from the Notion tasks DB, for the daily digest.
 

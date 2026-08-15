@@ -64,11 +64,20 @@ def main() -> int:
     # The half of J0.2 that turned out to be false — "roughly a third are wrong" — and the reason
     # the fix is a resolution rule rather than a cull. If this ever fails, the extractor has begun
     # inventing evidence and the prune rule is the wrong tool for it.
-    ungrounded = []
+    # A file edited AFTER the graph was built has moved the lines the graph cites, so checking a
+    # line reference against it measures staleness, not grounding. Found by deleting 26 lines from
+    # gmail.py: three edges "lost" their target on a file the graph had not been rebuilt for. The
+    # graph rebuilds on commit (post-commit hook) and this repo commits rarely by policy, so
+    # skipping those is the same call J8.2's gate makes about its own stale entries.
+    built = GP.GRAPH.stat().st_mtime
+    ungrounded, stale = [], 0
     for lk in inferred:
         m = re.match(r"L(\d+)", lk.get("source_location") or "")
         path = ROOT / (lk.get("source_file") or "")
         if not m or not path.is_file():
+            continue
+        if path.stat().st_mtime > built:
+            stale += 1
             continue
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         i = int(m.group(1)) - 1
@@ -76,8 +85,9 @@ def main() -> int:
         name = re.sub(r"\(\)$", "", (nodes[lk["target"]].get("label") or "").split(".")[-1])
         if name and not re.search(rf"\b{re.escape(name)}\b", window):
             ungrounded.append((lk["source_file"], lk["source_location"], name))
-    check(f"the target's name appears at every cited line ({len(inferred)} edges)", not ungrounded,
-          str(ungrounded[:3]))
+    check(f"the target's name appears at every cited line "
+          f"({len(inferred) - stale} checked, {stale} skipped as newer than the graph)",
+          not ungrounded, str(ungrounded[:3]))
 
     print("\n[3] the rule keeps what it should and drops what it should not")
     same = [lk for lk in inferred
