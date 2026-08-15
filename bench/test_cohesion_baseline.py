@@ -180,6 +180,27 @@ def main() -> int:
     check("and cohesion alone would have called it one, which is why degree is what is gated",
           grew["cohesion"] - was["cohesion"] < -CB.TOLERANCE)
 
+    # The second false alarm a real commit produced, and the reason for MIN_GATED_SIZE: a 7-node
+    # community lost 2 members, its degree fell 20% and its cohesion went UP. One member is worth
+    # roughly 1/N of the degree, so below ~10 nodes the band is measuring nothing.
+    tiny = {"name": "T", "size": 7, "cohesion": 0.333, "degree": 2.0,
+            "members": [f"t{i}" for i in range(7)]}
+    shrunk = {"name": "T", "size": 5, "cohesion": 0.400, "degree": 1.6,
+              "members": [f"t{i}" for i in range(5)]}
+    regs, _, _ = CB.compare({"internal_edge_share": 0.8, "communities": [tiny]},
+                            {"internal_edge_share": 0.8, "communities": [shrunk]})
+    check("a community too small to measure is not gated on a 20% swing", not regs,
+          f"size {tiny['size']} vs MIN_GATED_SIZE={CB.MIN_GATED_SIZE}")
+    big_regs, _, _ = CB.compare(
+        {"internal_edge_share": 0.8,
+         "communities": [dict(tiny, size=20, members=[f"t{i}" for i in range(20)])]},
+        {"internal_edge_share": 0.8,
+         "communities": [dict(shrunk, size=18, members=[f"t{i}" for i in range(18)])]})
+    check("the same swing in a community big enough to mean something IS gated", bool(big_regs),
+          "a size floor above the real communities would switch the gate off entirely")
+    check("and the ungated ones are counted, not silently dropped",
+          isinstance(getattr(CB.compare, "ungated", None), int))
+
     print("\n[5] the check is wired to run")
     runner = (ROOT / "bench" / "run_all_tests.py").read_text(encoding="utf-8")
     check("registered in the suite", "test_cohesion_baseline.py" in runner)

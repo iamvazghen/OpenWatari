@@ -53,8 +53,14 @@ def check(ok: bool, name: str, detail: str = "") -> None:
 
 
 def ruff(args: list[str], cwd: Path = ROOT) -> subprocess.CompletedProcess:
+    # stdin MUST be closed. Section [2] passes "-", which tells ruff to read the file from stdin;
+    # without this it inherits ours and waits for input that never comes. Under the suite that is a
+    # hang, not a failure: the runner killed the test at its 420s budget and the orphaned ruff kept
+    # the inherited pipe open, so the whole run sat there. Observed 2026-08-15, 30+ minutes.
+    # It only bites when the parent's stdin stays open, which is why it passes from a terminal and
+    # hangs from a background runner — reproduce with `sleep 300 | python bench/…`.
     return subprocess.run([sys.executable, "-m", "ruff", *args], cwd=str(cwd),
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
 
 def main() -> None:

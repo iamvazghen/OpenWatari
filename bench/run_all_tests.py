@@ -436,6 +436,12 @@ def run(script: str, timeout: int) -> tuple[int, str]:
     p = subprocess.Popen(
         [PY, str(ROOT / "bench" / script)],
         cwd=str(ROOT),
+        # No test may inherit this process's stdin. One that reads it waits forever for input that
+        # is never coming, and the budget below does not save the run: on 2026-08-15 a `ruff … -`
+        # inside test_static_correctness blocked on an inherited stdin, and after the kill its
+        # orphaned grandchild still held the pipes — the run sat there for half an hour. A test
+        # that wants input must supply it; one that reads by accident now gets EOF and fails fast.
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

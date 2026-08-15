@@ -2299,6 +2299,13 @@ root cause, both silent — nothing errored, the app simply started fresh.
       report and Part J quote — but only a **>15% degree drop** fails a build. Same run set the
       overlap floor: at 0.6 a community that shed 12 of its 38 members read as a regression, at
       0.7 it is correctly NOT COMPARABLE, and coverage only falls from 170 to 161 of 192.
+      **A third false alarm set the size floor.** The commit after *that* one shrank a 7-node
+      community to 5; its degree fell 20% while its cohesion went UP. One member is worth ~1/N of
+      the degree, so the 15% band means nothing until N is well past 1/0.15. Communities under
+      **10 nodes** are reported as too small to gate — 93 of 197, but only 14% of nodes, and none
+      of the communities J1/J2 name. Each false alarm was found by the gate firing on a real
+      commit rather than by argument, which is the only way this class of threshold gets set
+      honestly.
       `internal_edge_share` (0.791) is the number that survives reshuffling and is gated too, so a
       wholesale re-cluster cannot hide a real loss behind unmatched communities.
       **Re-clustering is deterministic**, measured: re-running `graphify cluster-only .` on the same
@@ -2646,6 +2653,22 @@ actually changing. The earlier 11.8% was a score of my own fixture wiring.
       teardown order, or run that one test in a subprocess that is allowed to `os._exit(0)` after a
       clean summary. Record every recurrence here with the date and the exit code, so the rate is a
       measured number rather than a memory.
+
+### L3g · A test that reads stdin hangs the whole suite, and the timeout does not save it (2026-08-15)
+- [x] **FIXED 2026-08-15/16.** `bench/test_static_correctness.py` runs `ruff check … -`, and `-`
+      means *read the file from stdin*. It passed no stdin, so ruff inherited the runner's and
+      waited for input that was never coming.
+      **From a terminal it passes**, because stdin is at EOF. From a background runner whose stdin
+      stays open it hangs — which is why this looked like an intermittent slow suite rather than a
+      bug. Reproduce deterministically: `sleep 300 | uv run python bench/test_static_correctness.py`.
+      **The 420s budget did not contain it.** The runner killed its direct child on time, but the
+      orphaned ruff grandchild still held the inherited pipes, so the post-kill `communicate()` had
+      nothing to close them and the run sat there. Observed 30+ minutes on one test, and the run
+      had to be killed by hand.
+      Fixed in two places, deliberately: `stdin=subprocess.DEVNULL` on the ruff call (the specific
+      trap, with the reproduction in the comment) **and on the runner's `Popen`** (the general one —
+      no test may inherit stdin, so a future test that reads it by accident gets EOF and fails fast
+      instead of wedging the suite).
 
 ### L3f · Editing a shell script from Windows silently breaks it (observed 2026-08-15)
 

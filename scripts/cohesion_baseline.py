@@ -64,8 +64,14 @@ MIN_OVERLAP = 0.7
 # So cohesion is still recorded and reported, because it is the number GRAPH_REPORT.md prints and
 # Part J's findings quote — but the red light is degree.
 MAX_DEGREE_DROP = 0.15  # 3x the largest movement seen across a real re-cluster
+# Below this size the gate can only produce noise: in a 7-node community one member leaving moved
+# the degree 20% (2.00 -> 1.60) while its cohesion went UP, which is the second false alarm a real
+# commit produced. One member is worth ~1/N of the degree, so the band above is meaningless until
+# N is comfortably past 1/0.15. At 10 the gate still covers 86% of all nodes and every community
+# J1/J2 names — the small ones are counted in the summary line, never silently dropped.
 # graphify's own cutoff for printing a community in GRAPH_REPORT.md, and the heading it drops them
 # under ("33 thin omitted"). `--thin` names them beneath this marker (J0.5).
+MIN_GATED_SIZE = 10
 MIN_REPORTED = 3
 MARKER = "## Thin communities (omitted above)"
 
@@ -129,12 +135,16 @@ def compare(base: dict, cur: dict) -> tuple[list, list, list]:
     """
     pool = list(cur["communities"])
     regressions, improvements, orphans = [], [], []
+    ungated = 0
     for b in base["communities"]:
         best, score = None, 0.0
         for c in pool:
             s = overlap(b["members"], c["members"])
             if s > score:
                 best, score = c, s
+        if b["size"] < MIN_GATED_SIZE:
+            ungated += 1
+            continue
         if best is None or score < MIN_OVERLAP:
             orphans.append((b, round(score, 2), best["name"] if best else "-", "membership"))
             continue
@@ -145,6 +155,7 @@ def compare(base: dict, cur: dict) -> tuple[list, list, list]:
             regressions.append((b, best, round(delta, 4), round(score, 2)))
         elif delta > MAX_DEGREE_DROP:
             improvements.append((b, best, round(delta, 4), round(score, 2)))
+    compare.ungated = ungated
     return regressions, improvements, orphans
 
 
@@ -196,7 +207,9 @@ def main() -> int:
 
     share_drop = base["internal_edge_share"] - cur["internal_edge_share"]
     print(f"cohesion: {len(cur['communities'])} communities, internal edge share "
-          f"{cur['internal_edge_share']:.3f} (baseline {base['internal_edge_share']:.3f})")
+          f"{cur['internal_edge_share']:.3f} (baseline {base['internal_edge_share']:.3f}); "
+          f"{compare.ungated} baseline communities under {MIN_GATED_SIZE} nodes are too small "
+          f"to gate")
     for b, c, d, s in regressions:
         print(f"  WORSE  {b['name']!r} internal degree {degree(b):.2f} -> {degree(c):.2f} "
               f"({d:+.0%}), cohesion {b['cohesion']:.3f} -> {c['cohesion']:.3f}, "
