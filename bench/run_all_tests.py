@@ -197,6 +197,8 @@ TESTS = [
      "test_provider_cooldown.py", "offline", ["checks passed ==="]),
     ("Languages: six understood, the spoken one identified, and the reply matched to it",
      "test_languages.py", "offline", ["checks passed ==="]),
+    ("Protocol utility: all 8 protocols do the thing they claim, not just pass the password gate",
+     "test_protocol_utility.py", "offline", ["checks passed ==="]),
     ("Static correctness: undefined names / redefinitions fail at lint time, not at 03:00 Sunday",
      "test_static_correctness.py", "offline", ["checks passed ==="]),
     ("Phase 3: presence-aware proactivity — greet-on-arrival (idle transition, privacy gate)",

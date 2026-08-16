@@ -131,6 +131,10 @@ _REPORTS = {
     "diagnostics": "afon-diagnostics-*.txt",
     "auditpack": "afon-audit-*.zip",
     "checkpoint": "afon-checkpoint-*.zip",
+    # ping's whole purpose is to answer "does the push channel work?", and a verdict the owner
+    # never sees is not an answer. Deliberately delivered over Telegram — a report saying the push
+    # channel is broken cannot be sent by push.
+    "ping": "afon-ping-*.txt",
 }
 #: How long to wait for a detached script to finish writing before giving up on delivery.
 _REPORT_WAIT_S = 90.0
@@ -172,6 +176,19 @@ async def _deliver_report(name: str, since: float) -> None:
     if newest is None:
         logger.warning(f"protocol '{name}': no {pattern} appeared within {_REPORT_WAIT_S:.0f}s — "
                        "nothing to deliver")
+        # ...and TELL him. He was told the protocol started; a log line he will never read is not
+        # the other half of that sentence. This is the shape auditpack failed in for months: the
+        # runner said "Audit archive started, sir", the script archived a directory that does not
+        # exist, and the only trace was a warning on a server.
+        try:
+            from afon.brain.tools.telegram import send_telegram
+
+            await send_telegram({"message":
+                                 f"Protocol {name} produced no report, sir — I waited "
+                                 f"{_REPORT_WAIT_S:.0f}s for {pattern} and nothing appeared. "
+                                 f"It reported starting, so something failed after that."})
+        except Exception as e:  # noqa: BLE001 — best effort; the log line above still stands
+            logger.warning(f"protocol '{name}': could not report the missing artifact: {e}")
         return
     try:
         from afon.brain.tools.telegram import send_telegram

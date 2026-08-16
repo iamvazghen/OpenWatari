@@ -49,8 +49,10 @@ def _secret_values() -> list[str]:
 
 
 def _audit_dir() -> Path:
-    base = Path(settings.audit_log_dir) if settings.audit_log_dir else _REPO_ROOT / "audit"
-    return base
+    # One spelling, shared with protocols/auditpack.py — which used to keep its own and so
+    # archived an empty directory for months while reporting success (J3.6).
+    from afon.shared.paths import audit_dir
+    return audit_dir()
 
 
 def _redact(args: dict | None) -> dict:

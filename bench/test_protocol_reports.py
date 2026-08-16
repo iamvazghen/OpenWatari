@@ -98,7 +98,14 @@ async def main() -> None:
         os.utime(old, (time.time() - 86400, time.time() - 86400))   # a day old
         P._REPORT_WAIT_S = 3.0                                       # don't wait 90s to prove a negative
         await P._deliver_report("auditpack", time.time())
-        check("nothing delivered when only a stale file exists", not sent, str(len(sent)))
+        check("last week's archive is never passed off as this run's",
+              not any(str(a.get("file", "")).endswith(".zip") for a in sent), str(sent[:1]))
+        # ...but the owner is not left in silence either. He was told the protocol started; that
+        # sentence needs an ending. This is precisely how auditpack archived nothing for months
+        # while reporting success — see bench/test_protocol_utility.py.
+        check("instead he is told the protocol produced nothing",
+              len(sent) == 1 and "no report" in sent[0]["message"].lower(),
+              str(sent[:1]))
 
         print("\n[4] a fresh ARCHIVE is delivered as a file, without inlining binary")
         sent.clear()
@@ -120,12 +127,25 @@ async def main() -> None:
         for stale_txt in (root / "backups").glob("afon-diagnostics-*.txt"):
             os.utime(stale_txt, (day_ago, day_ago))
         await P._deliver_report("diagnostics", time.time())    # no new .txt will appear
-        check("no message when the script produced nothing", not sent, str(len(sent)))
+        check("a script that produced nothing is reported, not passed over",
+              len(sent) == 1 and "diagnostics" in sent[0]["message"], str(sent[:1]))
+        check("...and no file is attached, because there is none",
+              sent and not sent[0].get("file"), str(sent[:1]))
 
-        print("\n[6] an unknown/unlisted protocol is a no-op")
+        print("\n[6] an unlisted protocol is a no-op")
+        # `ping` used to be the example here — it now WRITES a verdict and is delivered, because a
+        # push test whose result the owner never sees answers nothing. `goodnight` takes its place:
+        # machine-level, produces no artifact, and must stay silent.
         sent.clear()
-        await P._deliver_report("ping", time.time())
-        check("ping writes no report, so nothing is sent", not sent, str(len(sent)))
+        await P._deliver_report("goodnight", time.time())
+        check("a protocol with no declared artifact sends nothing", not sent, str(len(sent)))
+        sent.clear()
+        fresh_ping = root / "backups" / "afon-ping-20260801-140000.txt"
+        fresh_ping.write_text("Protocol PING — the push REACHED your phone.\n\nHTTP 200\n",
+                              encoding="utf-8")
+        await P._deliver_report("ping", time.time() - 5)
+        check("ping's verdict IS delivered — it is the whole point of the protocol",
+              len(sent) == 1 and "REACHED your phone" in sent[0]["message"], str(sent[:1]))
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
