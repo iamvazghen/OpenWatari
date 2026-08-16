@@ -355,6 +355,11 @@ class LLMClient:
             METRICS.incr("llm_failovers")
         if latency_ms is not None:
             METRICS.observe("llm_route_ms", latency_ms)
+            # The turn's model stage, measured from `route_started` so a failover's cost lands on
+            # the turn that paid it. Only successful routes arrive here; a chain that fails
+            # outright raises, and the trace records that turn as failed instead.
+            from afon.brain.turn_trace import add_stage
+            add_stage("llm", latency_ms)
         self.last_route = {
             "mode": mode,
             "answered_by": model,

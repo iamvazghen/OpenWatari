@@ -495,9 +495,14 @@ planning stays in-process (no extra round trip).
       supported outcome and the scorer credits it. **B06 measured 2%** — he answers unknowables at
       full confidence today. *gate:* new `test_uncertainty.py` — 12 unanswerable prompts, none
       receives a confident assertion; 12 answerable ones are still answered.
-- [ ] 01.F3 The turn tracer records, per turn: intent class, tools considered, tools fired, prefill
+- [x] 01.F3 The turn tracer records, per turn: intent class, tools considered, tools fired, prefill
       tokens, wall clock per stage. Three days of data before any further tuning (TODO K2).
-      *gate:* `test_metrics.py` extended — every turn emits a complete trace row.
+      Shipped as `brain/turn_trace.py`: one row per turn from a `finally`, so the turns that
+      refuse, take the zero-arg fast path, get barged in on, or raise are recorded too — those are
+      the ones worth reading, and an emit-on-success tracer drops exactly them. Rows persist to
+      `~/.afon/traces/` because METRICS is in-memory and the brain restarts nightly, so an
+      in-process tracer could never accumulate the three days this asks for.
+      *gate:* `test_metrics.py` extended — every turn emits a complete trace row. 54/54.
 
 **Raise**
 - [ ] 01.R1 Intent classes explicit and testable (chat · lookup · act · multi-clause · ambiguous)
@@ -637,9 +642,18 @@ cannot own the turn.
       Shipped at **both** append sites — the live turn and the autonomous worker, which was the
       worse of the two because its loop keeps the message list across steps.
       *gate:* `test_tool_result_ceiling.py` 15/15.
-- [ ] 03.F3 **Catalogue narrowing is measured, not assumed.** Per-turn tool count and token cost land
+- [x] 03.F3 **Catalogue narrowing is measured, not assumed.** Per-turn tool count and token cost land
       in the trace; the 58-tool prefill is the number to beat (TODO K2).
-      *gate:* `test_speed.py` asserts a hard ceiling on presented-catalogue tokens.
+      **Now measured, and the estimate was low.** The core catalogue is 59 tools / **8,260 tokens**,
+      and a turn that arms a lazy group presents **75 tools / 10,575** — worst observed 91 / 12,437.
+      Chatter presents nothing and a router-narrowed read presents one tool / 138 tokens, so the
+      two fast paths are real; it is the general and compound turns that pay. The ceiling asserted
+      is a **ratchet at today's worst (13,000)**, not the 2,500 budget — 03.R1's two-stage
+      selection is what reaches that, and until then this stops the number growing, which is the
+      regression that already happened once (59 → 91 tools once groups arm). Each run prints the
+      remaining gap so it stays visible.
+      *gate:* `test_speed.py` asserts a hard ceiling on presented-catalogue tokens, read from the
+      turn's own trace row rather than recomputed. 25/25.
 
 **Raise**
 - [ ] 03.R1 Two-stage selection: a cheap router picks a *family* (10–20 tools), the model picks
@@ -3283,9 +3297,9 @@ green, `E` = elite green.
 
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
-| S01 | Brain / Core Intelligence | structured badly | 1/3 | 0/4 | 0/3 |
+| S01 | Brain / Core Intelligence | structured badly | 2/3 | 0/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 2/3 | 0/3 | 0/1 |
-| S03 | Tool Utilization | complete for now | 3/4 | 0/4 | 0/1 |
+| S03 | Tool Utilization | complete for now | 4/4 | 0/4 | 0/1 |
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
@@ -3334,7 +3348,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 70 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 70 of 360.**
+**Totals: 72 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 72 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

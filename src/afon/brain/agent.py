@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from afon.brain import turn_trace
 from afon.brain.context import build_system_prompt
 from afon.brain.fleet import FLEET_TOOL_SCHEMA, FleetUnavailable, delegate_to_fleet
 from afon.config import settings
@@ -698,6 +699,7 @@ class AfonAgent:
         the turn differently (return vs yield) and merging them would need a sentinel value
         that obscures more than it saves.
         """
+        _prep_started = time.monotonic()
         self._history.append({"role": "user", "content": user_text})
         messages = [self._system, *self._history]
 
@@ -740,6 +742,17 @@ class AfonAgent:
                     logger.info(f"B6 clause router: compound request needs {clause_plan}")
             except Exception as e:  # noqa: BLE001 — routing must never break a turn
                 logger.debug(f"clause router skipped: {type(e).__name__}: {e}")
+
+        # 01.F3: the only place that knows all of intent, catalogue and prompt at once. Recorded
+        # here rather than at the call sites so `respond` and `respond_stream` cannot drift apart
+        # in what they report — the same reason `_prepare_turn` exists at all.
+        tr = turn_trace.current()
+        if tr is not None:
+            tr.set_intent(turn_trace.classify(
+                pure_chat=_is_pure_chat(user_text), multi_intent=multi_intent,
+                work_intent=work_intent, narrowed=narrowed, forced_name=forced_name))
+            tr.note_prompt(messages, turn_tools)
+            tr.add_ms("prepare", (time.monotonic() - _prep_started) * 1000)
 
         return TurnPlan(messages, turn_tools, narrowed, forced_name, force_first,
                         multi_intent, work_intent, clause_plan)
@@ -1162,11 +1175,23 @@ class AfonAgent:
         self._history.append({"role": "assistant", "content": _CATASTROPHIC_REFUSAL})
         self._trim()
         logger.info("refused a catastrophic system command (deterministic safety guard)")
+        tr = turn_trace.current()
+        if tr is not None:
+            tr.set_intent("refused")   # this turn never reaches _prepare_turn, so it names itself
         return _CATASTROPHIC_REFUSAL
 
     # ---- main loop --------------------------------------------------------------------
     async def respond(self, user_text: str, on_progress: Callable | None = None) -> str:
-        """Run one full turn (with tool calls) and return Afon's spoken reply text."""
+        """Run one full turn (with tool calls) and return Afon's spoken reply text.
+
+        Thin tracing wrapper (01.F3). The body has a dozen exits — a refusal, the zero-arg fast
+        path, a degrade, several normal returns — and wrapping it is the only way one row per turn
+        is guaranteed for all of them, including the ones that raise.
+        """
+        with turn_trace.turn(user_text, streamed=False):
+            return await self._respond_impl(user_text, on_progress)
+
+    async def _respond_impl(self, user_text: str, on_progress: Callable | None = None) -> str:
         from afon.brain.metrics import METRICS
         METRICS.incr("turns")
         self._begin_turn(user_text)
@@ -1521,6 +1546,10 @@ class AfonAgent:
         from afon.brain.metrics import METRICS
         METRICS.incr("tool_calls")
         METRICS.incr(f"tool.{name}")
+        # 01.F3: which tools this TURN actually fired, and what they cost it. Every tool passes
+        # through here, so the trace cannot miss one the way a per-call-site record would.
+        turn_trace.fired(name)
+        turn_trace.add_stage("tools", (time.monotonic() - started) * 1000)
         # ...and the same count durably: METRICS is in-memory, and the brain restarts daily, so
         # the "which tools does he actually use" question the catalogue tiering needs could never
         # accumulate an answer.
@@ -1589,13 +1618,14 @@ class AfonAgent:
         the next replay (AUDIT #7). The ``finally`` records a short placeholder so that never happens.
         """
         self._stream_done = False
-        try:
-            async for chunk in self._respond_stream_impl(user_text, on_progress):
-                yield chunk
-        finally:
-            if not self._stream_done:
-                self._history.append({"role": "assistant", "content": "(interrupted)"})
-                self._trim()
+        with turn_trace.turn(user_text, streamed=True):   # 01.F3 — one row, cancelled or not
+            try:
+                async for chunk in self._respond_stream_impl(user_text, on_progress):
+                    yield chunk
+            finally:
+                if not self._stream_done:
+                    self._history.append({"role": "assistant", "content": "(interrupted)"})
+                    self._trim()
 
     async def _respond_stream_impl(self, user_text: str, on_progress: Callable | None = None):
         """Streaming body — see ``respond_stream`` for the cancellation guard."""

@@ -102,7 +102,15 @@ def hud_snapshot(
         # budget. Read from the DECLARED table, so a loop that never started is a row saying
         # never_ran rather than an absence nobody can notice.
         "loops": _safe(_loops, []),
+        # 01.F3: what the recent turns cost and how they classified. `incomplete` is the number
+        # that matters — a row missing a field means the tuning evidence has a hole in it.
+        "turns_trace": _safe(_turns_trace, {}),
     }
+
+
+def _turns_trace() -> dict:
+    from afon.brain.turn_trace import summary
+    return summary()
 
 
 def _performance() -> dict:
