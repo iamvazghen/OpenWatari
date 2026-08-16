@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from afon.shared import language as lang
 from afon.brain import turn_trace
 from afon.brain.context import build_system_prompt
 from afon.brain.fleet import FLEET_TOOL_SCHEMA, FleetUnavailable, delegate_to_fleet
@@ -675,6 +676,9 @@ class AfonAgent:
         # improve_own_code is advertised only alongside the coding lazy group (see _tools_for_turn),
         # so it never bloats the every-turn surface — it appears when the turn is about code.
         self._group_ttl: dict[str, int] = {}     # group -> turns it stays advertised
+        # Which language the conversation is in. Built lazily on the first mirror-mode turn so a
+        # single-language deployment never pays for it.
+        self._lang_tracker: lang.LanguageTracker | None = None
         self._tools = list(self._core_tools)     # current advertised set (core until a turn needs more)
         self._registry: dict[str, Callable] = {
             "get_time": self._tool_get_time,
@@ -711,6 +715,10 @@ class AfonAgent:
             messages.append({"role": "system", "content": _WORK_INTENT_NUDGE})
         elif multi_intent:
             messages.append({"role": "system", "content": _MULTI_INTENT_NUDGE})
+
+        lang_note = self._language_note(user_text)   # multilingual: answer in the language he used
+        if lang_note:
+            messages.append({"role": "system", "content": lang_note})
 
         recall_note = await self._recall_note(user_text)   # auto-RAG (ephemeral, not stored)
         if recall_note:
@@ -1835,6 +1843,31 @@ class AfonAgent:
         except Exception as e:  # noqa: BLE001 — reading the room must never break a turn
             logger.debug(f"relational note skipped: {type(e).__name__}")
             return None
+
+    def _language_note(self, user_text: str) -> str | None:
+        """Name the language this turn must be answered in (mirror mode only).
+
+        Asking a model to "reply in the same language" works on a paragraph and fails on a voice
+        turn: "ok", "да" and "genau" carry almost no signal, and one ambiguous utterance flips the
+        conversation. So the language is decided here — stickily, by `LanguageTracker` — and
+        stated outright, rather than left to be inferred from the very turn that lacks the cue.
+        """
+        if (settings.reply_language or "").strip().lower() != lang.MATCH:
+            return None
+        if self._lang_tracker is None:
+            self._lang_tracker = lang.LanguageTracker(
+                default=(lang.parse_languages(settings.understood_languages) or ["en"])[0],
+                allowed=lang.parse_languages(settings.understood_languages) or None)
+        code = self._lang_tracker.observe(user_text)
+        name = lang.name_of(code)
+        tr = turn_trace.current()
+        if tr is not None:
+            tr.language = code            # so "which language did he use" is a measured thing
+        if self._lang_tracker.last_detected and self._lang_tracker.last_detected != code:
+            logger.debug(f"language: heard {self._lang_tracker.last_detected} at "
+                         f"{self._lang_tracker.last_confidence} — keeping {code}")
+        return (f"The owner is speaking {name}. Reply in {name} ({lang.SUPPORTED[code][1]}), "
+                "in full sentences, with no translation or transliteration of your own reply.")
 
     async def _recall_note(self, user_text: str) -> str | None:
         """Fix #1 — auto-RAG. Retrieve memory relevant to THIS utterance and return a compact system

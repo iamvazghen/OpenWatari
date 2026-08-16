@@ -13,6 +13,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from afon.shared.language import MATCH as LANG_MATCH
 from afon.config import settings
 
 # repo root = .../src/afon/brain/context.py -> parents[3]
@@ -68,7 +69,20 @@ def _identity_tokens() -> dict[str, str]:
         address_line = "Address them naturally, without honorifics."
     understood = (s.understood_languages or "English").strip()
     reply = (s.reply_language or "English").strip()
-    if understood.lower() != reply.lower():
+    if reply.strip().lower() == LANG_MATCH:
+        # Mirror mode. The per-turn note in `agent._language_note` names the actual language, so
+        # this only has to establish the rule; the model is never left to infer it from a two-word
+        # utterance, which is where language-matching normally goes wrong.
+        # Kept deliberately short. This line is in the prompt on EVERY turn and the budget is 2000
+        # tokens; the first draft cost 27 of them over. The specifics belong in the per-turn note
+        # (`agent._language_note`), which only appears when there is a language to name.
+        # The list of languages is deliberately NOT enumerated here. In mirror mode the per-turn
+        # note names the actual language, so the list is redundant — and enumerating it would make
+        # the always-on prompt grow every time the owner adds a language, which is how a budget
+        # gets breached by a config change nobody connects to it.
+        language_line = ("They are multilingual. **Reply in the same language they used** — each "
+                         "turn names it. Names and quotations stay unchanged.")
+    elif understood.lower() != reply.lower():
         language_line = (f"They may speak {understood} — understand any of them, but **always reply "
                          f"in {reply}**. Never switch languages even if they do.")
     else:

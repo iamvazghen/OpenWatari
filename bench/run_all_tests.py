@@ -195,6 +195,8 @@ TESTS = [
      "test_unpark_gate.py", "offline", ["checks passed ==="]),
     ("Provider cooldown (02.F3): provider health is learned from failures, and the HUD says so",
      "test_provider_cooldown.py", "offline", ["checks passed ==="]),
+    ("Languages: six understood, the spoken one identified, and the reply matched to it",
+     "test_languages.py", "offline", ["checks passed ==="]),
     ("Static correctness: undefined names / redefinitions fail at lint time, not at 03:00 Sunday",
      "test_static_correctness.py", "offline", ["checks passed ==="]),
     ("Phase 3: presence-aware proactivity — greet-on-arrival (idle transition, privacy gate)",

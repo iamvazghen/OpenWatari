@@ -36,7 +36,30 @@ def _build_elevenlabs():
     from pipecat.frames.frames import ErrorFrame
     from afon.edge import voice_health
 
-    logger.info(f"TTS: ElevenLabs {settings.elevenlabs_model} (cloud, streaming)")
+    from afon.shared.language import MATCH, SUPPORTED, name_of, parse_languages
+
+    # Which language to hand ElevenLabs. When the reply language is PINNED, say so — it is free
+    # determinism. When it is "match", deliberately leave it unset: the reply text is already
+    # wholly in the target language and eleven_flash_v2_5 detects it per utterance, whereas a
+    # build-time pin would lock the voice to one language for the life of the process, which is
+    # the opposite of what mirror mode is for.
+    reply = (settings.reply_language or "").strip().lower()
+    pinned = "" if reply == MATCH else next(iter(parse_languages(settings.reply_language)), "")
+    wanted = parse_languages(settings.understood_languages) or ["en"]
+    if len(wanted) > 1 and not any(m in settings.elevenlabs_model
+                                   for m in ("multilingual", "flash", "turbo", "v3")):
+        logger.warning(
+            f"AFON_ELEVENLABS_MODEL='{settings.elevenlabs_model}' is an English-only voice model, "
+            f"but {len(wanted)} languages are configured "
+            f"({', '.join(name_of(c) for c in wanted)}). Non-English replies will be spoken with "
+            f"an English phoneme set. Use eleven_flash_v2_5 or eleven_multilingual_v2."
+        )
+    logger.info(
+        f"TTS: ElevenLabs {settings.elevenlabs_model} (cloud, streaming"
+        + (f", language={pinned}" if pinned else
+           f", per-utterance language across {len(wanted)}: "
+           f"{'/'.join(SUPPORTED[c][0] for c in wanted)}") + ")"
+    )
 
     class _MonitoredElevenLabs(ElevenLabsTTSService):
         """Records escalated errors so the watchdog can fail over to local Piper when the cloud
@@ -46,12 +69,12 @@ def _build_elevenlabs():
             voice_health.record_cloud_error(str(getattr(error, "error", "")))
             await super().push_error_frame(error)
 
+    opts: dict = {"voice": settings.elevenlabs_voice_id, "model": settings.elevenlabs_model}
+    if pinned:
+        opts["language"] = pinned
     return _MonitoredElevenLabs(
         api_key=settings.elevenlabs_api_key,
-        settings=ElevenLabsTTSService.Settings(
-            voice=settings.elevenlabs_voice_id,
-            model=settings.elevenlabs_model,
-        ),
+        settings=ElevenLabsTTSService.Settings(**opts),
     )
 
 

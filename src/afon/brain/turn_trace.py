@@ -145,6 +145,7 @@ class TurnTrace:
     text: str = ""
     streamed: bool = False
     intent: str = "general"
+    language: str = ""
     tools_considered: int = 0
     catalogue_tokens: int = 0
     prefill_tokens: int = 0
@@ -189,6 +190,7 @@ class TurnTrace:
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "seq": self.seq,
             "intent": self.intent,
+            "language": self.language,
             "streamed": self.streamed,
             "tools_considered": self.tools_considered,
             "catalogue_tokens": self.catalogue_tokens,

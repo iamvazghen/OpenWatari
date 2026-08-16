@@ -50,7 +50,12 @@ class Settings(BaseSettings):
     # How he addresses you: an honorific ("sir", "ma'am", "boss"), your name, or "" for none.
     user_address: str = ""
     understood_languages: str = "English"  # comma-list of languages he can UNDERSTAND (STT side)
-    reply_language: str = "English"        # the single language he always REPLIES in
+    # The language he REPLIES in. A language name ("English", "Deutsch", "fr") pins it; the
+    # special value "match" answers in whichever supported language the owner just spoke, which is
+    # what a multilingual voice is for. Supported: English, German, French, Spanish, Russian,
+    # Ukrainian (afon/shared/language.py). Detection is sticky — an ambiguous turn ("ok", "да")
+    # keeps the current language rather than flipping the conversation.
+    reply_language: str = "English"
     persona_file: str = "afon.md"        # which file in personality/ holds the persona template
     # The owner's local timezone (IANA name, e.g. "America/New_York", "Asia/Tokyo"). Drives
     # get_time, the proactive/scheduler clocks, and calendar event creation. Generic default = UTC;

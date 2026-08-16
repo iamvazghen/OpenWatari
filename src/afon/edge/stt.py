@@ -1,17 +1,19 @@
 """STT builder — pick + configure the speech-to-text service for the voice pipeline.
 
-Multilingual by design: the owner may speak English, French, German, Armenian, Russian or
-Ukrainian. Two engines, a clear trade-off:
+Multilingual by design: the owner speaks English, Russian, German, French, Spanish and Ukrainian
+(`afon/shared/language.py` is the list). Two engines, and the trade-off is a real one:
 
 * **Deepgram** (default, low-latency cloud): nova-3 ``language='multi'`` code-switches across
-  English / French / German / Russian (and more) with great latency. It does **not** support
-  Armenian, and Ukrainian isn't in the ``multi`` set.
-* **Whisper** (``faster-whisper``, local): auto-detects and transcribes **all six** including
-  **Armenian** and **Ukrainian**. Heavier on a no-GPU CPU, but the only configured engine that
-  covers everything. Select with ``AFON_STT_PROVIDER=whisper``.
+  English / Spanish / French / German / Russian with excellent latency. It does **not** cover
+  Ukrainian — and crucially it does not error on it, it returns plausible Russian.
+* **Whisper** (``faster-whisper``, local): auto-detects and transcribes **all six**. Heavier on a
+  no-GPU CPU, but the only configured engine that covers everything. ``AFON_STT_PROVIDER=whisper``.
 
-Either way the brain always **replies in English** (see ``personality/afon.md``); STT only
-decides which spoken languages Afon can *understand*.
+Whichever is chosen, `_warn_language_gaps` says out loud which configured languages this ear
+cannot actually hear, because that failure is silent by construction: the transcript looks
+well-formed, the language detector agrees with it, and Afon answers confidently in the wrong
+language. The reply language is decided downstream (`AFON_REPLY_LANGUAGE`, "match" to mirror the
+speaker); STT only decides which spoken languages Afon can *understand*.
 """
 
 from __future__ import annotations
@@ -80,8 +82,22 @@ def _auto_whisper(model: str):
 
 def _build_whisper():
     _lang = settings.whisper_language
-    _desc = "AUTO-DETECT EN/FR/DE/HY/RU/UK" if (not _lang or _lang.lower() == "auto") else f"language={_lang}"
+    _auto = not _lang or _lang.lower() == "auto"
+    _desc = "AUTO-DETECT all configured languages" if _auto else f"language={_lang}"
     logger.info(f"STT: Whisper local ({_desc}, model={settings.whisper_model})")
+    if _auto:
+        _warn_language_gaps("whisper")
+    else:
+        # A pinned language is not a gap in the model, it is a gap in the configuration — and a
+        # louder one, because Whisper will happily force a Ukrainian utterance into English words.
+        from afon.shared.language import name_of, parse_languages
+        others = [c for c in parse_languages(settings.understood_languages) if c != _lang.lower()]
+        if others:
+            logger.warning(
+                f"Whisper is PINNED to '{_lang}', so {', '.join(name_of(c) for c in others)} will "
+                f"be forced into it rather than transcribed. Set AFON_WHISPER_LANGUAGE=auto to "
+                f"detect per utterance."
+            )
     return _auto_whisper(settings.whisper_model)
 
 
@@ -146,6 +162,31 @@ def _build_moonshine():
     return _MoonshineSTT(settings.moonshine_model)
 
 
+def _warn_language_gaps(provider: str) -> None:
+    """Say out loud which configured languages this ear cannot actually hear.
+
+    The failure this prevents is not a crash. Deepgram's multilingual model returns *plausible
+    Russian* for Ukrainian speech rather than an error, so the transcript looks fine, the language
+    detector agrees with it, and Afon answers confidently in the wrong language. Nothing anywhere
+    would have said why.
+    """
+    from afon.shared.language import name_of, parse_languages, stt_gaps
+
+    wanted = parse_languages(settings.understood_languages)
+    gaps = stt_gaps(provider, wanted)
+    if not gaps:
+        if wanted:
+            logger.info(f"STT understands all {len(wanted)} configured languages: "
+                        f"{', '.join(name_of(c) for c in wanted)}")
+        return
+    logger.warning(
+        f"STT provider '{provider}' cannot transcribe: {', '.join(name_of(c) for c in gaps)}. "
+        f"Speech in those will come back as a plausible-looking transcript in another language, "
+        f"not as an error. Set AFON_STT_PROVIDER=whisper (local, auto-detects all six, slower) "
+        f"or drop them from AFON_UNDERSTOOD_LANGUAGES."
+    )
+
+
 def _build_deepgram():
     if not settings.deepgram_api_key:
         raise RuntimeError("AFON_DEEPGRAM_API_KEY is not set (.env)")
@@ -153,9 +194,9 @@ def _build_deepgram():
 
     logger.info(
         f"STT: Deepgram {settings.deepgram_model} (language={settings.deepgram_language}, "
-        f"endpointing={settings.deepgram_endpointing_ms}ms) "
-        "— understands EN/FR/DE/RU; for Armenian/Ukrainian set STT provider to 'whisper'"
+        f"endpointing={settings.deepgram_endpointing_ms}ms)"
     )
+    _warn_language_gaps("deepgram")
     opts = dict(
         model=settings.deepgram_model,
         language=settings.deepgram_language,  # 'multi' = EN/FR/DE/RU code-switch
