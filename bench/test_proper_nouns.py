@@ -112,9 +112,44 @@ def main() -> None:
          settings.user_address, contacts_mod.BOOK) = saved
         proper_nouns.hotwords_str.cache_clear()
 
+    one_node_per_person()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
+
+
+# ── 24.F1: the names STT hands over resolve to the node the facts are under ──────────────────
+# This file's subject is the names Afon biases the recogniser toward. The other end of that wire
+# is what happens once STT returns one: a proper noun that arrives transliterated ("Вазген" ->
+# "Vazghen") must reach the same graph node as the facts stored under the other spelling, or
+# biasing the recogniser toward a name only makes it better at missing.
+def one_node_per_person() -> None:
+    import tempfile
+    from pathlib import Path as _P
+
+    from afon.brain.graph import GraphMemory
+    from afon.shared.entities import canonical
+
+    print("\n[24.F1] a transliterated proper noun finds the facts stored under the other spelling")
+    with tempfile.TemporaryDirectory() as td:
+        g = GraphMemory(_P(td) / "g.sqlite")
+        g.add("Вазген", "owns", "Lpstrak")
+        g.add("Lpstrak", "located in", "Armenia")
+
+        check("the Cyrillic name is stored transliterated",
+              any(canonical("Вазген") in s for s, _p, _o in g.all_triples()),
+              str(g.all_triples()))
+        for spelling in ("Вазген", "Vazgen", "vazgen"):
+            check(f"{spelling!r} reaches the stored facts", bool(g.describe(spelling)),
+                  f"describe -> {g.describe(spelling)}")
+        check("a close spelling variant reaches them too", bool(g.describe("Vazghen")),
+              "STT returns whichever transliteration it favours; the facts must not move")
+        check("multi-hop still works from the transliterated name",
+              "armenia" in [r.lower() for r in g.related("Vazgen", hops=2)],
+              str(g.related("Vazgen", hops=2)))
+        check("an unrelated name reaches nothing", g.describe("Zebedee Quinn") == [],
+              "resolving a stranger onto the nearest node is worse than finding nothing")
 
 
 if __name__ == "__main__":

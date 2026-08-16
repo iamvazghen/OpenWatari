@@ -114,9 +114,67 @@ def main() -> None:
         wm5.note_event("reply from the landlord arrived", now=now)
         check("events-only world still renders", "landlord" in wm5.render(now=now))
 
+    states_its_gaps()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
+
+
+# ── 24.F2: say what is NOT known about an entity ─────────────────────────────────────────────
+# Afon could always report what he knew about someone. He could not report what he didn't — so an
+# entity he held two facts about and one he held twenty about sounded equally complete, and the
+# owner had no way to tell which answers were thin. The gaps come from a DECLARED list of facets,
+# not from whatever happens to be stored: a gap you can only notice by already knowing what to
+# look for is a gap nobody notices. Same reasoning as the loop registry in 31.F4.
+def states_its_gaps() -> None:
+    import tempfile
+    from pathlib import Path as _P
+
+    from afon.brain.graph import GraphMemory
+    from afon.brain.world_model import what_i_dont_know
+    from afon.shared.entities import FACETS
+
+    with tempfile.TemporaryDirectory() as td:
+        g = GraphMemory(_P(td) / "graph.sqlite")
+        g.add("Anna Petrova", "email", "anna@example.com")
+        g.add("Anna Petrova", "role", "architect")
+
+        print("\n[24.F2] the answer names both halves")
+        said = what_i_dont_know("Anna Petrova", graph=g)
+        check("what IS known is reported", "anna@example.com" in said, said)
+        check("what is NOT known is reported too", "don't have" in said, said)
+        for facet in ("phone", "birthday"):
+            check(f"the missing '{facet}' is named", facet in said, said)
+        check("a facet that IS known is not listed as missing",
+              "role" not in said.split("don't have")[1], said)
+
+        print("\n[24.F2] the gaps come from a declared list, not from what happens to be stored")
+        gaps = g.gaps("Anna Petrova")
+        check(f"every gap is a declared facet ({gaps})",
+              set(gaps) <= set(FACETS["person"]), str(gaps))
+        check("the two recorded facets are not gaps",
+              "email" not in gaps and "role" not in gaps, str(gaps))
+        check("a project is asked different questions than a person",
+              set(g.gaps("Rently", kind="project")) <= set(FACETS["project"])
+              and "deadline" in g.gaps("Rently", kind="project"),
+              str(g.gaps("Rently", kind="project")))
+
+        print("\n[24.F2] an entity he holds nothing about says so plainly")
+        blank = what_i_dont_know("Someone He Never Met", graph=g)
+        check("it does not pretend to know anything", "nothing recorded" in blank, blank)
+        check("...and still says what it would want to know", "email" in blank, blank)
+
+        print("\n[24.F2] the gaps close as facts arrive")
+        before = len(g.gaps("Anna Petrova"))
+        g.add("Anna Petrova", "phone", "+37411223344")
+        after = g.gaps("Anna Petrova")
+        check(f"recording a fact removes its gap ({before} -> {len(after)})",
+              "phone" not in after and len(after) == before - 1, str(after))
+        # 24.F1 and 24.F2 meet here: the gap must close whichever spelling the fact arrived under.
+        g.add("Вазген", "email", "vaz@example.com")
+        check("a fact stored under one spelling closes the gap for the other",
+              "email" not in g.gaps("Vazgen"), str(g.gaps("Vazgen")))
 
 
 if __name__ == "__main__":

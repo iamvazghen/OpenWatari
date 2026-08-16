@@ -76,8 +76,25 @@ _SKIP_EXT = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf",
 
 
 def tracked_files() -> list[str]:
+    """Everything git would publish: tracked files AND new files not covered by .gitignore.
+
+    `git ls-files` alone lists only what is already in the index, which made this scan blind to
+    precisely the files most likely to carry a fresh mistake — the ones just written. A new module
+    could be created, leak the owner's name, and pass this gate until the commit that added it, by
+    which point the leak is in history and scrubbing it is a rewrite rather than an edit. Caught
+    when `shared/entities.py` was written with the owner's name in six docstrings and the scan
+    reported the tree clean.
+
+    `--exclude-standard` keeps .gitignore authoritative, so `.env` and the like stay out.
+    """
     out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
-    return [f for f in out.stdout.splitlines() if f.strip()]
+    new = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"],
+                         cwd=ROOT, capture_output=True, text=True)
+    seen: list[str] = []
+    for line in (out.stdout + new.stdout).splitlines():
+        if line.strip() and line not in seen:
+            seen.append(line)
+    return seen
 
 
 # --- 36.F5: secrets have exactly one home -------------------------------------------------------
@@ -215,6 +232,20 @@ def main() -> int:
         print("no tracked files (not a git repo?) — skipping")
         return 0
     findings: list[str] = []
+    # Does this scan actually reach a file that was just written? It did not, for as long as it
+    # read only `git ls-files` — so the files most likely to carry a fresh mistake were the ones
+    # it could not see, and a leak passed until the commit that buried it in history. Verified
+    # here rather than asserted in a comment, because "the scanner has full coverage" is exactly
+    # the kind of claim that is true right up until someone edits `tracked_files`.
+    probe = ROOT / "_public_clean_reach_probe.py"
+    try:
+        probe.write_text("# reach probe\n", encoding="utf-8")
+        if probe.name not in [Path(f).name for f in tracked_files()]:
+            findings.append(f"  {probe.name}  [scan coverage]  a new file is invisible to this "
+                            f"scan — a leak in one would pass until it was committed")
+    finally:
+        probe.unlink(missing_ok=True)
+
     self_name = Path(__file__).name
     for rel in files:
         if Path(rel).name == self_name:

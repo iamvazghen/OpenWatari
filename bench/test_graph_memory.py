@@ -14,6 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 passed = failed = 0
@@ -132,18 +133,86 @@ def main() -> None:
     finally:
         gmod.GRAPH = saved
 
-    # J3.10: graph.py and memory.py each define their own `_norm`. They are deliberately NOT
-    # merged — memory.py already imports graph.py (the L5b recall layer), so a shared helper would
-    # need a third module purely to dodge an import cycle, for two one-line functions. What matters
-    # is that they AGREE: entity keys are written through one and looked up through the other, so a
-    # divergence makes graph recall silently MISS rather than fail. That is what this asserts.
+    print("\n[24.F1] rows written under the OLD key are re-keyed, not orphaned")
+    # The riskiest edit in 24.F1: changing how a node is keyed makes every existing row
+    # unreachable unless they are rewritten. The data would still be there and no lookup could
+    # ever find it again — worse than not changing the key at all. Nothing covered this, because
+    # every other test starts from an empty database.
+    import sqlite3 as _sq
+    import tempfile as _tf
+    from pathlib import Path as _P
+
+    from afon.brain.graph import GraphMemory as _GM
+
+    with _tf.TemporaryDirectory() as _td:
+        _dbp = _P(_td) / "legacy.sqlite"
+        _c = _sq.connect(_dbp)
+        _c.execute("CREATE TABLE triples (subject TEXT, predicate TEXT, object TEXT, "
+                   "PRIMARY KEY(subject, predicate, object))")
+        # Exactly what the pre-24.F1 `_norm` would have written: lowercased, whitespace collapsed.
+        _c.execute("INSERT INTO triples VALUES ('вазген', 'owns', 'lpstrak')")
+        _c.execute("INSERT INTO triples VALUES ('café au lait', 'is a', 'drink')")
+        _c.execute("INSERT INTO triples VALUES ('plain', 'stays', 'put')")
+        _c.commit()
+        _c.close()
+
+        _g = _GM(_dbp)
+        _subjects = {s for s, _p, _o in _g.all_triples()}
+        check("a Cyrillic node written under the old key is re-keyed",
+              "vazgen" in _subjects and "вазген" not in _subjects, str(_subjects))
+        check("...and its facts are reachable again", bool(_g.describe("Vazgen")),
+              "an unreachable row is data you cannot get back without a migration nobody wrote")
+        check("an accented node is re-keyed too", "cafe au lait" in _subjects, str(_subjects))
+        check("a row already in canonical form is left alone",
+              ("plain", "stays", "put") in _g.all_triples(), str(_g.all_triples()))
+        _before = sorted(_g.all_triples())
+        _g2 = _GM(_dbp)
+        check("re-opening migrates nothing (idempotent)", sorted(_g2.all_triples()) == _before,
+              "a migration that runs every open is a migration that can churn forever")
+
+    print("\n[24.F1] the store does not leak a connection per operation")
+    # `with sqlite3.connect(...)` commits and does NOT close. Every read and write leaked a
+    # handle for the life of the process. Found by a temp-dir teardown failing on Windows, which
+    # is the loud version; on Linux it just walks toward the fd limit.
+    # Counted, not inferred from whether the file can be deleted — CPython's refcounting collects
+    # an unreferenced connection promptly, so the delete succeeds either way and that check could
+    # never fail. `dbconn.OPEN` is the difference between "closed" and "happened to be collected".
+    from afon.brain import dbconn as _dbc
+
+    with _tf.TemporaryDirectory() as _td2:
+        _g3 = _GM(_P(_td2) / "leak.sqlite")
+        _before_open = _dbc.OPEN
+        for _i in range(25):
+            _g3.add(f"node{_i}", "links", "target")
+            _g3.describe(f"node{_i}")
+        check(f"50 operations leave no connection open (open={_dbc.OPEN})",
+              _dbc.OPEN == _before_open,
+              "`with sqlite3.connect(...)` commits and does NOT close; on a brain that runs for "
+              "weeks that walks toward the fd limit")
+
+    # J3.10, restated for 24.F1. This used to assert that graph._norm and memory._norm produced
+    # IDENTICAL output, on the premise that entity keys were written through one and looked up
+    # through the other. That premise no longer holds, and saying so plainly matters: memory._norm
+    # is used at exactly ONE site - deduplicating learned-fact TEXT - while graph keys now go
+    # through the shared `canonical`. Two functions doing different jobs are not required to
+    # agree, and holding them to it would block the transliteration folding that 24.F1 needs.
+    #
+    # What still matters is the property the old check was reaching for: a lookup must not depend
+    # on who normalised the string first.
     from afon.brain.graph import _norm as _gnorm
     from afon.brain.memory import _norm as _mnorm
-    _cases = ["  Alex  Vardanian ", "GDPR\tArt.\n5", "A B", "Rabbit Farm",
-              "MiXeD Case", "", "   ", "café  au   lait"]
-    _diverge = [c for c in _cases if _gnorm(c) != _mnorm(c)]
-    check("graph._norm and memory._norm agree (shared entity-key contract)",
-          not _diverge, f"diverge on {_diverge}")
+    from afon.shared.entities import canonical
+    _cases = ["  Alex  Vardanian ", "GDPR\tArt.\n5", "A B", "Rabbit Farm", "Вазген",
+              "MiXeD Case", "", "   ", "café  au   lait", "Mr. John Smith"]
+    check("the graph keys entities through the one shared function",
+          all(_gnorm(c) == canonical(c) for c in _cases),
+          "a private copy is how a key drifts away from everyone else's")
+    _unstable = [c for c in _cases if canonical(_mnorm(c)) != canonical(c)]
+    check("normalising before a graph lookup cannot change which node is found",
+          not _unstable, f"pre-normalising changes the key for {_unstable}")
+    _bad = [c for c in _cases if canonical(canonical(c)) != canonical(c)]
+    check("the entity key is idempotent (re-keying a stored key is a no-op)",
+          not _bad, f"{_bad} - the migration would move rows forever")
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

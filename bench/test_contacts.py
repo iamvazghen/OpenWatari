@@ -104,9 +104,87 @@ def main() -> None:
     check("save_contact is registered", "save_contact" in tool_names())
     check("resolve_contact is NOT confirm-gated (read-only)", not confirm_required("resolve_contact"))
 
+    entity_resolution()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
+
+
+# ── 24.F1: one person, one node, however their name arrived ──────────────────────────────────
+# Three stores keyed on a person's name and each normalised it differently, so the same human
+# arrived as several entities holding a third of the facts each. The two ways that happens to a
+# VOICE assistant in particular: STT transliterates a name ("Вазген" -> "Vazghen"), and a person
+# is referred to by channel — an address or a handle — as often as by name.
+def entity_resolution() -> None:
+    import pathlib
+    import tempfile
+
+    from afon.brain.contacts import Contact, ContactBook
+    from afon.shared.entities import canonical, is_handle, same_entity
+
+    print("\n[24.F1] a name is canonicalised, however it was spelled")
+    check("transliteration folds", canonical("Вазген") == canonical("Vazgen"), canonical("Вазген"))
+    check("a spelling variant folds", same_entity("Vazghen", "Вазген"))
+    check("accents fold", canonical("José García") == "jose garcia", canonical("José García"))
+    check("a title is not identity", canonical("Mr. John Smith") == canonical("john smith"))
+    check("case and spacing fold", canonical("  ANNA   K.  ") == canonical("anna k"))
+    # The threshold, held to the measurements it was chosen from. Transliteration variants of one
+    # name score 0.83-0.94; different people score 0.64-0.80. That gap is narrow enough that it is
+    # worth pinning both sides of it here, because moving the constant is a one-character edit and
+    # the failure it causes — a message to the wrong human — is silent.
+    print("\n[24.F1] the similarity band, both sides of it")
+    for a, b in [("Yaroslaw", "Ярослав"), ("Sergey", "Sergei"), ("Dmitriy", "Dmitri"),
+                 ("Katharina", "Katarina")]:
+        check(f"{a} / {b} are the same person", same_entity(a, b))
+    for a, b in [("Anna", "Anne"), ("Marc", "Mark"), ("Jan", "Jon")]:
+        check(f"{a} / {b} are NOT", not same_entity(a, b),
+              "merging two people sends an outward message to the wrong human")
+    # Full names get a word-wise rule: a shared surname alone drags two different people to 0.800
+    # on whole-string similarity, which is inside touching distance of the merge band.
+    check("a shared surname is not identity", not same_entity("John Smith", "Jane Smith"),
+          "'john smith' vs 'jane smith' scores 0.800 as a whole string; john/jane is 0.500")
+    # These two are where the word-wise rule earns its place, and the reason it exists at all.
+    # A LONG shared surname drags the whole-string score to 0.917 — comfortably inside the merge
+    # band — while the given names that actually distinguish the two people score 0.750. Planting
+    # the rule's removal showed nothing until these cases were added: John/Jane happened to fall
+    # below the threshold on its own, so the rule looked load-bearing when it was not being tested.
+    check("a long shared surname does not merge two people (Anna/Anne Petrova)",
+          not same_entity("Anna Petrova", "Anne Petrova"),
+          "whole-string 0.917, given names 0.750 — string similarity alone merges them")
+    check("...same shape with Marc/Mark Petrova", not same_entity("Marc Petrova", "Mark Petrova"))
+    check("...nor a shared given name", not same_entity("Anna Petrova", "Anna Ivanova"))
+    check("...in either position", not same_entity("Anna Petrova", "Boris Petrova"))
+    check("but a full name whose every word is a variant still merges",
+          same_entity("Sergey Dmitriy", "Sergei Dmitri"))
+    check("two different addresses never merge", not same_entity("a@b.com", "c@d.com"))
+
+    print("\n[24.F1] a channel identifies a person too")
+    for token, kind in (("a@b.com", "email"), ("@vazgen", "telegram"), ("+37411223344", "phone")):
+        check(f"{token} is recognised as a {kind}", is_handle(token))
+    check("a plain name is not a channel", not is_handle("Vazgen Sargsyan"))
+
+    with tempfile.TemporaryDirectory() as td:
+        book = ContactBook(pathlib.Path(td) / "contacts.md")
+        book.save(Contact(name="Вазген Саргсян", email="vaz@example.com", telegram="@vazgen"))
+        book.save(Contact(name="Anna Petrova", email="anna@example.com"))
+
+        print("\n[24.F1] the contact book resolves all three ways to the SAME person")
+        for query in ("Вазген Саргсян", "Vazgen Sargsyan", "vazgen sargsyan"):
+            hits = book.resolve(query)
+            check(f"{query!r} resolves to exactly one contact",
+                  len(hits) == 1 and canonical(hits[0].name).startswith("vazgen"),
+                  f"{len(hits)} hits: {[c.name for c in hits]}")
+        for channel in ("vaz@example.com", "@vazgen"):
+            hits = book.resolve(channel)
+            check(f"the channel {channel!r} resolves to the person who owns it",
+                  len(hits) == 1 and canonical(hits[0].name).startswith("vazgen"),
+                  f"{[c.name for c in hits]}")
+        check("an unknown channel resolves to nobody rather than the nearest name",
+              book.resolve("stranger@example.com") == [],
+              "guessing which contact an unknown address belongs to is how mail goes astray")
+        check("a partial first name still works", len(book.resolve("Anna")) == 1)
+        check("an unrelated name finds nothing", book.resolve("Zebedee") == [])
 
 
 if __name__ == "__main__":

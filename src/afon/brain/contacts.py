@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from afon.config import settings
+from afon.shared.entities import canonical, is_handle, same_entity
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -74,6 +75,11 @@ def _parse_line(line: str) -> Contact | None:
     )
 
 
+def _targets_of(contact: "Contact") -> list[str]:
+    """Every channel that identifies this person — the addresses a query might arrive as."""
+    return [v for v in (getattr(contact, f, "") or "" for f in ("email", "telegram", "phone")) if v]
+
+
 class ContactBook:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or _contacts_path()
@@ -121,16 +127,31 @@ class ContactBook:
         return line
 
     def resolve(self, query: str) -> list[Contact]:
-        """Contacts whose name matches ``query`` (case-insensitive: exact, then any-word match)."""
-        q = (query or "").strip().lower()
+        """Contacts matching ``query`` by name, spelling variant, or channel (24.F1).
+
+        Four passes, narrowest first, so a precise query never widens into an ambiguous one:
+        an exact canonical name; a CHANNEL (an email/handle/phone identifies exactly one person);
+        a close spelling; then the old any-word fallback for partial names ("call Anna").
+        """
+        q = (query or "").strip()
         if not q:
             return []
         people = self.all()
-        exact = [c for c in people if c.name.lower() == q]
+        key = canonical(q)
+
+        exact = [c for c in people if canonical(c.name) == key]
         if exact:
             return exact
-        qwords = set(q.split())
-        return [c for c in people if qwords & set(c.name.lower().split()) or q in c.name.lower()]
+        if is_handle(q):
+            # A channel names one person. Matching it by name-similarity afterwards would be
+            # nonsense, so this returns whatever it finds — including nothing.
+            return [c for c in people if any(canonical(t) == key for t in _targets_of(c))]
+        spelled = [c for c in people if same_entity(c.name, q)]
+        if spelled:
+            return spelled
+        qwords = set(key.split())
+        return [c for c in people
+                if qwords & set(canonical(c.name).split()) or key in canonical(c.name)]
 
 
 BOOK = ContactBook()

@@ -1833,11 +1833,25 @@ consulted in the prompt path so answers are shaped by it rather than re-derived.
 | reasoned | a scored "what's going on with X" scenario in the behavioural suite | 3 / 5 / 2 d | — | 0 | temporal columns are nullable → today's semantics |
 
 **Floor**
-- [ ] 24.F1 Entity resolution: one person, one node, regardless of spelling or channel
-      (`resolve_contact` covers part of this today). *gate:* `test_proper_nouns.py`,
-      `test_contacts.py` extended.
-- [ ] 24.F2 The world model states what it does *not* know about an entity when asked.
-      *gate:* `test_world_model.py` extended.
+- [x] 24.F1 Entity resolution: one person, one node, regardless of spelling or channel
+      (`resolve_contact` covers part of this today).
+      `shared/entities.py` canonicalises a name — transliteration, accents, titles, edge
+      punctuation — so "Вазген" and "Vazgen" key identically, and a channel (email, @handle,
+      phone) resolves to the person who owns it. Spelling variants that transliteration cannot
+      settle ("Vazghen" vs "Vazgen") are merged at **lookup** time by a high-threshold difflib
+      match, not by rewriting one into the other: a normaliser does not get to decide a rename,
+      and merging two different people sends an outward message to the wrong human. The graph
+      re-keys existing rows once on open — without that, changing the key orphans every accented
+      or Cyrillic node, which is worse than not changing it.
+      *gate:* `test_proper_nouns.py` 22/22, `test_contacts.py` 41/41, `test_graph_memory.py`
+      33/33 (migration + idempotence).
+- [x] 24.F2 The world model states what it does *not* know about an entity when asked.
+      `what_i_dont_know()` answers with both halves. The gaps come from a **declared** facet list
+      per entity kind rather than from whatever happens to be stored — a gap you can only notice
+      by already knowing what to look for is a gap nobody notices, which is the same reasoning as
+      31.F4's declared loop table. Until now an entity he held two facts about and one he held
+      twenty about sounded equally complete.
+      *gate:* `test_world_model.py` extended. 36/36.
 
 **Raise**
 - [ ] 24.R1 Temporal validity — facts carry "true from / true until", so a moved apartment does not
@@ -3348,7 +3362,7 @@ green, `E` = elite green.
 | S21 | Personal Time Mgmt | structured badly | 0/3 | 0/3 | 0/1 |
 | S22 | Recoverability | complete for now | 4/4 | 0/3 | 0/1 |
 | S23 | 24/7 Reachability | complete, parked | 4/4 | 0/3 | 0/1 |
-| S24 | Knowledge & World Model | structured badly | 0/2 | 0/3 | 0/1 |
+| S24 | Knowledge & World Model | structured badly | 2/2 | 0/3 | 0/1 |
 | S25 | Personality | complete for now | 2/3 | 0/3 | 0/1 |
 | S26 | Multi-Modal Perception | structured badly | 1/3 | 0/3 | 0/1 |
 | S27 | Context Awareness | structured badly | 0/2 | 0/3 | 0/1 |
@@ -3376,7 +3390,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 75 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 75 of 360.**
+**Totals: 77 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 77 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
