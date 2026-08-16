@@ -1847,10 +1847,13 @@ class AfonAgent:
         if len(t.split()) < settings.memory_autorecall_min_words or _is_affirmation(t):
             return None
         try:
-            from afon.brain.memory import STORE
+            # 30.F2: through the facade. Auto-RAG stays on the two local layers — it runs on
+            # EVERY turn, so the network-backed ones would put a round-trip in the latency path
+            # of a greeting — but which stores exist is the facade's business, not the agent's.
+            from afon.brain.recall import recall as _recall_all
 
-            hits = await STORE.fused_recall(t, limit=settings.memory_autorecall_limit,
-                                            layers=("L1", "L2"))
+            hits = await _recall_all(t, limit=settings.memory_autorecall_limit,
+                                     layers=("L1", "L2"))
         except Exception as e:  # noqa: BLE001 — recall must never break a turn
             logger.debug(f"auto-recall skipped: {type(e).__name__}: {e}")
             return None

@@ -211,8 +211,79 @@ def main() -> None:
     check(not cycles, f"{len(graph)} modules, no module-level cycle",
           "\n        " + "\n        ".join(sorted(set(cycles))[:6]))
 
+    recall_facade()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     sys.exit(1 if failed else 0)
+
+
+# ── 30.F2: one recall facade, one connection owner ───────────────────────────────────────────
+# The plan's words: "Seven stores, five holding their own SQLite handle, no unified entry point.
+# A single recall() fans out and merges; callers stop touching stores directly."
+#
+# The layering test is where this belongs because both halves are structural: a fifth store
+# opening its own connection, or a caller reaching past the facade into a store, are both things
+# you can only catch by reading the whole tree — which is precisely what nobody does before
+# adding the sixth.
+def recall_facade() -> None:
+    import ast
+
+    root = Path(__file__).resolve().parents[1] / "src" / "afon"
+    OWNER = "brain/dbconn.py"
+
+    print("\n[30.F2] one module opens memory databases")
+    offenders = []
+    for p in sorted(root.rglob("*.py")):
+        rel = p.relative_to(root).as_posix()
+        if rel == OWNER:
+            continue
+        # Comments and docstrings necessarily name the thing they forbid; parse instead of grep.
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "connect"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "sqlite3"):
+                offenders.append(f"{rel}:{node.lineno}")
+    check(not offenders, f"only {OWNER} calls sqlite3.connect", str(offenders))
+
+    stores = ["coaching", "graph", "presence", "semantic", "tasks"]
+    routed = [s for s in stores
+              if "from afon.brain.dbconn import connect"
+              in (root / "brain" / f"{s}.py").read_text(encoding="utf-8")]
+    check(len(routed) == len(stores),
+          f"all {len(stores)} memory stores open through it ({', '.join(routed)})",
+          f"not routed: {sorted(set(stores) - set(routed))}")
+
+    print("\n[30.F2] one entry point for 'what do we know about X?'")
+    facade = (root / "brain" / "recall.py").read_text(encoding="utf-8")
+    check("the facade declares every layer it fans out to",
+          all(f'"{lay}"' in facade for lay in ("L1", "L2", "L3", "L5", "L5b", "L4")),
+          "a store that is not in the table is a store nobody remembers to ask")
+    check("it carries a per-store timeout",
+          "LAYER_TIMEOUT_S" in facade and "wait_for" in facade,
+          "without one, the slowest layer decides the recall budget (S30: p95 <= 300ms)")
+
+    # The load-bearing check: a caller must not fan out for itself. `fused_recall` is the L1/L2
+    # store's own multi-layer method — reaching it from outside memory.py is exactly the "callers
+    # touching stores directly" this floor removes, and it silently skips the tasks layer.
+    users = []
+    for p in sorted(root.rglob("*.py")):
+        rel = p.relative_to(root).as_posix()
+        if rel in ("brain/memory.py", "brain/recall.py"):
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "fused_recall"):
+                users.append(f"{rel}:{node.lineno}")
+    check(not users, "no caller outside the facade fans out over the stores itself", str(users))
 
 
 if __name__ == "__main__":

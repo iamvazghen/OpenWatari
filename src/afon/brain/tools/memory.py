@@ -66,11 +66,16 @@ async def recall(args: dict) -> str:
         return tool_error("recall", ValueError("no search text (expected a 'query' argument)"))
     layers = args.get("layers")  # optional: ['L1','L2','L3','L5'] to narrow
     try:
-        # fused_recall returns tagged dicts; tag each hit with its layer so the LLM can cite.
-        hits = await STORE.fused_recall(query, limit=settings.memory_recall_limit, layers=tuple(layers) if layers else None)
+        # 30.F2: through the facade, not the store. This tool asked the L1/L2 store to fan out on
+        # its behalf, which meant the open tasks — usually what "what's going on with X" means —
+        # were not in the answer, and one slow layer could own the whole turn.
+        from afon.brain.recall import recall as _recall_all
+        hits = await _recall_all(query, limit=settings.memory_recall_limit,
+                                 layers=tuple(layers) if layers else None)
         if not hits:
             return f"I don't have anything stored about '{query}', sir."
-        tag = {"L1": "learned", "L2": "journal", "L3": "vault", "L5": "semantic"}
+        tag = {"L1": "learned", "L2": "journal", "L3": "vault", "L5": "semantic",
+               "L5b": "graph", "L4": "task"}
         lines = []
         for h in hits:
             layer = tag.get(h["layer"], h["layer"])

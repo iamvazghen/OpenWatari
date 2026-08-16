@@ -174,6 +174,42 @@ async def main() -> None:
     check("both stores are populated after a session (L1 facts + L5b triples)",
           store.count() >= 3 and len(graph.all_triples()) >= 2, f"L1={store.count()} triples={len(graph.all_triples())}")
 
+    print("\n[30.F2] one slow store cannot own the answer")
+    # test_layering.py checks that the facade EXISTS and that nobody bypasses it. This checks the
+    # part a structural scan cannot: that the per-layer budget is actually applied. Written after
+    # planting a rename of `LAYER_TIMEOUT_S`, which the grep-for-the-name check waved through
+    # because the constant is also mentioned where it is used.
+    import time as _time
+
+    from afon.brain.recall import recall as _recall_all
+
+    class _Stalled:
+        async def fused_recall(self, query, limit=8, layers=None):
+            await asyncio.sleep(30)
+            return [{"layer": "L1", "text": "far too late", "score": 9.0, "source": "learned"}]
+
+    t0 = _time.perf_counter()
+    hits = await _recall_all("rabbit farm", store=_Stalled(), layers=("L1", "L2"))
+    local = _time.perf_counter() - t0
+    check(f"a stalled LOCAL layer is abandoned in about a second ({local:.1f}s)", local < 2.0,
+          "auto-recall runs these on every turn; S30 budgets recall at p95 <= 300ms")
+    check("...and recall answers without it rather than raising", hits == [], str(hits))
+    t0 = _time.perf_counter()
+    await _recall_all("rabbit farm", store=_Stalled(), layers=("L1", "L3"))
+    network = _time.perf_counter() - t0
+    check(f"a NETWORK layer gets a real allowance instead ({network:.1f}s)",
+          network > local + 1.0,
+          "a single flat budget either strangles the vault search or puts its latency on a greeting")
+
+    class _Twice:
+        async def fused_recall(self, query, limit=8, layers=None):
+            return [{"layer": "L1", "text": "He has a rabbit farm.", "score": 3.0, "source": "learned"},
+                    {"layer": "L5b", "text": "he has a rabbit farm", "score": 1.0, "source": "graph"}]
+
+    merged = await _recall_all("rabbit farm", store=_Twice(), layers=("L1", "L5b"))
+    check("the same fact held in two stores is reported once", len(merged) == 1, str(merged))
+    check("...keeping the better-scoring copy", merged and merged[0]["score"] == 3.0, str(merged))
+
     try:
         tmp.cleanup()
     except Exception:  # noqa: BLE001

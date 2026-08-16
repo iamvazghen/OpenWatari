@@ -25,6 +25,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from afon.brain.dbconn import connect
 from afon.config import settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -48,7 +49,7 @@ class GraphMemory:
         self._ready = False
 
     def _conn(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self._path, timeout=5)
+        c = connect(self._path, rows=False)
         if not self._ready:
             c.execute(
                 "CREATE TABLE IF NOT EXISTS triples ("

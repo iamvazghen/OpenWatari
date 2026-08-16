@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
+from afon.brain.dbconn import connect
 from afon.config import settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -134,9 +135,7 @@ class TaskQueue:
 
     # ---- persistence ------------------------------------------------------------------
     def _conn(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self._path)
-        c.row_factory = sqlite3.Row
-        return c
+        return connect(self._path)
 
     # Columns added after the original release; migrated onto pre-existing DBs at startup.
     _EXTRA_COLS = (("description", "TEXT"), ("priority", "TEXT"), ("deadline", "REAL"),

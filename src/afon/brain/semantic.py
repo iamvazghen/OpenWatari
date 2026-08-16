@@ -25,6 +25,7 @@ from typing import Callable, Sequence
 
 from loguru import logger
 
+from afon.brain.dbconn import connect
 from afon.config import settings
 
 Vector = Sequence[float]
@@ -53,7 +54,7 @@ class VectorStore:
         self._ready = False
 
     def _conn(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self._path, timeout=5)
+        c = connect(self._path, rows=False)
         if not self._ready:
             c.execute("CREATE TABLE IF NOT EXISTS embeddings "
                       "(key TEXT PRIMARY KEY, mtime REAL NOT NULL, vec BLOB NOT NULL)")

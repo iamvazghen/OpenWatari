@@ -2168,10 +2168,20 @@ embed once per turn and reuse · cache the digest · target p95 ≤300ms.
       running on a week-old memory of the owner (TODO I6 and the rename findings). Decide the merge
       direction, execute it, record the decision. *gate:* new `test_memory_single_origin.py` — one
       store path per environment, no second candidate directory present.
-- [ ] 30.F2 **One recall facade.** Seven stores, five holding their own SQLite handle, no unified
+- [x] 30.F2 **One recall facade.** Seven stores, five holding their own SQLite handle, no unified
       entry point (TODO K3 / J3.3). A single `recall()` fans out and merges; callers stop touching
-      stores directly. *gate:* `test_layering.py` extended — no module outside the facade opens a
-      memory connection.
+      stores directly.
+      Two halves. `brain/dbconn.py` is now the only module that opens a memory database — the five
+      stores had five independent guesses at the arguments, three of them inheriting sqlite's
+      5-second busy timeout by accident rather than decision. `brain/recall.py` is the single
+      entry point: it delegates to the existing `fused_recall` rather than reimplementing it, adds
+      the **tasks layer** (which is usually what "what's going on with X" means and was not
+      reachable at all), dedups across stores, and gives each layer a budget — **local layers 1s,
+      network layers 4s**, because auto-recall runs the local ones on every turn and one flat
+      backstop generous enough for Jina would have put five seconds on a greeting.
+      *gate:* `test_layering.py` extended — no module outside the facade opens a memory
+      connection. 29/29, plus the behavioural half in `test_memory_behavioral.py` 23/23 (a
+      structural grep for the budget passed a planted rename; behaviour caught it).
 - [x] 30.F3 Every stored fact carries source, timestamp and confidence.
       The store mixes three different kinds of claim — what the owner said outright, what the
       background reviewer inferred from a conversation, and what the pattern detector guessed from
@@ -3344,7 +3354,7 @@ green, `E` = elite green.
 | S27 | Context Awareness | structured badly | 0/2 | 0/3 | 0/1 |
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
-| S30 | Persistent Memory | structured badly | 1/3 | 0/4 | 0/1 |
+| S30 | Persistent Memory | structured badly | 2/3 | 0/4 | 0/1 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/4 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
@@ -3366,7 +3376,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 74 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 74 of 360.**
+**Totals: 75 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 75 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

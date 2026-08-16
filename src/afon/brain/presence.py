@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from afon.brain.dbconn import connect
 from afon.brain import loops
 from afon.config import settings
 
@@ -97,9 +98,7 @@ class Presence:
 
     # ---- persistence ------------------------------------------------------------------
     def _conn(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self._path)
-        c.row_factory = sqlite3.Row
-        return c
+        return connect(self._path)
 
     def _init_db(self) -> None:
         try:
