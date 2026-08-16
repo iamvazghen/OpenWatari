@@ -105,7 +105,15 @@ def hud_snapshot(
         # 01.F3: what the recent turns cost and how they classified. `incomplete` is the number
         # that matters — a row missing a field means the tuning evidence has a hole in it.
         "turns_trace": _safe(_turns_trace, {}),
+        # 02.F3: learned provider health. Every provider the chain can address gets a row, so a
+        # healthy one says so rather than being an absence.
+        "llm_providers": _safe(_llm_providers, []),
     }
+
+
+def _llm_providers() -> list[dict]:
+    from afon.brain.llm import provider_health
+    return provider_health()
 
 
 def _turns_trace() -> dict:

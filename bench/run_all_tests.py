@@ -193,6 +193,8 @@ TESTS = [
      "test_loop_registry.py", "offline", ["checks passed ==="]),
     ("Unpark gate (23.F4): leaving the park refuses while any Wave-0 floor is unmet",
      "test_unpark_gate.py", "offline", ["checks passed ==="]),
+    ("Provider cooldown (02.F3): provider health is learned from failures, and the HUD says so",
+     "test_provider_cooldown.py", "offline", ["checks passed ==="]),
     ("Static correctness: undefined names / redefinitions fail at lint time, not at 03:00 Sunday",
      "test_static_correctness.py", "offline", ["checks passed ==="]),
     ("Phase 3: presence-aware proactivity — greet-on-arrival (idle transition, privacy gate)",

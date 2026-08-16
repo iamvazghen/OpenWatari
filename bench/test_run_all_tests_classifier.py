@@ -150,6 +150,25 @@ def main() -> int:
     check(f"all {len(registered)} registered tests report failure through the exit code",
           not silent, f"count failures but always exit 0: {silent}")
 
+    # The other way to break the same contract, and the one a reviewer's eye slides over: the
+    # verdict is INVERTED. `return 0 if FAIL else 1` exits 1 when everything passed, so a green
+    # test is reported red — and, worse, the file looks right and reads right when run by hand,
+    # because the checks all print [PASS]. It cost one full 13-minute suite run to find. Correct
+    # spellings compare (`0 if FAIL == 0 else 1`) or put the failure case first (`1 if FAIL`).
+    inverted = []
+    for name in sorted(registered):
+        path = bench_dir / name
+        if not path.exists():
+            continue
+        # Comments stripped: the paragraph above necessarily quotes the broken spelling, and a
+        # scanner that flags the description of a bug alongside the bug is a scanner nobody trusts.
+        text = "\n".join(ln.split("#", 1)[0]
+                         for ln in path.read_text(encoding="utf-8", errors="replace").splitlines())
+        if _re.search(r"\b0\s+if\s+(?:FAIL|failed|_fail|_failed)\s+else\s+1\b", text):
+            inverted.append(name)
+    check(f"no registered test inverts its exit code ({len(registered)} checked)",
+          not inverted, f"exit 1 on success: {inverted}")
+
     print("\n[7] every registered test exercises shipped code, or is a declared structural gate (J6.3)")
     # J6.3 asked whether the tiny, highly-cohesive test communities are hermetic *by design* or
     # hermetic *by accident* — a test that asserts against its own stub is a green tick over zero

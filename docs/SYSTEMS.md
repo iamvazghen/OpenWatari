@@ -570,9 +570,18 @@ thinking tier only where it changes the answer (<15% of turns).
 - [x] 02.F1 Fast failover on first-token stall, not on request timeout (TODO K5a).
       *gate:* `test_brain_llm.py`, `test_resilience.py`
 - [x] 02.F2 Tool-tier and thinking-tier routing. *gate:* `test_model_tiers.py`
-- [ ] 02.F3 Provider health is *learned*, not just configured: a provider that failed twice in five
+- [x] 02.F3 Provider health is *learned*, not just configured: a provider that failed twice in five
       minutes is deprioritised for a cooldown, and the HUD says so.
-      *gate:* new `test_provider_cooldown.py`
+      What existed was the configured kind: one failure benched one chain **entry** for one fixed
+      duration. A rate-limited key kills every entry that provider serves, and the chain
+      rediscovered that one entry at a time, paying a failed round-trip for each, every turn.
+      Failures now also count per provider; two inside five minutes moves its entries to the
+      **back** of the chain rather than out of it (a provider that failed twice is not proven
+      dead, and a chain that can empty itself can leave Afon mute), repeat offences double the
+      cooldown to a 30-minute cap, a dead key skips straight to the long bench, and one success
+      clears it — without that half, the first bad five minutes of a day would bench a provider
+      until the next restart.
+      *gate:* new `test_provider_cooldown.py` 28/28, twelve plants.
 
 **Raise**
 - [ ] 02.R1 Per-tier cost accounting in `metrics` — tokens and money per intent class, in the HUD.
@@ -3298,7 +3307,7 @@ green, `E` = elite green.
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
 | S01 | Brain / Core Intelligence | structured badly | 2/3 | 0/4 | 0/3 |
-| S02 | LLM Integration | complete for now | 2/3 | 0/3 | 0/1 |
+| S02 | LLM Integration | complete for now | 3/3 | 0/3 | 0/1 |
 | S03 | Tool Utilization | complete for now | 4/4 | 0/4 | 0/1 |
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
@@ -3348,7 +3357,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 72 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 72 of 360.**
+**Totals: 73 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 73 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

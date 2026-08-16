@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -34,6 +35,118 @@ _PERMANENT_ERR_CUES = (
     "unauthorized", "account is not active", "account_deactivated",
 )
 _PERMANENT_COOLDOWN_S = 21600.0  # 6h — credits/access don't come back in the transient window
+
+#: Every provider the chain can address: (name, base-url setting, api-key setting, key fallback).
+#: One spelling, because `_resolve` and `provider_of` must never disagree about which provider an
+#: entry belongs to — a second copy of this list is how a provider ends up benched under a name
+#: nothing else uses, and the deprioritisation silently stops applying (J3.6).
+_PROVIDERS: tuple[tuple[str, str, str | None, str], ...] = (
+    ("groq", "groq_base_url", "groq_api_key", "missing-groq-key"),
+    ("cerebras", "cerebras_base_url", "cerebras_api_key", "missing-cerebras-key"),
+    ("minimax", "minimax_base_url", "minimax_api_key", "missing-minimax-key"),
+    ("ollama", "ollama_base_url", None, "ollama"),          # Ollama ignores the key
+    ("vercel", "vercel_ai_gateway_base_url", "vercel_ai_gateway_api_key", "missing-vercel-key"),
+)
+_DEFAULT_PROVIDER = "freellmapi"   # an unprefixed entry goes to the proxy
+
+
+def provider_of(entry: str) -> str:
+    """Which provider a chain entry is served by. `ollama:llama3:8b` is Ollama, not `llama3`."""
+    head = entry.split(":", 1)[0]
+    return head if any(head == p[0] for p in _PROVIDERS) else _DEFAULT_PROVIDER
+
+
+# ── learned provider health (SYSTEMS.md 02.F3) ───────────────────────────────────────────────
+# The model-level bench below is CONFIGURED health: one failure, one fixed cooldown, applied to
+# the single chain entry that happened to fail. It learns nothing. When a provider's key is rate-
+# limited or its region is down, every entry it serves is dead, and the chain discovers that one
+# entry at a time — paying a failed round-trip for each, on every turn, forever.
+#
+# So failures are also counted per PROVIDER. Two inside five minutes and that provider is
+# deprioritised: its entries move to the back of the chain rather than out of it, because a
+# provider that is merely slow must still be reachable when the healthy ones are exhausted.
+# Repeat offences double the cooldown (a provider that keeps failing has told you more each time),
+# and one success clears the record — recovery has to be learnable too, or the first bad five
+# minutes of the day would bench a provider until restart.
+#
+# Process-wide, like METRICS: there is one chain per brain, and the HUD has to be able to read
+# this without holding a reference to whichever LLMClient the agent happens to own.
+_PROVIDER_FAIL_WINDOW_S = 300.0     # "failed twice in five minutes"
+_PROVIDER_FAIL_THRESHOLD = 2
+_PROVIDER_COOLDOWN_S = 120.0
+_PROVIDER_COOLDOWN_MAX_S = 1800.0   # 30m — past this it is an outage, and paging is the answer
+
+_PROVIDER_FAILS: dict[str, list[float]] = {}
+_PROVIDER_COOL: dict[str, float] = {}     # provider -> monotonic deadline
+_PROVIDER_STRIKES: dict[str, int] = {}    # how many times it has earned a cooldown
+_PROVIDER_LAST: dict[str, str] = {}       # provider -> why it was last deprioritised
+
+
+def note_provider_failure(entry: str, permanent: bool = False, why: str = "") -> bool:
+    """Record one failure. Returns True if this failure put the provider into a cooldown."""
+    p = provider_of(entry)
+    now = time.monotonic()
+    fails = [t for t in _PROVIDER_FAILS.get(p, ()) if now - t <= _PROVIDER_FAIL_WINDOW_S]
+    fails.append(now)
+    _PROVIDER_FAILS[p] = fails
+    if not permanent and len(fails) < _PROVIDER_FAIL_THRESHOLD:
+        return False
+    strikes = _PROVIDER_STRIKES[p] = _PROVIDER_STRIKES.get(p, 0) + 1
+    cooldown = min(_PROVIDER_COOLDOWN_MAX_S, _PROVIDER_COOLDOWN_S * (2 ** (strikes - 1)))
+    if permanent:
+        cooldown = _PERMANENT_COOLDOWN_S
+    _PROVIDER_COOL[p] = now + cooldown
+    _PROVIDER_FAILS[p] = []   # the strike consumed them; don't re-trigger on the next failure
+    _PROVIDER_LAST[p] = why[:120] or ("permanent failure" if permanent else
+                                      f"{len(fails)} failures inside {_PROVIDER_FAIL_WINDOW_S:.0f}s")
+    logger.warning(f"LLM provider '{p}' deprioritised for {cooldown:.0f}s "
+                   f"(strike {strikes}): {_PROVIDER_LAST[p]}")
+    return True
+
+
+def note_provider_success(entry: str) -> None:
+    """A provider that answers has earned its place back. Clears the record, and steps the strike
+    count down rather than to zero — a provider that has failed all morning should not be treated
+    as pristine because of one good answer."""
+    p = provider_of(entry)
+    _PROVIDER_FAILS.pop(p, None)
+    _PROVIDER_COOL.pop(p, None)
+    _PROVIDER_LAST.pop(p, None)
+    if _PROVIDER_STRIKES.get(p):
+        _PROVIDER_STRIKES[p] -= 1
+
+
+def provider_cooling(entry: str) -> bool:
+    return _PROVIDER_COOL.get(provider_of(entry), 0.0) > time.monotonic()
+
+
+def provider_health() -> list[dict]:
+    """What the HUD shows: every provider the chain can address, and whether it is trusted.
+
+    Built from `_PROVIDERS` rather than from whichever providers happen to have failed, so a
+    healthy provider is a row saying so — the same reason 31.F4's loop table is declared and not
+    collected.
+    """
+    now = time.monotonic()
+    out = []
+    for name in [p[0] for p in _PROVIDERS] + [_DEFAULT_PROVIDER]:
+        until = _PROVIDER_COOL.get(name, 0.0)
+        out.append({
+            "provider": name,
+            "cooling": until > now,
+            "cooling_for_s": round(max(0.0, until - now), 1),
+            "recent_failures": len([t for t in _PROVIDER_FAILS.get(name, ())
+                                    if now - t <= _PROVIDER_FAIL_WINDOW_S]),
+            "strikes": _PROVIDER_STRIKES.get(name, 0),
+            "why": _PROVIDER_LAST.get(name, ""),
+        })
+    return out
+
+
+def reset_provider_health() -> None:
+    """Forget everything learned. For tests and for a deliberate operator reset."""
+    for d in (_PROVIDER_FAILS, _PROVIDER_COOL, _PROVIDER_STRIKES, _PROVIDER_LAST):
+        d.clear()
 
 
 def _is_permanent_error(err: Exception) -> bool:
@@ -253,19 +366,14 @@ class LLMClient:
         fallback); ``vercel:<model>`` hits the Vercel AI Gateway, the paid LAST-RESORT backstop that
         only answers once everything ahead of it has failed; unprefixed goes to the freellmapi proxy.
         Each provider's client is built once and cached."""
-        for prefix, base_url, api_key in (
-            ("groq:", settings.groq_base_url, settings.groq_api_key or "missing-groq-key"),
-            ("cerebras:", settings.cerebras_base_url, settings.cerebras_api_key or "missing-cerebras-key"),
-            ("minimax:", settings.minimax_base_url, settings.minimax_api_key or "missing-minimax-key"),
-            ("ollama:", settings.ollama_base_url, "ollama"),  # Ollama ignores the key
-            ("vercel:", settings.vercel_ai_gateway_base_url,
-             settings.vercel_ai_gateway_api_key or "missing-vercel-key"),
-        ):
+        for name, url_attr, key_attr, key_default in _PROVIDERS:
+            prefix = f"{name}:"
             if entry.startswith(prefix):
-                name = prefix[:-1]
+                api_key = (getattr(settings, key_attr) if key_attr else None) or key_default
                 client = self._clients.get(name)
                 if client is None:
-                    client = self._clients[name] = self._make_client(base_url, api_key)
+                    client = self._clients[name] = self._make_client(
+                        getattr(settings, url_attr), api_key)
                 return client, entry[len(prefix):]
         return self._default, entry
 
@@ -276,20 +384,35 @@ class LLMClient:
     def _candidate_chain(self) -> list[str]:
         """Return healthy entries first; if every entry is cooling down, try the full chain anyway."""
         if not self._cooldown:
-            return list(self._chain)
+            return self._deprioritise(list(self._chain))
         now = asyncio.get_running_loop().time()
         healthy = [m for m in self._chain if self._unhealthy_until.get(m, 0.0) <= now]
         if healthy:
             skipped = [m for m in self._chain if m not in healthy]
             if skipped:
                 logger.debug(f"LLM skipping cooling-down models: {skipped}")
-            return healthy
-        return list(self._chain)
+            return self._deprioritise(healthy)
+        return self._deprioritise(list(self._chain))
+
+    @staticmethod
+    def _deprioritise(chain: list[str]) -> list[str]:
+        """02.F3: entries from a learned-bad provider go to the BACK, never out.
+
+        Removing them would be the wrong trade twice over — a provider that failed twice in five
+        minutes is not proven dead, and a chain that can empty itself is a chain that can leave
+        Afon mute. Python's sort is stable, so the healthy entries keep their configured order.
+        """
+        return sorted(chain, key=provider_cooling)
 
     def _mark_failure(self, model: str, err: Exception) -> None:
         from afon.brain.metrics import METRICS
         METRICS.incr("llm_model_failures")
         permanent = _is_permanent_error(err)
+        # 02.F3: the provider learns even when the model-level cooldown is switched off, and even
+        # on a slow-first-token failure — a provider that is slow twice in five minutes is a
+        # provider to try second, which is exactly what a fixed per-model bench cannot express.
+        if note_provider_failure(model, permanent, f"{type(err).__name__}: {err}"):
+            METRICS.incr("llm_provider_cooldowns")
         # A permanent (quota/credit/access) failure benches the model even when the transient cooldown is
         # disabled — the whole point is to stop retrying a dead key. _candidate_chain still falls back to
         # the full chain if EVERY entry is benched, so this never locks Afon out of answering.
@@ -349,6 +472,7 @@ class LLMClient:
         errors: list[dict[str, str]] | None = None,
     ) -> None:
         self._unhealthy_until.pop(model, None)
+        note_provider_success(model)   # 02.F3 — recovery is learned too, not waited out
         from afon.brain.metrics import METRICS
         METRICS.incr("llm_routes")
         if failures:
