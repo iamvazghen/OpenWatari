@@ -48,7 +48,8 @@ async def remember(args: dict) -> str:
     if isinstance(tags, str):
         tags = [t for t in tags.replace(";", ",").split(",") if t.strip()]
     try:
-        STORE.remember(text, tags=tags)
+        # He said it outright — nothing outranks that (30.F3).
+        STORE.remember(text, tags=tags, source="owner")
         return "Noted, sir — I'll remember that."
     except Exception as e:  # noqa: BLE001
         return tool_error("remember", e)

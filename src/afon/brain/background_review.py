@@ -122,7 +122,8 @@ async def review_and_learn(history: list[dict[str, Any]], llm, store: Any = STOR
     before = store.count()
     learned: list[str] = []
     for f in facts:
-        if store.remember(f, tags=["learned", "auto"]):
+        # Read out of a conversation by a model, not stated as fact (30.F3).
+        if store.remember(f, tags=["learned", "auto"], source="inferred"):
             learned.append(f)
     # L5b: write any explicit relations into the graph (dedup via INSERT OR IGNORE). Never fatal.
     triples = 0

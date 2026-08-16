@@ -2172,8 +2172,17 @@ embed once per turn and reuse · cache the digest · target p95 ≤300ms.
       entry point (TODO K3 / J3.3). A single `recall()` fans out and merges; callers stop touching
       stores directly. *gate:* `test_layering.py` extended — no module outside the facade opens a
       memory connection.
-- [ ] 30.F3 Every stored fact carries source, timestamp and confidence.
-      *gate:* `test_memory_salience.py` extended.
+- [x] 30.F3 Every stored fact carries source, timestamp and confidence.
+      The store mixes three different kinds of claim — what the owner said outright, what the
+      background reviewer inferred from a conversation, and what the pattern detector guessed from
+      behaviour — and once written they were indistinguishable, so a guess was recalled with the
+      authority of a statement. A closed `SOURCES` vocabulary (owner · tool · inferred · pattern ·
+      legacy) now rides in the frontmatter with a confidence, and every `.remember()` call site
+      names its origin — checked structurally, because a default parameter means a new caller
+      silently attributes its facts to whatever the default happens to be (36.F5's lesson).
+      Notes written before this existed are named **legacy** rather than backfilled with a
+      confidence nobody measured, and a stated fact now upgrades one that had only been inferred.
+      *gate:* `test_memory_salience.py` extended. 31/31, seven plants.
 
 **Raise**
 - [ ] 30.R1 Ranked merge with dedup across stores (L0–L5 + graph + patterns).
@@ -3335,7 +3344,7 @@ green, `E` = elite green.
 | S27 | Context Awareness | structured badly | 0/2 | 0/3 | 0/1 |
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
-| S30 | Persistent Memory | structured badly | 0/3 | 0/4 | 0/1 |
+| S30 | Persistent Memory | structured badly | 1/3 | 0/4 | 0/1 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/4 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
@@ -3357,7 +3366,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 73 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 73 of 360.**
+**Totals: 74 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 74 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

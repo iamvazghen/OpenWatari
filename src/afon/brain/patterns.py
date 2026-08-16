@@ -172,7 +172,7 @@ def persist_as_l1(store, lookback_days: int = 30) -> list[str]:
     for f in fresh:
         try:
             # MemoryStore.remember dedups by normalised text.
-            store.remember(f, tags=["pattern"])
+            store.remember(f, tags=["pattern"], source="pattern")
             added.append(f)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"patterns.persist_as_l1: remember({f[:50]!r}) failed: {e}")

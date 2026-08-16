@@ -62,16 +62,49 @@ def _terms(query: str) -> list[str]:
     return filtered or raw
 
 
+# ── provenance (SYSTEMS.md 30.F3) ────────────────────────────────────────────────────────────
+# "Every stored fact carries source, timestamp and confidence." Until now a fact carried its text,
+# its tags and a `created` line, and nothing recorded WHERE it came from. That matters because the
+# store mixes three very different kinds of claim: things the owner said outright, things the
+# background reviewer inferred from a conversation, and things the pattern detector guessed from
+# behaviour. They were indistinguishable once written, so a guess and a statement were recalled
+# with equal authority — which is how a wrong inference becomes something Afon "knows".
+#
+# The vocabulary is closed. An open string would drift into a dozen spellings of the same origin
+# and nothing downstream (30.R2's "I have two versions", 30.R4's confidence floor) could group on
+# it. `legacy` names the notes written before this existed: their provenance is genuinely unknown,
+# and saying so is more honest than backfilling a confidence nobody measured.
+SOURCES: dict[str, float] = {
+    "owner": 1.0,        # he said it. Nothing outranks this.
+    "tool": 0.9,         # read out of a system of record (calendar, tasks, vault)
+    "inferred": 0.6,     # the background reviewer read it out of a conversation
+    "pattern": 0.5,      # the detector noticed it in behaviour; a guess with evidence
+    "legacy": 0.5,       # written before provenance existed — unknown, and named as such
+}
+DEFAULT_SOURCE = "inferred"
+
+
+def source_rank(source: str) -> float:
+    return SOURCES.get(source, 0.0)
+
+
+def _iso(mtime: float) -> str:
+    return datetime.fromtimestamp(mtime, timezone.utc).isoformat()
+
+
 class LearnedNote:
-    __slots__ = ("path", "text", "tags", "created", "mtime")
+    __slots__ = ("path", "text", "tags", "created", "mtime", "source", "confidence")
 
     def __init__(self, path: Path, text: str, tags: list[str], created: str,
-                 mtime: float = 0.0) -> None:
+                 mtime: float = 0.0, source: str = "legacy",
+                 confidence: float | None = None) -> None:
         self.path = path
         self.text = text
         self.tags = tags
         self.created = created
         self.mtime = mtime   # cached at read time so hot-path callers needn't re-stat
+        self.source = source if source in SOURCES else "legacy"
+        self.confidence = SOURCES[self.source] if confidence is None else confidence
 
 
 class MemoryStore:
@@ -88,15 +121,32 @@ class MemoryStore:
         self._note_cache: dict[str, tuple[float, LearnedNote]] = {}
 
     # ---- L1: learned facts ------------------------------------------------------------
-    def remember(self, text: str, tags: list[str] | None = None) -> Path | None:
+    def remember(self, text: str, tags: list[str] | None = None, *,
+                 source: str = DEFAULT_SOURCE, confidence: float | None = None) -> Path | None:
+        """Store one learned fact with its provenance (30.F3).
+
+        `source` must be one of `SOURCES`; an unknown one is stored as the default rather than
+        inventing a category, because a vocabulary nothing enforces is a vocabulary that drifts.
+        """
         text = (text or "").strip()
         if not text:
             return None
         tags = [t.strip().lower() for t in (tags or []) if t.strip()]
+        if source not in SOURCES:
+            logger.warning(f"memory: unknown source {source!r} — storing as {DEFAULT_SOURCE}")
+            source = DEFAULT_SOURCE
+        conf = SOURCES[source] if confidence is None else max(0.0, min(1.0, float(confidence)))
         # Dedup: identical normalised fact already stored -> return it, don't duplicate.
         for note in self._iter_notes():
             if _norm(note.text) == _norm(text):
-                logger.info(f"memory: already knew {text[:50]!r}")
+                # ...but a better source is new information. The owner stating outright something
+                # Afon had merely inferred is exactly the moment a guess becomes a fact, and
+                # silently keeping the weaker provenance would throw that away.
+                if source_rank(source) > source_rank(note.source):
+                    self._rewrite_provenance(note, source, conf)
+                    logger.info(f"memory: promoted {text[:40]!r} from {note.source} to {source}")
+                else:
+                    logger.info(f"memory: already knew {text[:50]!r}")
                 return note.path
         self.learned_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc)
@@ -104,14 +154,33 @@ class MemoryStore:
         path = self.learned_dir / fname
         tagline = ", ".join(tags)
         path.write_text(
-            f"---\ncreated: {ts.isoformat()}\ntags: {tagline}\n---\n{text}\n",
+            f"---\ncreated: {ts.isoformat()}\ntags: {tagline}\n"
+            f"source: {source}\nconfidence: {conf:.2f}\n---\n{text}\n",
             encoding="utf-8",
         )
-        logger.info(f"memory: learned {text[:60]!r}" + (f" [{tagline}]" if tags else ""))
+        logger.info(f"memory: learned {text[:60]!r} [{source} {conf:.2f}]"
+                    + (f" [{tagline}]" if tags else ""))
         return path
+
+    def _rewrite_provenance(self, note: LearnedNote, source: str, confidence: float) -> None:
+        """Upgrade a stored fact's provenance in place, keeping its text and original timestamp."""
+        try:
+            raw = note.path.read_text(encoding="utf-8", errors="ignore")
+            m = _FRONTMATTER_RE.match(raw)
+            body = m.group(2).strip() if m else raw.strip()
+            keep = [ln for ln in (m.group(1).splitlines() if m else [])
+                    if not ln.startswith(("source:", "confidence:"))]
+            if not any(ln.startswith("created:") for ln in keep):
+                keep.insert(0, f"created: {note.created or _iso(note.mtime)}")
+            meta = "\n".join(keep + [f"source: {source}", f"confidence: {confidence:.2f}"])
+            note.path.write_text(f"---\n{meta}\n---\n{body}\n", encoding="utf-8")
+            self._note_cache.pop(str(note.path), None)   # force a re-parse on the next read
+        except OSError as e:
+            logger.debug(f"memory: could not upgrade provenance of {note.path.name}: {e}")
 
     def _parse_note(self, p: Path, raw: str) -> LearnedNote:
         m = _FRONTMATTER_RE.match(raw)
+        source, confidence = "legacy", None
         if m:
             meta, body = m.group(1), m.group(2).strip()
             tags: list[str] = []
@@ -121,9 +190,16 @@ class MemoryStore:
                     tags = [t.strip().lower() for t in line[5:].split(",") if t.strip()]
                 elif line.startswith("created:"):
                     created = line[8:].strip()
+                elif line.startswith("source:"):
+                    source = line[7:].strip().lower()
+                elif line.startswith("confidence:"):
+                    try:
+                        confidence = max(0.0, min(1.0, float(line[11:].strip())))
+                    except ValueError:
+                        confidence = None
         else:
             body, tags, created = raw.strip(), [], ""
-        return LearnedNote(p, body, tags, created)
+        return LearnedNote(p, body, tags, created, source=source, confidence=confidence)
 
     def _iter_notes(self):
         if not self.learned_dir.is_dir():
@@ -155,6 +231,11 @@ class MemoryStore:
                 continue
             note = self._parse_note(Path(entry.path), raw)
             note.mtime = mtime
+            if not note.created:
+                # 30.F3 wants a timestamp on every fact, and a note written without frontmatter
+                # has none. The file's own mtime is the only honest answer available, and it is
+                # better than the empty string `salient_notes` was already having to guess around.
+                note.created = _iso(mtime)
             self._note_cache[key] = (mtime, note)
             yield note
         # Forget files that have since been deleted, so the cache can't grow unbounded or serve ghosts.
