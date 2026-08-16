@@ -61,6 +61,11 @@ DECLARED = {
                                   "delivered to a log file is not a question"),
     "_fire_pattern_scan": (False, "internal learning; the facts surface when they're used"),
     "_fire_backup":       (False, "housekeeping — announcing a successful zip is noise"),
+    # Reports only when it FAILS, which is the honest reading of J2.8 for a check rather than an
+    # action. A daily "your backups still restore" is noise that trains the owner to skim past the
+    # one morning it says the opposite; a failed restore drill means the archives are not
+    # trustworthy, and that he must hear. `must_report` tracks the silent-success path, so False.
+    "_fire_restore_drill": (False, "silent on success by design; it speaks up when a restore fails"),
 }
 
 

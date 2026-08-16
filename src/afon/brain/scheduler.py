@@ -12,12 +12,14 @@ Triggers supported by ``add_reminder``: a one-shot delay (``in_minutes``), an ab
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Callable
 from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from afon.brain.loops import ticks
 from afon.config import settings
 
 USER_TZ = ZoneInfo(settings.user_tz)
@@ -63,6 +65,7 @@ async def _emit_proactive(msg: str, urgency: float, title: str) -> None:
         pass
 
 
+@ticks("daily-task-briefing")
 async def _fire_briefing() -> None:
     """Top-level job target (importable for the SQLite jobstore): the daily consolidated catch-up.
 
@@ -87,6 +90,7 @@ async def _fire_briefing() -> None:
     await _emit_proactive(msg, 0.6, "Afon — today")
 
 
+@ticks("daily-backlog")
 async def _fire_backlog() -> None:
     """Top-level job target: the daily autonomous backlog pass (Phase 3.1).
 
@@ -117,6 +121,7 @@ async def _fire_backlog() -> None:
     await _emit_proactive(msg, 0.55, "Afon — backlog")
 
 
+@ticks("daily-objectives")
 async def _fire_objectives() -> None:
     """Top-level job target: the daily multi-day OBJECTIVES advance (Phase 4.1).
 
@@ -142,6 +147,7 @@ async def _fire_objectives() -> None:
     await _emit_proactive(msg, 0.55, "Afon — objectives")
 
 
+@ticks("daily-pattern-scan")
 async def _fire_pattern_scan() -> None:
     """T3b: scan the rolling command log for repeating patterns; persist as L1 facts."""
     try:
@@ -154,6 +160,7 @@ async def _fire_pattern_scan() -> None:
         logger.warning(f"daily pattern scan failed: {e}")
 
 
+@ticks("weekly-memory-review")
 async def _fire_weekly_review() -> None:
     """T3c: weekly memory review prompt — drop the last 20 learned facts into the owner's chat
     and ask them to confirm / correct / forget any. Routes through the proactive engine if
@@ -176,6 +183,7 @@ async def _fire_weekly_review() -> None:
         logger.warning(f"weekly memory review failed: {e}")
 
 
+@ticks("daily-memory-backup")
 async def _fire_backup() -> None:
     """Top-level job target: zip Afon's learned facts + journal (L1/L2) into ``backups/`` and keep
     the most recent 14. The memory dir is the one durable store with no other automated backup (the
@@ -199,6 +207,37 @@ async def _fire_backup() -> None:
         logger.info(f"memory backup written ({stamp}); pruned {len(keep)} old archive(s)")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"memory backup failed: {e}")
+
+
+@ticks("daily-restore-drill")
+async def _fire_restore_drill() -> None:
+    """Top-level job target (22.F4): restore the newest backup into a throwaway directory and prove
+    it comes back. Creating an archive proves a zip was written; only a restore proves a backup.
+
+    Runs daily rather than weekly because the backup it checks is daily: a weekly drill would let a
+    broken archive sit undetected for up to six days, and the check itself is a local unzip costing
+    milliseconds. Speaks up ONLY on failure — a drill that reports every success teaches the owner
+    to ignore it, and a silent green is exactly what a working backup should look like."""
+    from afon.protocols.backup import run_restore_drill
+
+    try:
+        res = await asyncio.to_thread(run_restore_drill)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"restore drill could not run: {e}")
+        return
+    if res.get("ok"):
+        logger.info(f"restore drill OK: {res['files']} file(s), {res['bytes']} bytes, {res['ms']}ms")
+        if res.get("stale"):
+            await _emit_proactive(
+                f"Sir, the backups are restoring cleanly but the newest is "
+                f"{int(res['age_s'] // 3600)} hours old — the nightly backup may have stopped.",
+                0.6, "Afon — backup age")
+        return
+    logger.error(f"restore drill FAILED: {res.get('error')}")
+    await _emit_proactive(
+        f"Sir, I could not restore my own backup this morning: {res.get('error')}. "
+        "The archives are not trustworthy until that is fixed.",
+        0.85, "Afon — restore drill failed")
 
 
 async def _fire(message: str, push_phone: bool = True) -> None:
@@ -362,6 +401,19 @@ class Scheduler:
                       misfire_grace_time=3600, coalesce=True, replace_existing=True)
         logger.info(f"daily memory backup scheduled for {hh:02d}:{mm:02d}")
         return "daily-memory-backup"
+
+    def schedule_restore_drill(self, hhmm: str = "05:00") -> str | None:
+        """22.F4: daily restore drill, after the 03:30 backup and the 04:00/04:30 memory passes, so
+        it verifies the archive that today's run actually produced."""
+        from apscheduler.triggers.cron import CronTrigger
+
+        hh, mm = _parse_hhmm(hhmm)
+        sched = self._ensure()
+        sched.add_job(_fire_restore_drill, trigger=CronTrigger(hour=hh, minute=mm, timezone=USER_TZ),
+                      id="daily-restore-drill", name="daily restore drill",
+                      misfire_grace_time=3600, coalesce=True, replace_existing=True)
+        logger.info(f"restore drill scheduled for {hh:02d}:{mm:02d}")
+        return "daily-restore-drill"
 
     def schedule_pattern_scan(self, hhmm: str = "04:30") -> str | None:
         """T3b: daily pattern-detection pass — scans the rolling command log and writes new patterns

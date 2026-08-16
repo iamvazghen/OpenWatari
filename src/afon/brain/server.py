@@ -574,8 +574,9 @@ async def serve(host: str | None = None, port: int | None = None) -> None:
     try:
         SCHEDULER.schedule_pattern_scan()
         SCHEDULER.schedule_weekly_review()
+        SCHEDULER.schedule_restore_drill()   # 22.F4 — an untested backup is a rumour
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"pattern scan / weekly review not scheduled: {e}")
+        logger.warning(f"pattern scan / weekly review / restore drill not scheduled: {e}")
 
     # T10 — reliability health probe every 4h (silent on green, ntfy on red).
     try:

@@ -1701,7 +1701,7 @@ the cost is known rather than discovered.
       *gate:* `test_backup_restore.py`, `test_protocol_drills.py`
 - [x] 22.F2 Daily freshness restarts on both hosts. *gate:* `test_uptime_watch.py`
 - [x] 22.F3 Self-repair paths for known failure shapes. *gate:* `test_self_repair.py`
-- [ ] 22.F4 Backup **restore** is verified on a schedule, not just backup creation — an untested
+- [x] 22.F4 Backup **restore** is verified on a schedule, not just backup creation — an untested
       backup is a rumour. *gate:* `test_backup_restore.py` extended [scheduled restore drill]
 
 **Raise**
@@ -1757,9 +1757,10 @@ retrying blindly · degraded mode answers time, reminders and status with no LLM
 - [x] 23.F2 Messages arriving while down are held and forwarded. *gate:* `test_error_spool.py`
 - [x] 23.F3 **The park switch honours itself on every host and role** — no autostart while
       `~/.afon/MAINTENANCE` exists. *gate:* `test_maintenance_lock.py`
-- [ ] 23.F4 Unpark is as deliberate as park: a documented checklist that verifies each floor before
-      the lock is removed. *gate:* `scripts/preflight.sh` gains an unpark mode that refuses on any
-      unmet Wave-0 floor.
+- [x] 23.F4 Unpark is as deliberate as park: a documented checklist that verifies each floor before
+      the lock is removed — `scripts/preflight.sh --unpark`, which reads the Wave-0 floors from this
+      document rather than a copy, refuses on any unmet one, and never removes the lock itself.
+      *gate:* `test_unpark_gate.py`
 
 **Raise**
 - [ ] 23.R1 Reachability monitoring from outside the VPS, so "up" is not self-reported.
@@ -2210,7 +2211,7 @@ the last probe rather than re-probing per poll.
 - [x] 31.F2 Typed error taxonomy with turn correlation. *gate:* `test_error_taxonomy.py`,
       `test_error_tracking.py`
 - [x] 31.F3 Tool-level reliability learned from the audit trail. *gate:* `test_tool_reliability.py`
-- [ ] 31.F4 Every background loop appears in the HUD with its last tick, its period and its budget —
+- [x] 31.F4 Every background loop appears in the HUD with its last tick, its period and its budget —
       "no silent work". *gate:* new `test_loop_registry.py`
 
 **Raise**
@@ -2501,7 +2502,7 @@ off the answer path.
       is honestly unsure. *gate:* `test_face_second_factor.py`
 - [x] 36.F4 A park switch that halts every role on every host.
       *gate:* `test_maintenance_lock.py`
-- [ ] 36.F5 Secrets have exactly one home (password store), and the repo proves it.
+- [x] 36.F5 Secrets have exactly one home (password store), and the repo proves it.
       *gate:* `check_public_clean.py` extended.
 
 **Raise**
@@ -3303,8 +3304,8 @@ green, `E` = elite green.
 | S19 | Composio / MCP | structured badly | 2/3 | 0/3 | 0/1 |
 | S20 | External APIs | complete for now | 2/3 | 0/3 | 0/1 |
 | S21 | Personal Time Mgmt | structured badly | 0/3 | 0/3 | 0/1 |
-| S22 | Recoverability | complete for now | 3/4 | 0/3 | 0/1 |
-| S23 | 24/7 Reachability | complete, parked | 3/4 | 0/3 | 0/1 |
+| S22 | Recoverability | complete for now | 4/4 | 0/3 | 0/1 |
+| S23 | 24/7 Reachability | complete, parked | 4/4 | 0/3 | 0/1 |
 | S24 | Knowledge & World Model | structured badly | 0/2 | 0/3 | 0/1 |
 | S25 | Personality | complete for now | 2/3 | 0/3 | 0/1 |
 | S26 | Multi-Modal Perception | structured badly | 1/3 | 0/3 | 0/1 |
@@ -3312,12 +3313,12 @@ green, `E` = elite green.
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
 | S30 | Persistent Memory | structured badly | 0/3 | 0/4 | 0/1 |
-| S31 | Self-Monitoring | complete for now | 3/4 | 0/4 | 0/1 |
+| S31 | Self-Monitoring | complete for now | 4/4 | 0/4 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
 | S35 | Crisis Response | half-built | 1/3 | 0/3 | 0/1 |
-| S36 | Security & Access | complete for now | 4/5 | 0/3 | 0/1 |
+| S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
 | S37 | Privacy & Governance | half-built | 0/3 | 0/3 | 0/1 |
 | S38 | Communication Hub | structured badly | 1/3 | 0/3 | 0/1 |
 | S39 | Multi-Agent Delegation | thin | 1/3 | 0/3 | 0/1 |
@@ -3333,8 +3334,9 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals at the moment of writing: 66 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite
-tasks — 66 of 360.** The floors are the furthest along because the last three weeks of work were
+**Totals: 70 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 70 of 360.**
+Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
+drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
 derived from the checkboxes in the sections above and must be re-derived, not edited by hand.
 

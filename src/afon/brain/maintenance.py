@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
+from afon.brain.loops import ticks
 from afon.brain.memory import STORE, MemoryStore, _terms
 
 
@@ -112,6 +113,7 @@ def rotate_journals(store: MemoryStore | None = None, keep_days: int = 35) -> di
     return {"archived": archived}
 
 
+@ticks("memory-maintenance")
 async def run_maintenance() -> str:
     """Daily job target (importable for the scheduler's jobstore). Runs all hygiene passes."""
     c = compact_learned()

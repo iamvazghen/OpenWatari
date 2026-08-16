@@ -98,6 +98,10 @@ def hud_snapshot(
         "performance": _safe(_performance, {}),
         "health": _safe(_health, []),
         "reliability": _safe(_reliability, []),
+        # 31.F4 "no silent work": every background loop, with its last tick, its period and its
+        # budget. Read from the DECLARED table, so a loop that never started is a row saying
+        # never_ran rather than an absence nobody can notice.
+        "loops": _safe(_loops, []),
     }
 
 
@@ -140,6 +144,14 @@ def _health() -> list[dict]:
     except Exception:  # noqa: BLE001 — no probe yet is fine, report nothing rather than crash
         pass
     return out
+
+
+def _loops() -> list[dict]:
+    """Every declared background loop. Not a projection of what is running — a projection of what
+    is *supposed* to be running, which is the only version that can report a loop that stopped."""
+    from afon.brain.loops import snapshot
+
+    return snapshot()
 
 
 def _reliability() -> list[dict]:

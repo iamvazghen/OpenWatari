@@ -159,7 +159,10 @@ def main() -> None:
     check(not drift, "every row matches its section's real counts", "\n        ".join(drift[:8]))
 
     tot = [sum(counts[s][t][i] for s in counts) for t in ("F", "R", "E") for i in (0, 1)]
-    stated = re.search(r"\*\*Totals at the moment of writing: (\d+) of (\d+) floor tasks green, "
+    # "at the moment of writing" was in this pattern until the totals first MOVED, which is the one
+    # event it was guaranteed to see. The counts are meant to be re-derived, so the phrase anchoring
+    # them cannot be one that only makes sense before anything is finished.
+    stated = re.search(r"\*\*Totals(?:[^:]*)?: (\d+) of (\d+) floor tasks green, "
                        r"(\d+) of (\d+) raise tasks, (\d+) of (\d+) elite", body)
     check(stated is not None, "the totals line is present and parseable")
     if stated:

@@ -600,16 +600,20 @@ class Settings(BaseSettings):
     browser_nav_timeout_ms: int = 30000
 
     # --- Protocols (password-gated executable routines, FRIDAY/AFON-style) -------------
-    # Named programs Afon runs ONLY when given the matching password. CHANGE these defaults.
+    # Named programs Afon runs ONLY when given the matching password. Set each in .env (or the
+    # password store) — UNSET MEANS DISABLED, deliberately. These carried real defaults until
+    # 36.F5: a password published in a public repo is the password of every install that never
+    # changed it, and "ragnarok valhalla" restarts the laptop. A secret with a fallback in tracked
+    # source has two homes, and the weaker one is the one an attacker uses.
     protocols_enabled: bool = True
-    protocol_goodnight_password: str = "morpheus"   # stops Afon
-    protocol_phoenix_password: str = "icarus"       # restarts Afon
-    protocol_ragnarok_password: str = "valhalla"    # restarts the laptop
-    protocol_backup_password: str = "atlas"         # backs up Afon memory
-    protocol_ping_password: str = "hermes"          # sends a phone push test
-    protocol_diagnostics_password: str = "ani"      # writes a local diagnostics report
-    protocol_auditpack_password: str = "artashat"   # archives audit logs
-    protocol_checkpoint_password: str = "vagharshapat"  # archives key non-secret context
+    protocol_goodnight_password: str | None = None      # stops Afon
+    protocol_phoenix_password: str | None = None        # restarts Afon
+    protocol_ragnarok_password: str | None = None       # restarts the laptop
+    protocol_backup_password: str | None = None         # backs up Afon memory
+    protocol_ping_password: str | None = None           # sends a phone push test
+    protocol_diagnostics_password: str | None = None    # writes a local diagnostics report
+    protocol_auditpack_password: str | None = None      # archives audit logs
+    protocol_checkpoint_password: str | None = None     # archives key non-secret context
 
     # --- Phase 4: proactivity & notifications -------------------------------------------
     scheduler_db_path: str | None = None          # default: <repo>/afon_jobs.sqlite

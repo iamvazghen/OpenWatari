@@ -257,8 +257,20 @@ def run_protocol(name: str, password: str, drill: bool = False) -> ProtocolResul
     proto = reg[name]
     if not password:
         return ProtocolResult(False, f"Protocol {name} needs the password, sir.")
+    # Fail CLOSED when no password is configured (36.F5). These defaults used to ship in config.py
+    # as real words — "valhalla" restarts the laptop — which meant the password for every install
+    # that never changed them was published in a public repo. An unset password now makes the
+    # protocol unavailable rather than universally known: a secret with a fallback in tracked source
+    # has two homes, and the weaker one wins.
+    configured = str(proto["password"] or "").strip()
+    if not configured:
+        logger.warning(f"protocol '{name}' refused: no password configured")
+        return ProtocolResult(
+            False,
+            f"Protocol {name} has no password set, sir, so I've disabled it. "
+            f"Set protocol_{name}_password to enable it.")
     # Constant-time compare so a wrong guess leaks no timing.
-    if not hmac.compare_digest(str(password).strip(), str(proto["password"])):
+    if not hmac.compare_digest(str(password).strip(), configured):
         logger.warning(f"protocol '{name}' refused: bad password")
         return ProtocolResult(False, f"That password is incorrect, sir. Protocol {name} was not run.")
 

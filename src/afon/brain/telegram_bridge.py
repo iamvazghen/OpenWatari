@@ -18,6 +18,7 @@ from typing import Awaitable, Callable
 import httpx
 from loguru import logger
 
+from afon.brain.loops import tick
 from afon.config import settings
 
 Responder = Callable[[str], Awaitable[str]]
@@ -148,7 +149,12 @@ class TelegramBridge:
                         logger.info(f"telegram in: {text!r}")
                     await self._api("sendChatAction", chat_id=chat_id, action="typing")
                     try:
-                        reply = await self._respond(text)
+                        # The listener's "tick" is one inbound message answered — a full agent turn,
+                        # which is what its 120s budget is sized for. Polling getUpdates is not a
+                        # tick: it returns every 30s with nothing, and counting that would make an
+                        # idle bridge look busy.
+                        with tick("telegram-bridge"):
+                            reply = await self._respond(text)
                     except Exception:  # noqa: BLE001
                         logger.exception("telegram bridge: respond failed")
                         reply = "Sorry sir, I hit an error handling that."

@@ -23,6 +23,15 @@ def check(cond, label):
 # Guarantee protocols are enabled for the drill regardless of ambient config.
 settings.protocols_enabled = True
 
+# Set the passwords this test drills with, rather than inheriting them (36.F5). They used to ship as
+# real defaults in config.py — "valhalla" restarts the laptop — so this file passed anywhere without
+# noticing it depended on them. With the defaults removed, inheriting means passing only on a machine
+# whose .env happens to define them, which is not a hermetic test; it is a test that agrees with
+# whatever is lying around.
+for _p in ("goodnight", "phoenix", "ragnarok", "backup", "ping", "diagnostics",
+           "auditpack", "checkpoint"):
+    setattr(settings, f"protocol_{_p}_password", f"test-{_p}-pw")
+
 # Record every Popen so we can prove drills DON'T launch and live runs DO reach the launch path.
 # (Return a dummy so the engine's own try/except sees a normal launch, not an error.)
 _launched = []
@@ -52,6 +61,23 @@ async def main():
     # --- 2) the password gate still holds under drill (wrong password refused, nothing runs) --
     r_bad = run_protocol(names[0], "definitely-wrong-password", drill=True)
     check((not r_bad.ok) and "incorrect" in r_bad.message, "a wrong password is refused even in drill mode")
+
+    # --- 2b) an UNCONFIGURED password disables the protocol; it never falls open (36.F5) ------
+    # The dangerous shape is not a wrong guess, it is no configuration at all: before 36.F5 an
+    # install that set nothing ran on words published in a public repo. Unset must mean unavailable.
+    _saved = _password_for(names[0])
+    try:
+        for _blank in (None, "", "   "):
+            setattr(settings, f"protocol_{names[0]}_password", _blank)
+            r_off = run_protocol(names[0], "valhalla", drill=True)
+            check((not r_off.ok) and "no password" in r_off.message.lower(),
+                  f"an unconfigured protocol refuses ({_blank!r}) instead of accepting a guess")
+        setattr(settings, f"protocol_{names[0]}_password", None)
+        check(not run_protocol(names[0], "", drill=True).ok,
+              "and an empty password against an unset one is still a refusal, not a match")
+    finally:
+        setattr(settings, f"protocol_{names[0]}_password", _saved)
+    check(_launched == [], "nothing launched while probing the unconfigured path")
 
     # --- 3) an unknown protocol is reported, not launched -----------------------------------
     r_unk = run_protocol("no-such-protocol", "x", drill=True)

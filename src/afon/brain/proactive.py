@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from afon.brain import loops
 from afon.config import settings
 
 USER_TZ = ZoneInfo(settings.user_tz)
@@ -599,6 +600,7 @@ class ProactiveEngine:
     async def run(self) -> None:
         """Tick forever on the configured interval. Cancelled on shutdown."""
         interval = max(15, settings.proactive_tick_seconds)
+        loops.set_period("proactive-tick", interval)
         logger.info(
             f"proactive engine on: every {interval}s, budget {self._budget}/day, "
             f"quiet {self._quiet}, threshold {self._threshold}"
@@ -607,7 +609,8 @@ class ProactiveEngine:
             while True:
                 await asyncio.sleep(interval)
                 try:
-                    await self.maybe_interject()
+                    with loops.tick("proactive-tick"):
+                        await self.maybe_interject()
                 except Exception:  # noqa: BLE001
                     logger.exception("proactive tick error (continuing)")
         except asyncio.CancelledError:

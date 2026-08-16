@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from afon.brain import loops
 from afon.config import settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -316,6 +317,7 @@ class Presence:
         """Sample the laptop's foreground window on an interval, forever. Cancelled on shutdown.
         No laptop connected / tracking paused -> the tick is a harmless no-op."""
         interval = max(10, settings.presence_poll_seconds)
+        loops.set_period("presence-poller", interval)
         logger.info(f"presence poller on: every {interval}s (tracking "
                     f"{'ON' if self._enabled else 'PAUSED'})")
         ticks = 0
@@ -328,7 +330,10 @@ class Presence:
                 if not self._enabled:
                     continue
                 try:
-                    await self._poll_once()
+                    # Inside the try: a poll that raises is still a tick that happened, and the
+                    # registry records the error rather than reporting a loop that went quiet.
+                    with loops.tick("presence-poller"):
+                        await self._poll_once()
                 except Exception as e:  # noqa: BLE001 — never break the loop
                     logger.debug(f"presence poll skipped: {type(e).__name__}: {e}")
         except asyncio.CancelledError:

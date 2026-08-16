@@ -19,6 +19,13 @@
 #
 #   bash scripts/preflight.sh            # local checks only
 #   bash scripts/preflight.sh --remote   # also checks the VPS (needs AFON_VPS)
+#   bash scripts/preflight.sh --unpark   # ...plus the Wave-0 floor checklist (SYSTEMS.md 23.F4)
+#
+# --unpark answers a different question from the rest of this script. The invariants above ask
+# "would a deploy work"; --unpark asks "is this deployment allowed back into production at all".
+# Parking is one command, so leaving the park must not be: it refuses on any unmet Wave-0 floor,
+# reads what those floors ARE from docs/SYSTEMS.md rather than from a copy that goes stale here,
+# and never removes the lock itself - on a full pass it prints the command and a human still acts.
 #
 # Exit 0 = every invariant holds. Exit 1 = at least one does not (each is named).
 
@@ -26,7 +33,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 REMOTE_CHECKS=0
-[[ "${1:-}" == "--remote" ]] && REMOTE_CHECKS=1
+UNPARK_CHECKS=0
+for arg in "$@"; do
+  [[ "$arg" == "--remote" ]] && REMOTE_CHECKS=1
+  [[ "$arg" == "--unpark" ]] && UNPARK_CHECKS=1
+done
 
 if [[ -f scripts/deploy_vps.env ]]; then
   # shellcheck disable=SC1091
@@ -279,6 +290,18 @@ if [[ "$REMOTE_CHECKS" -eq 1 ]]; then
   fi
 else
   echo "  skip  remote checks (pass --remote to include them)"
+fi
+
+# -- 5. the unpark checklist (23.F4) --------------------------------------
+# Runs LAST and deliberately: it executes real gate suites, so it is the slow, decisive part. The
+# checks above are invariants about the machines; this one is about whether the work is done.
+if [[ "$UNPARK_CHECKS" -eq 1 ]]; then
+  echo
+  if "$PYBIN" scripts/unpark_check.py; then
+    pass "every Wave-0 floor is met - unpark is defensible"
+  else
+    fail "unpark REFUSED: at least one Wave-0 floor is unmet"          "the park switch stays on; see the list above"
+  fi
 fi
 
 echo

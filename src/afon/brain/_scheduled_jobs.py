@@ -3,7 +3,10 @@ import asyncio
 
 from loguru import logger
 
+from afon.brain.loops import ticks
 
+
+@ticks("reliability-health-probe")
 async def _fire_reliability_probe() -> None:
     """Probe critical organs, self-repair what's fixable, and page the owner on a SUSTAINED
     outage (Phase 0.1). Never raises into the loop."""
@@ -21,6 +24,7 @@ async def _fire_reliability_probe() -> None:
         logger.warning(f"reliability probe failed: {type(e).__name__}: {e}")
 
 
+@ticks("composio-catalog-refresh")
 async def _fire_composio_catalog_refresh() -> None:
     """T12 — refresh the cached Composio catalog so the system prompt picks up new tools
     overnight (before the morning briefing, so the next session sees the full list)."""
