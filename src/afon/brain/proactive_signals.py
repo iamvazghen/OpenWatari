@@ -19,6 +19,7 @@ from pathlib import Path
 from loguru import logger
 
 from afon.brain.proactive import Signal
+from afon.shared.paths import state_dir
 
 
 def _swallowed(source: str, e: BaseException) -> None:
@@ -34,7 +35,7 @@ def _swallowed(source: str, e: BaseException) -> None:
         pass
 
 
-_PATTERNS_LOG = Path.home() / ".afon" / "patterns.jsonl"
+_PATTERNS_LOG = state_dir() / "patterns.jsonl"
 _VAULT_DIR = Path.home() / ".openclaw" / "obsidian-vault"
 
 
@@ -178,7 +179,7 @@ def wellbeing_signals(now: datetime | None = None) -> list[Signal]:
         return []
 
 
-_ROUTINES_PATH = Path.home() / ".afon" / "routines.json"
+_ROUTINES_PATH = state_dir() / "routines.json"
 
 # Owner's timing rule (2026-07-28): "everything has to be purposeful — stretching has to be done
 # before I go to train". Two kinds of entry, owner-editable at ~/.afon/routines.json:
@@ -286,7 +287,7 @@ def routine_planning_signal(now: datetime | None = None) -> list[Signal]:
         return []
 
 
-_RESURFACED_PATH = Path.home() / ".afon" / "resurfaced_memories.json"
+_RESURFACED_PATH = state_dir() / "resurfaced_memories.json"
 
 
 def memory_resurface_signals(now: datetime | None = None) -> list[Signal]:

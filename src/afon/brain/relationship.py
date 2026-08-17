@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
 def _now() -> datetime:
@@ -37,7 +38,7 @@ class RelationshipMemory:
     _AFFECT_CAP = 60
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self._path = Path(path) if path else Path.home() / ".afon" / "relationship.json"
+        self._path = Path(path) if path else state_dir() / "relationship.json"
         self._r = Relationship()
         self._load()
 

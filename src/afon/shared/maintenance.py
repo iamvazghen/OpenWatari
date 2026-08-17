@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from afon.shared.paths import state_dir
 
-LOCK = Path.home() / ".afon" / "MAINTENANCE"
+LOCK = state_dir() / "MAINTENANCE"
 
 
 def parked() -> str | None:

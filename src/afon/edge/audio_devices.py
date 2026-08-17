@@ -24,6 +24,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from afon.shared.paths import state_dir
 
 
 def _com_init() -> None:
@@ -69,7 +70,7 @@ OUTPUT_ALIASES: dict[str, tuple[str, ...]] = {
 
 # Where the chosen output preference is persisted so a (re)started worker honors the
 # last voice command. Small JSON, user-home scoped.
-PREF_PATH = Path.home() / ".afon" / "audio_pref.json"
+PREF_PATH = state_dir() / "audio_pref.json"
 
 
 @dataclass(frozen=True)

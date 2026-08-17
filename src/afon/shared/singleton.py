@@ -36,8 +36,9 @@ import time
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
-_RUN_DIR = Path.home() / ".afon" / "run"
+_RUN_DIR = state_dir() / "run"
 
 # How a role is recognised in a foreign process's command line.
 #

@@ -19,9 +19,10 @@ from pathlib import Path
 from loguru import logger
 
 from afon.brain.tools.base import tool_error
+from afon.shared.paths import state_dir
 
 
-_DEFAULT_SHOT = Path.home() / ".afon" / "screenshots" / "latest.jpg"
+_DEFAULT_SHOT = state_dir() / "screenshots" / "latest.jpg"
 
 
 async def screenshot_screen(args: dict) -> str:

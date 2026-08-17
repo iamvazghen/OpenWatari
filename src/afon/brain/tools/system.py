@@ -21,6 +21,7 @@ from pathlib import Path
 
 from afon.brain.tools.base import clip, tool_error
 from afon.config import settings
+from afon.shared.paths import state_dir
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -469,7 +470,7 @@ async def _activity_snapshot_local(args: dict) -> str:
         import json as _json
         import time as _time
         from pathlib import Path as _Path
-        rc = _json.loads((_Path.home() / ".afon" / "room_context.json").read_text(encoding="utf-8"))
+        rc = _json.loads((state_dir() / "room_context.json").read_text(encoding="utf-8"))
         if _time.time() - float(rc.get("ts", 0)) < 600:
             d = _json.loads(snap or "{}")
             d["room"] = {"reason": rc.get("reason"), "verdict": rc.get("verdict"),

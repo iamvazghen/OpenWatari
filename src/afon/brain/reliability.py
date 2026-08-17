@@ -21,12 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
-_last_probe_path = Path.home() / ".afon" / "health_probe.json"
+_last_probe_path = state_dir() / "health_probe.json"
 # Tracks consecutive-red counts + whether we've already alerted per component, so a single
 # transient blip never pages the owner and a sustained outage pages exactly once (Phase 0.1).
-_escalation_path = Path.home() / ".afon" / "health_escalation.json"
+_escalation_path = state_dir() / "health_escalation.json"
 
 
 async def safe_call(coro, *, label: str = "that") -> str:

@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from afon.brain.modes import MODES
 from afon.brain.tools.base import tool_error
 from afon.config import settings  # noqa: F401 - bench monkeypatches this module attribute.
+from afon.shared.paths import state_dir
 
 USER_TZ = ZoneInfo(settings.user_tz)
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -140,7 +141,7 @@ async def self_health(args: dict) -> str:
 # the morning planning prompt only asks about what's still open.
 import json as _json
 
-_DAY_PLAN = Path.home() / ".afon" / "day_plan.json"
+_DAY_PLAN = state_dir() / "day_plan.json"
 
 
 def _load_routines() -> list[dict]:

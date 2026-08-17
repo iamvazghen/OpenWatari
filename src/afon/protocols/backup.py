@@ -16,6 +16,7 @@ import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from afon.shared.paths import state_dir
 
 
 def make_backup(memory: Path, backups: Path) -> Path:
@@ -38,7 +39,7 @@ def restore_backup(archive: Path, memory: Path, force: bool = False) -> None:
 
 #: Where the drill records its last result, so a surface can read it without re-running a restore.
 #: Same shape and same home as reliability's last probe — one convention, not two.
-DRILL_PATH = Path.home() / ".afon" / "restore_drill.json"
+DRILL_PATH = state_dir() / "restore_drill.json"
 
 #: A backup older than this is stale on its own terms (S22's "backup age ≤24h at all times").
 MAX_BACKUP_AGE_S = 24 * 3600

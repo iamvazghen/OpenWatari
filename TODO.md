@@ -1290,13 +1290,24 @@ since the plan was written — the plan's own later addendum supersedes parts of
       ⚠️ The 61 utterances are the I1 problem, live — see the evidence recorded under I1.
 
 ### I6 · Memory — one brain, not two
-- [ ] **One-time reconciliation, by hand and verified**: export the laptop's TaskQueue + embeddings and
-      merge into the VPS store, deduping by content hash; the laptop then becomes cache-only. Measured
-      divergence at the time of the plan: laptop 105 tasks / 1,219 embeddings / 297 presence rows vs VPS
-      6 / 874 / 5,948 — the edge had been running against a local brain for weeks (session-pinning bug,
-      since fixed).
-- [ ] Add a **weekly drift check** to the fleet compliance audit so the two stores cannot silently
-      diverge again.
+- [x] **DONE 2026-08-17 — SYSTEMS.md 30.F1, `bench/test_memory_single_origin.py` (50/50, twelve
+      plants).** The reconciliation was the smaller half. The cause was that `afon_*.sqlite`,
+      `memory/learned` and `memory/journal` resolved against the *repo root* — wherever the code was
+      unpacked — so the deploy gave the brain host a second set under the same names and neither host
+      could tell. State now lives under one root per host (`AFON_STATE_DIR`, default `~/.afon`),
+      resolved in `shared/paths.py` alone; the repo holds no state, so a deploy cannot carry memory.
+      **Reconciled, both hosts parked**: learned facts and journals **unioned** (a fact only one host
+      was told is the only copy, so "newest wins" would delete it) — VPS 559 + laptop 162, 3 in
+      common, now **718 facts / 48–49 journal days on both**, residual merge zero in both directions.
+      Derived stores: brain host wins, and measured before deciding — the laptop's task store held
+      **199 rows, every one `failed`** (bench residue) against the VPS's single `open` task, so there
+      was nothing to merge, only something to stop trusting.
+      Backups: `backups/pre-30F1/` locally, `~/afon-memory-pre-30F1.tgz` on the host.
+      Decision recorded at `70-Decisions/2026-08-17-afon-memory-has-one-origin-per-host.md`.
+- [x] **DONE 2026-08-17 — better than weekly.** `second_origins()` runs at every brain start and in
+      `scripts/preflight.sh`, and `migrate_repo_state()` folds a leftover in automatically (it never
+      overwrites, so the worst case is a report naming both copies). A weekly audit would have found
+      the split up to seven days late; this cannot start.
 
 ### I7 · MCU-AFON demeanour
 - [ ] **Brevity pass on tool prose**: answers lead with the outcome, one supporting clause, no filler.

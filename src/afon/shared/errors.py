@@ -43,9 +43,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 # --- where it lands ---------------------------------------------------------------------------
-_DIR = Path.home() / ".afon"
+_DIR = state_dir()
 JOURNAL = _DIR / "errors.jsonl"
 # Successful operations are journalled too (owner's call), which is far more volume than failures
 # alone — so the cap is generous. The oldest half is dropped on rotate, keeping tail latency flat.

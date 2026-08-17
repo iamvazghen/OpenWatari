@@ -622,11 +622,12 @@ async def serve(host: str | None = None, port: int | None = None) -> None:
 
         from afon.brain.proactive import ProactiveEngine, default_signal_sources
 
-        # Persist suppression + budget so a restart doesn't re-fire nudges (default: next to tasks DB).
-        state_path = settings.proactive_state_path or (
-            str(Path(settings.tasks_db_path).parent / "proactive_state.json")
-            if settings.tasks_db_path
-            else str(Path(__file__).resolve().parents[3] / "proactive_state.json"))
+        # Persist suppression + budget so a restart doesn't re-fire nudges. In the state root with
+        # everything else Afon writes (30.F1) — it used to be derived from the tasks DB's parent,
+        # so moving the task queue silently moved this too.
+        from afon.shared.paths import state_dir
+
+        state_path = settings.proactive_state_path or str(state_dir() / "proactive_state.json")
         engine = ProactiveEngine(
             emit=server.proactive_emit,
             sources=default_signal_sources(),
@@ -890,6 +891,21 @@ def main() -> None:
     from afon.shared.maintenance import halt_if_parked
 
     halt_if_parked("brain")   # systemd Restart=always cannot be argued with — see maintenance.py
+
+    # 30.F1: before anything opens a store, make sure there is only one of each. A deploy untars
+    # the source tree into the brain host's own directory, so state resolved against the repo root
+    # forked per host and neither host could tell. This moves any such leftover into the state root
+    # — it never overwrites, so the worst case is a report that two copies exist and a human runs
+    # scripts/merge_memory.py. Running it here rather than expecting an operator to ssh in is what
+    # makes a redeploy self-healing.
+    from afon.shared.paths import migrate_repo_state, second_origins
+
+    for line in migrate_repo_state():
+        logger.warning(f"state migration: {line}")
+    for stale in second_origins():
+        logger.error(f"TWO MEMORIES: {stale} still holds state — merge it with "
+                     f"scripts/merge_memory.py, or this host answers from whichever it opens first")
+
     host = settings.brain_host
     try:
         asyncio.run(serve(host=host))

@@ -266,11 +266,9 @@ async def _fire(message: str, push_phone: bool = True) -> None:
 
 
 def _db_url() -> str:
-    from pathlib import Path
+    from afon.shared.paths import store_path
 
-    path = settings.scheduler_db_path or str(
-        Path(__file__).resolve().parents[3] / "afon_jobs.sqlite"
-    )
+    path = settings.scheduler_db_path or str(store_path("jobs"))
     return f"sqlite:///{path}"
 
 

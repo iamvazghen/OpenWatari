@@ -25,8 +25,11 @@ internal Python package is named `afon` for stability.)
 - The following are explicitly excluded from git (see [`.gitignore`](.gitignore)):
   `.env` and any `.env.*` (except the example), `*.session` / `*.session-journal` (Telegram/Telethon
   logins), `voiceprint.json` (your biometric template), `afon_jobs.sqlite`, `audit/`, `backups/`,
-  `.afon-browser/` (the persistent browser profile, which holds login cookies), and Afon's
-  private memory (`memory/learned/`, `memory/journal/`).
+  `.afon-browser/` (the persistent browser profile, which holds login cookies).
+- **Afon's learned memory is not in the repository at all.** Everything he writes about you — the
+  learned facts, the daily journal, every sqlite store, the relationship model — lives under
+  `AFON_STATE_DIR` (default `~/.afon`), per host, outside the tree. There is nothing to
+  accidentally commit and nothing for a deploy to copy to another machine (SYSTEMS.md 30.F1).
 - The **audit log redacts secrets two ways**: (1) any tool argument whose *key* looks like a
   password / token / secret / api_key / auth / credential is written as `***redacted***`; and (2) a
   value-level scrub removes any actual secret *value* from `.env` (API keys, tokens, protocol
@@ -194,9 +197,9 @@ issue. Include reproduction steps and the affected file/function.
 
 - **Run `afon-setup`** (or set them by hand): it generates the brain auth token and the eight
   protocol passwords so you never ship on defaults.
-- **Keep your repository private** if it carries personal data — `memory/*.md`, `memory/learned/`,
-  `memory/journal/`, and `personality/afon.md` describe a real person and their accounts. A clean
-  framework fork (no personal `memory/`) can be public; a configured instance should not be.
+- **Keep your repository private** if it carries personal data — `memory/*.md` and
+  `personality/afon.md` describe a real person and their accounts. A clean framework fork (no
+  personal `memory/`) can be public; a configured instance should not be.
 - **Rotate any key ever shared in plaintext** (chat, screenshare, a committed mistake) and use the
   narrowest scope that works (see §1).
 - **Don't expose the brain without the bearer token**, and prefer a private overlay network (§9).

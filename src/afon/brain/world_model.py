@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
 def _now() -> datetime:
@@ -59,7 +60,7 @@ class WorldModel:
     """Durable goals + context. One instance per brain; ``path`` is injectable for tests."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self._path = Path(path) if path else Path.home() / ".afon" / "world_model.json"
+        self._path = Path(path) if path else state_dir() / "world_model.json"
         self._goals: dict[str, Goal] = {}
         self._context: str = ""
         self._events: list[dict] = []   # time-bounded integration events (Phase 2.4)

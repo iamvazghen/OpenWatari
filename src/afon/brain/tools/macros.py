@@ -32,6 +32,7 @@ from pathlib import Path
 from loguru import logger
 
 from afon.brain.tools.base import tool_error
+from afon.shared.paths import state_dir
 
 
 # Where macros live. Override with AFON_MACROS_FILE.
@@ -42,7 +43,7 @@ def _store_path() -> Path:
         override = settings.user_data_dir
     except Exception:
         pass
-    base = Path(override) if override else Path.home() / ".afon"
+    base = Path(override) if override else state_dir()
     return base / "macros.json"
 
 

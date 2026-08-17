@@ -28,12 +28,11 @@ from loguru import logger
 
 from afon.config import settings
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+from afon.shared.paths import state_dir
 
 
 def _state_path() -> Path:
-    base = Path(settings.tasks_db_path).parent if settings.tasks_db_path else _REPO_ROOT
-    return base / "daily_digest_state.json"
+    return state_dir() / "daily_digest_state.json"
 
 
 def _load() -> dict:

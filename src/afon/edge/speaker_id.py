@@ -30,6 +30,7 @@ import numpy as np
 from loguru import logger
 
 from afon.config import settings
+from afon.shared.paths import state_dir
 
 
 #: Where the voiceprint used to live — the repo root. It is biometric data, and biometric data does
@@ -42,7 +43,7 @@ _LEGACY_PROFILE = Path(__file__).resolve().parents[3] / "voiceprint.json"
 def _default_profile_path() -> Path:
     if settings.speaker_profile_path:
         return Path(settings.speaker_profile_path)
-    return Path.home() / ".afon" / "voiceprint.json"
+    return state_dir() / "voiceprint.json"
 
 
 def _migrate_legacy_profile(path: Path) -> None:

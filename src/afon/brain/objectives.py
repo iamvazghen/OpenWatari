@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
 def _now() -> datetime:
@@ -53,7 +54,7 @@ class ObjectiveBook:
     """Durable list of objectives Afon is driving. One per brain; ``path`` injectable for tests."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self._path = Path(path) if path else Path.home() / ".afon" / "objectives.json"
+        self._path = Path(path) if path else state_dir() / "objectives.json"
         self._items: dict[str, Objective] = {}
         self._load()
 

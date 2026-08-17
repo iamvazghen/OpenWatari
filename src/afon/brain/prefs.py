@@ -15,13 +15,16 @@ from pathlib import Path
 from loguru import logger
 
 from afon.config import settings
+from afon.shared.paths import state_dir
 
-_PATH = Path(__file__).resolve().parents[3] / "runtime_prefs.json"
+
+def _path() -> Path:
+    return state_dir() / "runtime_prefs.json"
 
 
 def _load() -> dict:
     try:
-        return json.loads(_PATH.read_text(encoding="utf-8")) if _PATH.is_file() else {}
+        return json.loads(_path().read_text(encoding="utf-8")) if _path().is_file() else {}
     except Exception:  # noqa: BLE001 — a corrupt/locked file must never break a turn
         return {}
 
@@ -37,7 +40,8 @@ def set(key: str, value) -> None:  # noqa: A001 — small, intentional get/set A
     else:
         data[key] = value
     try:
-        _PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        _path().parent.mkdir(parents=True, exist_ok=True)
+        _path().write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.info(f"pref set: {key}={value!r}")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"could not persist pref '{key}': {e}")

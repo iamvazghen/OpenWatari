@@ -232,10 +232,31 @@ def recall_facade() -> None:
     OWNER = "brain/dbconn.py"
 
     print("\n[30.F2] one module opens memory databases")
+    # One narrow exception, stated rather than allowlisted. `shared/paths.py` has to decide whether
+    # a destination sqlite file is EMPTY before the 30.F1 migration is allowed to replace it — an
+    # empty database left by a first boot on the new path would otherwise strand the real data
+    # forever. That is an inspection, not a store access: it must be read-only, and `paths.py`
+    # cannot import `brain/dbconn.py` anyway without importing upward. The condition is checked
+    # below, so this stays a narrower rule instead of a hole.
+    READONLY_PROBE = "shared/paths.py"
+    probes = []
     offenders = []
     for p in sorted(root.rglob("*.py")):
         rel = p.relative_to(root).as_posix()
         if rel == OWNER:
+            continue
+        if rel == READONLY_PROBE:
+            try:
+                tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "connect"
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "sqlite3"):
+                    src = ast.unparse(node)
+                    probes.append((node.lineno, "mode=ro" in src and "uri=True" in src))
             continue
         # Comments and docstrings necessarily name the thing they forbid; parse instead of grep.
         try:
@@ -249,6 +270,10 @@ def recall_facade() -> None:
                     and node.func.value.id == "sqlite3"):
                 offenders.append(f"{rel}:{node.lineno}")
     check(not offenders, f"only {OWNER} calls sqlite3.connect", str(offenders))
+    check(all(ok for _line, ok in probes),
+          f"{READONLY_PROBE}'s emptiness probe stays read-only ({len(probes)} call(s))",
+          f"{[ln for ln, ok in probes if not ok]} — a writable connection there is a second store "
+          f"owner, and it would create the very file it is being asked whether to delete")
 
     stores = ["coaching", "graph", "presence", "semantic", "tasks"]
     routed = [s for s in stores

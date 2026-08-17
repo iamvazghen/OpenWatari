@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 #: A row is COMPLETE only if it carries all of these. Each maps to something 01.F3 names:
 #: intent class, tools considered (count + what they cost), tools fired, prefill tokens,
@@ -76,7 +77,7 @@ _seq = 0
 
 def trace_dir() -> Path:
     """Where rows land. Env-overridable so tests never write into the owner's real history."""
-    return Path(os.environ.get("AFON_TRACE_DIR") or (Path.home() / ".afon" / "traces"))
+    return Path(os.environ.get("AFON_TRACE_DIR") or (state_dir() / "traces"))
 
 
 def _tokens(text: str) -> int:

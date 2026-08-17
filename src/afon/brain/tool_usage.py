@@ -24,12 +24,13 @@ from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 _FLUSH_EVERY_S = 60.0
 
 
 def _default_path() -> Path:
-    return Path.home() / ".afon" / "tool_usage.json"
+    return state_dir() / "tool_usage.json"
 
 
 class ToolUsage:

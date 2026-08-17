@@ -28,11 +28,12 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from afon.edge.speaker_id import SpeakerVerifier
+from afon.shared.paths import state_dir
 
 # Room-awareness policy (owner's ask, 2026-07-28): Afon looks at the camera ONLY when the audio is
 # suspicious — a voice that isn't the owner's, or the owner's voice arriving amid someone else's
 # (overlap) — to understand who's in the room. Never a routine poll: the camera stays off otherwise.
-_ROOM_CONTEXT = Path.home() / ".afon" / "room_context.json"
+_ROOM_CONTEXT = state_dir() / "room_context.json"
 _LOOK_COOLDOWN_S = 180.0    # at most one look per 3 min — a chatty video shouldn't strobe the camera
 _OVERLAP_WINDOW_S = 12.0    # owner accepted this soon after a stranger = multiple voices in the room
 _BORDERLINE_MARGIN = 0.05   # accepts within this of the threshold also earn a face check (the owner's

@@ -27,16 +27,16 @@ from loguru import logger
 
 from afon.brain.dbconn import connect
 from afon.config import settings
+from afon.shared.paths import store_path
 
 Vector = Sequence[float]
 EmbedFn = Callable[[list[str]], list[Vector]]
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _vector_db_path() -> Path:
     return Path(settings.memory_vector_db_path) if settings.memory_vector_db_path \
-        else _REPO_ROOT / "afon_vectors.sqlite"
+        else store_path("vectors")
 
 
 class VectorStore:

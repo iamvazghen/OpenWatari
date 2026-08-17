@@ -22,9 +22,10 @@ from loguru import logger
 from afon.config import settings
 from afon.brain.tools.base import tool_error
 from afon.brain.tools.system import _dispatch  # forward-to-laptop-if-connected, like screenshot
+from afon.shared.paths import state_dir
 
 # Owner face refs live locally (never uploaded). One .npy of LBP histograms captured at enrollment.
-_FACE_DIR = Path.home() / ".afon" / "faces"
+_FACE_DIR = state_dir() / "faces"
 _OWNER_REFS = _FACE_DIR / "owner.npy"
 _MAX_REFS = 80   # newest refs kept across enrollment sessions (append, don't clobber)
 

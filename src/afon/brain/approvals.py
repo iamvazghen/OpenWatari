@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
 def _now() -> datetime:
@@ -61,7 +62,7 @@ class ApprovalQueue:
     """Durable queue of outward actions awaiting the owner's yes/no. ``path`` injectable for tests."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self._path = Path(path) if path else Path.home() / ".afon" / "approvals.json"
+        self._path = Path(path) if path else state_dir() / "approvals.json"
         self._items: dict[str, Approval] = {}
         self._load()
 

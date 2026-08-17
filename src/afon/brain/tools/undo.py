@@ -19,9 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
-_LOG = Path.home() / ".afon" / "recent_actions.json"
+_LOG = state_dir() / "recent_actions.json"
 _MAX = 8
 
 

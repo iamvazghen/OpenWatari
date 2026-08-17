@@ -23,9 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
+from afon.shared.paths import state_dir
 
 
-_CACHE = Path.home() / ".afon" / "composio_catalog.json"
+_CACHE = state_dir() / "composio_catalog.json"
 
 
 # Top apps whose top-actions deserve a full bullet (rest get one-line summaries).

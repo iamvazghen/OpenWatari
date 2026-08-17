@@ -30,12 +30,12 @@ from loguru import logger
 
 from afon.brain.dbconn import connect
 from afon.config import settings
+from afon.shared.paths import store_path
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _db_path() -> Path:
-    return Path(settings.tasks_db_path) if settings.tasks_db_path else _REPO_ROOT / "afon_tasks.sqlite"
+    return Path(settings.tasks_db_path) if settings.tasks_db_path else store_path("tasks")
 
 
 # Priority ordering for the manageable to-do list (higher = more urgent = sorts first).

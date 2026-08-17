@@ -2178,10 +2178,35 @@ embed once per turn and reuse · cache the digest · target p95 ≤300ms.
 | grounded | recall p95 and precision@3 on the corpus, before/after the facade | 5 / 6 / 3 d | **15 min (merge-direction decision)** | 0 | the facade wraps existing stores; callers revert per store |
 
 **Floor**
-- [ ] 30.F1 **Resolve the two-host split.** Laptop and VPS hold divergent learned state; he is
+- [x] 30.F1 **Resolve the two-host split.** Laptop and VPS hold divergent learned state; he is
       running on a week-old memory of the owner (TODO I6 and the rename findings). Decide the merge
-      direction, execute it, record the decision. *gate:* new `test_memory_single_origin.py` — one
-      store path per environment, no second candidate directory present.
+      direction, execute it, record the decision.
+      **The split was not a sync failure.** `afon_*.sqlite`, `memory/learned` and `memory/journal`
+      resolved as `Path(__file__).parents[3]` — *wherever the code was unpacked* — while patterns,
+      the relationship model and the voiceprint resolved from `~/.afon`. `deploy_vps.sh` untars the
+      source tree into the brain host's own directory, so the repo root there is a different
+      directory from the laptop's and each host kept its own half under the same names. Nothing
+      detected it: both paths resolve, both stores open, each host answers confidently. A sync
+      would not have fixed a store keyed on the location of the code.
+      **Decision.** One state root per host — `AFON_STATE_DIR`, default `~/.afon`, resolved in
+      `shared/paths.py` and nowhere else (28 modules had spelled `Path.home() / ".afon"` privately,
+      so the whole brain could not be pointed at another disk). The repo keeps code and the
+      hand-authored overlay; it keeps no state, so a deploy cannot carry memory between hosts.
+      Where two hosts already diverged: the brain host wins for **derived** stores (vectors,
+      presence, coaching — they regenerate), and learned facts and journals are **unioned**, never
+      picked between, because a fact only one host was ever told is not stale, it is the only copy.
+      `scripts/merge_memory.py` does the union through `remember()`, so 30.F3's provenance rules
+      apply and a fact the owner stated outright on one host stops being recorded as the other
+      host's guess. Migration MOVES rather than copies — a copy is two stores, which is the bug —
+      and refuses to overwrite a destination that holds data. One exception, found the hard way an
+      hour after it was written: an **empty** database left behind by a first boot on the new path
+      is an artifact, not a store, and blocking on it would strand the real data forever on every
+      host that had been started once.
+      Executed on the laptop: 10 locations moved, 35 journal days unioned, 162 learned facts under
+      one root, `second_origins()` empty.
+      *gate:* new `test_memory_single_origin.py` — 46/46, ten plants (a store reverting to the repo
+      root, a copy instead of a move, an overwrite, a private state root, a journal merge that
+      truncates). The VPS runs the same migration on its next brain start.
 - [x] 30.F2 **One recall facade.** Seven stores, five holding their own SQLite handle, no unified
       entry point (TODO K3 / J3.3). A single `recall()` fans out and merges; callers stop touching
       stores directly.
@@ -3368,7 +3393,7 @@ green, `E` = elite green.
 | S27 | Context Awareness | structured badly | 0/2 | 0/3 | 0/1 |
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
-| S30 | Persistent Memory | structured badly | 2/3 | 0/4 | 0/1 |
+| S30 | Persistent Memory | structured badly | 3/3 | 0/4 | 0/1 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/4 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
@@ -3390,7 +3415,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 77 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 77 of 360.**
+**Totals: 78 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 78 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

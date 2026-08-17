@@ -22,10 +22,7 @@ from pathlib import Path
 from loguru import logger
 
 from afon.config import settings
-
-# repo root = .../src/afon/brain/memory.py -> parents[3]
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MEMORY_DIR = _REPO_ROOT / "memory"
+from afon.shared.paths import memory_dir
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.DOTALL)
@@ -111,7 +108,10 @@ class MemoryStore:
     """Filesystem-backed learned facts (L1) + daily journal (L2)."""
 
     def __init__(self, base_dir: Path | str | None = None) -> None:
-        self.base = Path(base_dir) if base_dir else DEFAULT_MEMORY_DIR
+        # Resolved per instance, not once at import: the state root is a setting, and a constant
+        # frozen at import time cannot be pointed anywhere — which is how the store ended up being
+        # wherever the code was unpacked (30.F1).
+        self.base = Path(base_dir) if base_dir else memory_dir()
         self.learned_dir = self.base / "learned"
         self.journal_dir = self.base / "journal"
         # Parse cache: path -> (mtime, LearnedNote). recall()/digest() run on the hot path and were
@@ -150,8 +150,18 @@ class MemoryStore:
                 return note.path
         self.learned_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc)
-        fname = f"{ts:%Y%m%d-%H%M%S}-{_slug(text)}.md"
-        path = self.learned_dir / fname
+        stem = f"{ts:%Y%m%d-%H%M%S}-{_slug(text)}"
+        # The slug truncates, so two DIFFERENT facts can share one — "...appreciates quiet
+        # assistance" and "...appreciates quiet background help" produce the same stem. At one fact
+        # per conversation that never collides; merging another host's memory writes hundreds in the
+        # same second, and the second silently overwrote the first. Found by a merge that would not
+        # converge: one fact reappeared as "missing" on every re-run, because it was being written
+        # and then immediately replaced.
+        path = self.learned_dir / f"{stem}.md"
+        for n in range(2, 100):
+            if not path.exists():
+                break
+            path = self.learned_dir / f"{stem}-{n}.md"
         tagline = ", ".join(tags)
         path.write_text(
             f"---\ncreated: {ts.isoformat()}\ntags: {tagline}\n"

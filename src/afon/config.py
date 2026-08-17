@@ -403,6 +403,14 @@ class Settings(BaseSettings):
     # summarise even when ON (see _CHANNEL_DIRECT_MAX in agent.py).
     direct_speak_channel_reads: bool = False
 
+    # --- Where Afon's own state lives (30.F1) --------------------------------------------------
+    # Everything Afon WRITES about the owner — learned facts, journal, the sqlite stores, patterns,
+    # the relationship model — lives under one root, per host, outside the repo. Blank = ~/.afon.
+    # Set it to move the whole brain's memory somewhere else (a bigger disk, an encrypted volume);
+    # it is one setting because a store that follows the CODE forks the moment the code is copied,
+    # which is exactly how the laptop and the VPS ended up remembering different owners.
+    state_dir: str | None = None         # blank = ~/.afon
+
     # --- Background task queue (status-keeping) -------------------------------------------------
     # Long work (a fleet delegation) runs in the background and is tracked here so Afon can answer
     # "how's that going?" and announce completion by voice. SQLite so it survives a 24/7 restart.

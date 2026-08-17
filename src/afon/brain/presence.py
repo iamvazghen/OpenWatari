@@ -32,15 +32,14 @@ from loguru import logger
 from afon.brain.dbconn import connect
 from afon.brain import loops
 from afon.config import settings
+from afon.shared.paths import store_path
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _db_path() -> Path:
     if settings.presence_db_path:
         return Path(settings.presence_db_path)
-    base = Path(settings.tasks_db_path).parent if settings.tasks_db_path else _REPO_ROOT
-    return base / "afon_presence.sqlite"
+    return store_path("presence")
 
 
 def _tz() -> ZoneInfo:

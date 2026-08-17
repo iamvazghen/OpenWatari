@@ -223,6 +223,8 @@ TESTS = [
      "test_tool_reliability.py", "offline", ["checks passed ==="]),
     ("Memory-util: salience surfacing — durable commitments proactively resurfaced, rotated not nagged",
      "test_memory_salience.py", "offline", ["checks passed ==="]),
+    ("30.F1: one memory origin — every store follows one state root, and a merge unions two hosts",
+     "test_memory_single_origin.py", "offline", ["checks passed ==="]),
     ("B1: intent router — high-precision intents narrow to the one right tool; multi-intent/chat untouched",
      "test_intent_router.py", "offline", ["checks passed ==="]),
     ("B6: clause routing — each clause of a multi-intent turn asks for its own tool, not just the first",

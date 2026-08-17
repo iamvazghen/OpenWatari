@@ -10,7 +10,8 @@ This guide walks through the four customisation surfaces, in order of frequency:
 1. **`.env`** — who Afon is, what he answers to, what devices he uses
 2. **`personality/*.md`** — how he talks, what defaults he uses
 3. **`skills/*.md`** — domain-specific playbooks the LLM can read on demand
-4. **`memory/learned/`** — facts Afon has picked up about you (auto-curated)
+4. **`memory/learned/`** — facts Afon has picked up about you (auto-curated; stored
+   under `AFON_STATE_DIR`, default `~/.afon`)
 
 ---
 
@@ -132,15 +133,29 @@ disk and appears in `list_skills` after the next brain start.
 
 ---
 
-## 4 · Memory — `memory/learned/`
+## 4 · Memory — `<state>/memory/learned/`
+
+### Where state lives — one root, per host
+
+Everything Afon **writes** about you — learned facts, the journal, every sqlite store, the
+relationship model, the voiceprint — lives under one root: `AFON_STATE_DIR`, default `~/.afon`.
+The repo holds code and the things *you* write (`.env`, `memory/*.md`); it holds no state.
+
+That separation is load-bearing, not tidiness. These stores used to be resolved against the repo
+root, i.e. wherever the code happened to be unpacked — so deploying the brain to a second machine
+gave it a second, empty set of memories under the same names, and neither host could tell. If you
+are upgrading from a build that kept state in the repo, the brain moves it on the next start;
+`uv run python -m afon.shared.paths` shows where everything resolves and reports any leftovers.
+Two hosts that already diverged are merged with `scripts/merge_memory.py`, which unions the facts
+rather than picking a winner.
 
 Afon remembers across sessions in **five layers**:
 
 | Layer | Where | What goes there | How it's written |
 |---|---|---|---|
-| **L0 Working** | session JSON in CWD | The rolling conversation thread | automatic |
-| **L1 Learned** | `memory/learned/*.md` | Durable facts: preferences, decisions, names | `remember(text, tags)`; or extracted by background_review every N turns |
-| **L2 Journal** | `memory/journal/YYYY-MM-DD.md` | A daily summary of what happened | `STORE.journal_append(summary)`; automated at session end |
+| **L0 Working** | `<state>/afon_session.json` | The rolling conversation thread | automatic |
+| **L1 Learned** | `<state>/memory/learned/*.md` | Durable facts: preferences, decisions, names | `remember(text, tags)`; or extracted by background_review every N turns |
+| **L2 Journal** | `<state>/memory/journal/YYYY-MM-DD.md` | A daily summary of what happened | `STORE.journal_append(summary)`; automated at session end |
 | **L3 Obsidian vault** | wherever `AFON_VAULT_PATH` points | Your own notes — anything you put there | you (or `write_vault` tool) |
 | **L5 Semantic** | SQLite / FAISS, lazily | Embedding-backed similarity | automatic when `sentence-transformers` is installed |
 

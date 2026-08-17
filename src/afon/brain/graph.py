@@ -28,13 +28,13 @@ from loguru import logger
 from afon.brain.dbconn import connect
 from afon.shared.entities import canonical
 from afon.config import settings
+from afon.shared.paths import store_path
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _graph_db_path() -> Path:
     return Path(settings.memory_graph_db_path) if settings.memory_graph_db_path \
-        else _REPO_ROOT / "afon_graph.sqlite"
+        else store_path("graph")
 
 
 def _norm(s: str) -> str:

@@ -21,11 +21,12 @@ from pathlib import Path
 from loguru import logger
 
 from afon.config import settings
+from afon.shared.paths import state_dir
 
 
 # Where the rolling log lives. One JSON line per command, append-only.
 def _log_path() -> Path:
-    base = Path.home() / ".afon"
+    base = state_dir()
     p = base / "patterns.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p

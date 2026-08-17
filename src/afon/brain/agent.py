@@ -1776,7 +1776,10 @@ class AfonAgent:
     # ---- restart-durable working memory --------------------------------------------------
     def _session_path(self) -> Path:
         p = settings.session_persist_path
-        return Path(p) if p else Path(__file__).resolve().parents[3] / "afon_session.json"
+        if p:
+            return Path(p)
+        from afon.shared.paths import state_dir
+        return state_dir() / "afon_session.json"
 
     def _persist_session(self) -> None:
         """Snapshot the rolling thread to disk so a restart resumes it. Best-effort, never raises."""
