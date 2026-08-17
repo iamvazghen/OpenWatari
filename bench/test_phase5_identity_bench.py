@@ -195,6 +195,8 @@ async def main() -> None:
 
     settings.speaker_id_enabled = False  # restore
 
+    derived_threshold()
+
     print("\n[4] TTFW + VAQI benchmark math")
     from bench.benchmarks import TTFW, Turn, format_report, vaqi
 
@@ -229,6 +231,188 @@ async def main() -> None:
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
+
+
+# -- 10.F3: the accept bar is DERIVED from this profile's measured band, not set by hand -----------
+# The 0.30 default was itself a derivation — owner 0.34-0.45 against television and guests 0.16-0.31,
+# measured live on 2026-07-25 — done once, by hand, and then left in place while the profile it
+# described was replaced twice. Cosine scores are not comparable across profiles (different mic,
+# different room, different acoustic conditions covered), so one number for all of them is a number
+# that is right for at most one of them.
+def derived_threshold() -> None:
+    from afon.config import settings
+    from afon.edge.speaker_id import (MIN_DERIVED, MIN_SEPARATION, SpeakerVerifier,
+                                      derive_threshold)
+
+    print("\n[10.F3] the bar is computed, and lands inside the measured band")
+    saved_path, saved_thr, saved_on = (settings.speaker_profile_path, settings.speaker_threshold,
+                                       settings.speaker_id_enabled)
+    # The positive case first. A derivation that refuses every band is passed by `return fallback`,
+    # and then this task has changed nothing at all.
+    bar, why = derive_threshold(0.62, 0.20, 0.30)
+    check(f"a clean band yields a bar inside it ({bar:.2f})", 0.20 < bar < 0.62, why)
+    check("...and it is the midpoint, the only placement two point measurements support",
+          abs(bar - 0.41) < 1e-6, f"{bar}")
+    check("...and it says where the number came from", "derived" in why and "0.62" in why, why)
+
+    # A better owner score must never LOWER the bar, and a louder impostor must never raise it above
+    # the owner. Property checks: they catch a sign error that any single fixture would sail past.
+    bars = [derive_threshold(o, 0.20, 0.30)[0] for o in (0.40, 0.50, 0.60, 0.70, 0.80)]
+    check("a stronger profile never lowers the bar", bars == sorted(bars), str(bars))
+    check("the bar always stays under the owner's own score",
+          all(b < o for b, o in zip(bars, (0.40, 0.50, 0.60, 0.70, 0.80))), str(bars))
+
+    print("\n[10.F3] and it refuses, rather than inventing a number the data cannot carry")
+    narrow, why_n = derive_threshold(0.47, 0.42, 0.30)
+    check(f"a band narrower than {MIN_SEPARATION} keeps the setting", narrow == 0.30, why_n)
+    check("...and says to re-enrol, not to move the bar",
+          "re-enrol" in why_n.lower() and "No bar splits" in why_n, why_n)
+    low, why_l = derive_threshold(0.22, 0.02, 0.30)
+    check("a band entirely below the floor keeps the setting too", low == 0.30, why_l)
+    check("...because any safe bar there would lock the owner out", "lock you out" in why_l, why_l)
+    check("the two refusals do not share a message", why_n != why_l)
+    clamped, why_c = derive_threshold(0.44, 0.10, 0.30)   # midpoint 0.27, under the floor
+    check(f"a midpoint under the {MIN_DERIVED} floor sits on the floor instead",
+          clamped == MIN_DERIVED, why_c)
+    check("...and reports the headroom that is left", "headroom" in why_c, why_c)
+
+    print("\n[10.F3] the recorded band survives the disk, and DECIDES")
+    with tempfile.TemporaryDirectory() as d:
+        settings.speaker_profile_path = str(Path(d) / "vp.json")
+        settings.speaker_id_enabled = True
+        settings.speaker_threshold = 0.30          # the constant this replaces
+        ref = np.array([1.0] + [0.0] * 191, dtype=np.float32)
+        SpeakerVerifier.save_profile(ref)
+
+        fresh = SpeakerVerifier(embedder=lambda wav: ref.copy())
+        check("a profile with no measured band falls back to the setting",
+              fresh.accept_bar()[0] == 0.30, str(fresh.accept_bar()))
+        check("...and says so, with what to run to fix it",
+              "no measured separation" in fresh.accept_bar()[1]
+              and "enroll_voice" in fresh.accept_bar()[1], fresh.accept_bar()[1])
+
+        # A voice at 0.35: ACCEPTED under the 0.30 constant, REJECTED under a bar derived from a
+        # 0.20-0.62 band (0.41). If the derivation cannot flip a verdict it is decoration.
+        marginal = np.array([0.35, float(np.sqrt(1 - 0.35 ** 2))] + [0.0] * 190, dtype=np.float32)
+        v_const = SpeakerVerifier(embedder=lambda wav: marginal.copy())
+        accept_const, score = v_const.verify(b"\x01\x02" * 16000)
+        check(f"a {score:.2f} voice passes the hand-set 0.30 constant", accept_const, f"{score:.2f}")
+
+        SpeakerVerifier.record_separation(0.62, 0.20)
+        v_derived = SpeakerVerifier(embedder=lambda wav: marginal.copy())
+        check("the band round-trips through the profile file", v_derived.separation == (0.62, 0.20),
+              str(v_derived.separation))
+        check("the bar moved to the measured midpoint", abs(v_derived.accept_bar()[0] - 0.41) < 1e-6,
+              str(v_derived.accept_bar()))
+        accept_derived, _ = v_derived.verify(b"\x01\x02" * 16000)
+        check("...and the SAME voice is now refused — the derivation actually decides",
+              not accept_derived, "the bar is computed but nothing consults it")
+
+        # The owner himself must still get in, on the same profile and the same bar.
+        v_owner = SpeakerVerifier(embedder=lambda wav: ref.copy())
+        check("the owner still passes the derived bar", v_owner.verify(b"\x01\x02" * 16000)[0])
+
+        # Re-enrolling replaces the vectors, which makes the old band a measurement of something that
+        # no longer exists. Reusing it is the same class of bug as the stale constant, one file down.
+        SpeakerVerifier.save_profile(np.stack([ref, marginal]), append=True)
+        after = SpeakerVerifier(embedder=lambda wav: ref.copy())
+        check("re-enrolling DROPS the old band instead of reusing it against new vectors",
+              after.separation is None, str(after.separation))
+        check("...and falls back to the setting until the new band is measured",
+              after.accept_bar()[0] == 0.30, str(after.accept_bar()))
+
+        print("\n[10.F3] the borderline face-check margin follows the same band")
+        from afon.edge.speaker_gate import _BORDERLINE_MARGIN, _borderline_margin
+        wide = SpeakerVerifier(embedder=lambda wav: ref.copy())
+        check("no band -> the original constant margin", _borderline_margin(wide)
+              == _BORDERLINE_MARGIN, str(_borderline_margin(wide)))
+        SpeakerVerifier.record_separation(0.47, 0.42)      # a 0.05 band, as narrow as the margin
+        tight = SpeakerVerifier(embedder=lambda wav: ref.copy())
+        m = _borderline_margin(tight)
+        check(f"a band as narrow as the margin shrinks it ({m:.3f})", m < _BORDERLINE_MARGIN,
+              "a margin wider than a third of the band makes EVERY accept borderline, and then the "
+              "camera opens on every turn")
+        check("...but never to zero, which would disable the second factor silently", m >= 0.01,
+              f"{m}")
+
+    print("\n[10.F3] the owner number is his WORST short turn, not his best six seconds")
+    # The bar is only as honest as the two numbers it is derived from. The enrolment clip is the owner
+    # reading deliberately, seconds after enrolling; a live turn is one word. Deriving from the 6s
+    # score puts the bar above his typical turn, which is precisely the false-reject TODO I1 records
+    # (0.29 rejected, the same phrase accepted at 0.36 seconds later).
+    from afon.edge.speaker_id import FLOOR_WINDOW_S
+    with tempfile.TemporaryDirectory() as d:
+        settings.speaker_profile_path = str(Path(d) / "vp.json")
+        settings.speaker_id_enabled = True
+        ref = np.array([1.0] + [0.0] * 191, dtype=np.float32)
+        SpeakerVerifier.save_profile(ref)
+
+        # A clip that starts strong and degrades: window 1 is the owner, the last is much weaker.
+        # A stub keyed on the audio itself, so window order — not call order — decides the score.
+        strong, weak = ref.copy(), np.array([0.45, float(np.sqrt(1 - 0.45 ** 2))] + [0.0] * 190,
+                                           dtype=np.float32)
+        sr = 16000
+        half = int(3.0 * sr) * 2
+        clip = b"\x00\x40" * (half // 2) + b"\x01\x00" * (half // 2)   # loud half, then near-silent
+
+        def _by_content(wav):
+            return weak.copy() if abs(float(np.mean(np.abs(wav)))) < 0.001 else strong.copy()
+
+        v = SpeakerVerifier(embedder=_by_content)
+        wins = v.window_scores(clip, sr)
+        # Exactly five: 6s of audio, 2s windows, 1s hop, starting at 0,1,2,3,4s. Stated as a number
+        # rather than recomputed from the constants — a check that re-derives the implementation
+        # agrees with the implementation by construction and catches nothing.
+        check(f"a 6s clip yields exactly 5 overlapping {FLOOR_WINDOW_S:.0f}s windows ({len(wins)})",
+              len(wins) == 5, str(wins))
+        check("the worst window is well below the best", min(wins) < max(wins) - 0.5,
+              f"{min(wins):.2f}..{max(wins):.2f}")
+        whole = v.score(clip, sr)
+        check("...and below the score of the whole clip, which is what used to be recorded",
+              min(wins) < whole, f"windows {min(wins):.2f}, whole clip {whole:.2f}")
+
+        # The load-bearing consequence: the two choices give DIFFERENT bars. If they did not, the
+        # asymmetry would be a comment rather than a mechanism.
+        best_bar = derive_threshold(max(wins), 0.20, 0.30)[0]
+        worst_bar = derive_threshold(min(wins), 0.20, 0.30)[0]
+        check("deriving from his best window sets a higher bar than from his worst",
+              best_bar > worst_bar, f"best->{best_bar}, worst->{worst_bar}")
+        check("...and the worst-window bar is the one below his weakest turn",
+              worst_bar < min(wins), f"bar {worst_bar} vs weakest turn {min(wins):.2f}")
+
+        short = v.window_scores(b"\x00\x40" * 800, sr)   # 0.1s: shorter than one window
+        check("a clip shorter than one window yields no windows rather than a bogus one",
+              short == [], str(short))
+        # The trailing remainder is the case that needs the bound: 0.5s is exactly embed()'s minimum,
+        # so a half-second tail IS scoreable — and a score off half a second of audio is noise that
+        # would drag the owner's floor down and, through it, the bar. Only whole windows count.
+        ragged = v.window_scores(clip + b"\x00\x40" * (sr // 4), sr)   # 6.5s: a 0.5s remainder
+        check("a partial trailing window is dropped, not scored short",
+              len(ragged) == 5, f"{len(ragged)} windows from 6.5s — the 0.5s remainder was scored")
+        check("an empty clip does not crash the sampler", v.window_scores(b"", sr) == [])
+        no_backend = SpeakerVerifier(embedder=lambda wav: None)
+        check("no backend -> no windows, and score() says None not zero",
+              no_backend.window_scores(clip, sr) == [] and no_backend.score(clip, sr) is None)
+
+    # Structural: enrolment must pass the MIN of the owner's windows and the MAX of the impostor's.
+    # Swapping either one silently biases every future bar, and no mic-free test can catch it live.
+    enroll_src = (Path(__file__).resolve().parents[1] / "bench" / "enroll_voice.py").read_text("utf-8")
+    check("enrolment records the owner's worst window", "min(own_w) if own_w else score" in enroll_src)
+    check("...and the impostor's best", "max(imp_w) if imp_w else imp" in enroll_src)
+    check("...and hands exactly those two to the derivation",
+          "record_separation(owner_floor, impostor_ceiling)" in enroll_src
+          and "derive_threshold(owner_floor, impostor_ceiling" in enroll_src)
+
+    print("\n[10.F3] one module owns the number")
+    # The constant was read in two modules independently, which is why raising it in one place on
+    # 2026-07-25 left the gate's borderline check comparing against the other. Same lesson as 30.F1.
+    src = Path(__file__).resolve().parents[1] / "src" / "afon"
+    mentions = {p.name for p in src.rglob("*.py") if "speaker_threshold" in p.read_text("utf-8")}
+    check("only speaker_id.py reads the threshold setting (config.py declares it)",
+          mentions == {"config.py", "speaker_id.py"}, str(sorted(mentions)))
+
+    settings.speaker_profile_path, settings.speaker_threshold = saved_path, saved_thr
+    settings.speaker_id_enabled = saved_on
 
 
 if __name__ == "__main__":

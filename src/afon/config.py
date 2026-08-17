@@ -732,11 +732,16 @@ class Settings(BaseSettings):
     #                                       data belongs in state, not in the source tree)
     room_check_on_suspicion: bool = True  # unrecognized/overlapping voice -> one camera look (3-min
     #                                       cooldown) to understand who's in the room; never a routine poll
-    speaker_threshold: float = 0.30       # ECAPA cosine accept threshold. Live data (2026-07-25): owner
-    #                                       on the built-in far-field array scores 0.34-0.45 (AirPods-
-    #                                       enrolled profile, so depressed); TV/guests 0.16-0.31. 0.30
-    #                                       hears the owner with margin + rejects the TV. Re-enrolling on
-    #                                       THIS mic would lift the owner to ~0.6 and allow a higher bar.
+    speaker_threshold: float = 0.30       # FALLBACK accept bar only. The live bar is derived per
+    #                                       profile from the owner/impostor scores enrolment measured
+    #                                       (speaker_id.accept_bar / derive_threshold, 10.F3); this
+    #                                       number is what stands when no band has been measured, or
+    #                                       when the measured one cannot support a bar. It came from
+    #                                       live data (2026-07-25): owner 0.34-0.45 on the built-in
+    #                                       far-field array (AirPods-enrolled profile, so depressed),
+    #                                       TV/guests 0.16-0.31 — i.e. it is a hand-run of exactly the
+    #                                       derivation above, and it went stale the moment the profile
+    #                                       changed. Do not read it anywhere but accept_bar().
 
     # --- Latency / behaviour ------------------------------------------------------------
     # NB: "directed only" (ignore ambient speech & own playback) is enforced by the wake-word gate,

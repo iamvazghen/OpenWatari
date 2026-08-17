@@ -249,6 +249,30 @@ def main() -> None:
     _, imp = fresh.verify(other, SR)
     print(f"  impostor score: {imp:.2f} (owner {score:.2f}, threshold {_s.speaker_threshold})")
     print("  " + separation_verdict(score, imp, _s.speaker_threshold))
+
+    # 10.F3 — record the band, don't just narrate it. Everything above this line used to end in advice
+    # to go and edit AFON_SPEAKER_THRESHOLD by hand, which is how the gate ended up running on a
+    # number measured once, three weeks earlier, against a profile that had since been replaced.
+    #
+    # The two numbers are deliberately asymmetric, and this is the whole reason the derived bar is
+    # trustworthy rather than merely automatic. The bar has to sit UNDER the owner's worst turn and
+    # OVER the impostor's best one, so it is derived from the owner's WORST window and the impostor's
+    # BEST. Taking the 6-second score for both would use the owner at his best and the television at
+    # its average, and place the bar too high in exactly the way TODO I1 warns about.
+    from afon.edge.speaker_id import FLOOR_WINDOW_S, derive_threshold
+    own_w, imp_w = fresh.window_scores(pcm, SR), fresh.window_scores(other, SR)
+    owner_floor = min(own_w) if own_w else score
+    impostor_ceiling = max(imp_w) if imp_w else imp
+    if own_w:
+        print(f"  short-turn windows: you {min(own_w):.2f}-{max(own_w):.2f}, "
+              f"impostor {min(imp_w or [imp]):.2f}-{max(imp_w or [imp]):.2f} "
+              f"({len(own_w)} windows of {FLOOR_WINDOW_S:.0f}s)")
+        if min(own_w) < score - 0.10:
+            print(f"  ! a short turn scores {score - min(own_w):.2f} lower than the 6s clip — that "
+                  f"gap is what makes one-word commands get ignored.")
+    SpeakerVerifier.record_separation(owner_floor, impostor_ceiling)
+    bar, why = derive_threshold(owner_floor, impostor_ceiling, _s.speaker_threshold)
+    print(f"\n  accept bar: {bar:.2f} — {why}")
     print("\nRestart the edge to load the new profile.")
 
 

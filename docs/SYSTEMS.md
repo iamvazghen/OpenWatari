@@ -1103,9 +1103,29 @@ broadcast audio before embedding where the scene classifier can rule it out.
 - [x] 10.F1 The gate scores the **utterance**, not the room (N2, fixed 2026-08-11).
       *gate:* `test_speaker_gate_scoping.py`
 - [x] 10.F2 Cold-start warm-up does not mis-score the first utterance. *gate:* `test_speaker_warmup.py`
-- [ ] 10.F3 The threshold is derived from the enrolled profile's measured separation, not a constant
-      (depends on S08.F1). *gate:* `test_phase5_identity_bench.py` — threshold computed, asserted
-      inside the separation band.
+- [x] 10.F3 The threshold is derived from the enrolled profile's measured separation, not a constant.
+      *gate:* `test_phase5_identity_bench.py` [10.F3] — threshold computed, asserted inside the
+      separation band, and shown to flip a verdict the constant got wrong.
+      **Built without S08.F1**, which the plan listed as a dependency: what needs a good profile is a
+      good *number*, not the derivation. Enrolment already measured owner and impostor scores and did
+      nothing with them but advise a manual `AFON_SPEAKER_THRESHOLD` edit; it now records them beside
+      the vectors they were measured against (`record_separation`), and `accept_bar()` derives the
+      midpoint from them. Both modules that read the constant independently now go through that one
+      method — raising it in one place on 2026-07-25 had left the gate's borderline check comparing
+      against the other. With no band recorded, the setting stands and says so out loud.
+      Two refusals rather than a confident guess: a band narrower than 0.10 (which is today's real
+      state — a film cleared 0.40 while the owner sat at 0.47) and a band lying entirely below the
+      0.30 floor both keep the setting and name re-enrolment. Replacing the vectors drops the old
+      band, so a measurement never outlives the profile it described.
+      The two inputs are **deliberately asymmetric**, and this is what makes the bar trustworthy
+      rather than merely automatic. Both clips are scored in 2-second windows, and the owner
+      contributes his **worst** window while the impostor contributes its **best** — the bar has to
+      sit under his weakest turn and over the television's strongest moment. Scoring the six-second
+      clips whole would have taken the owner at his best (reading deliberately, seconds after
+      enrolling) against a television at its average, and placed the bar high in exactly the way
+      TODO I1 warns about: it records a live utterance rejected at 0.29 while the same phrase cleared
+      at 0.36 seconds later. **The remaining half is 08.F1**: the derivation is live, and it will
+      produce a genuinely better bar the first time it is given a genuinely better profile.
 
 **Raise**
 - [ ] 10.R1 Three-way verdict — owner · not-owner · **unsure** — with unsure routed to a soft
@@ -1119,7 +1139,8 @@ broadcast audio before embedding where the scene classifier can rule it out.
 - [ ] 10.E1 A week of real turns with zero owner false-rejects and zero stranger accepts, no manual
       threshold edits. *gate:* recorded scores + `test_voice_profile_drift.py`
 
-**Cross-refs** TODO N2, N3. Blocked behind S08.F1.
+**Cross-refs** TODO N2, N3. The floor is complete; the *quality* of the derived bar is behind S08.F1
+(20 min at the mic), and the raise tier is behind the labelled corpus.
 
 ---
 
@@ -3424,7 +3445,7 @@ green, `E` = elite green.
 | S07 | Session & Context | structured badly | 0/3 | 0/3 | 0/1 |
 | S08 | Voice Enrollment | weak | 1/2 | 0/3 | 0/1 |
 | S09 | Face Enrollment | not enrolled | 1/2 | 0/3 | 0/1 |
-| S10 | Voice Recognition | structured badly | 2/3 | 0/3 | 0/1 |
+| S10 | Voice Recognition | structured badly | 3/3 | 0/3 | 0/1 |
 | S11 | Face Recognition | structured badly | 2/3 | 0/3 | 0/1 |
 | S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
 | S13 | Notifications | structured badly | 2/3 | 0/3 | 0/1 |
@@ -3466,7 +3487,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 81 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 81 of 360.**
+**Totals: 82 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 82 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

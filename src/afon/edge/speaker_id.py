@@ -11,16 +11,19 @@ Design
   ``identity`` extra and is imported **lazily**. If it isn't installed (or no profile is enrolled,
   or the feature is off), the verifier **degrades to "accept everything"** — the pipeline never
   breaks, matching the rest of Afon's graceful-degradation contract.
-- Enrollment (``bench/enroll_voice.py``) records a few seconds of the owner, averages the embeddings,
-  L2-normalises, and saves a small JSON voiceprint to ``AFON_SPEAKER_PROFILE``.
+- Enrollment (``bench/enroll_voice.py``) records the owner reading a script, keeps one L2-normalised
+  vector per clip (not a mean — see ``_load_profile``), and saves a small JSON voiceprint to
+  ``AFON_SPEAKER_PROFILE``. It then measures the owner against an impostor and records that band.
 - At runtime, ``SpeakerGate`` (a Pipecat processor) buffers recent mic audio and, when a transcript
-  is produced, embeds that audio and accepts the turn only if cosine-similarity ≥ threshold.
+  is produced, embeds that audio and accepts the turn only if cosine-similarity clears the bar from
+  ``accept_bar()`` — **derived from this profile's measured band**, not a constant (10.F3).
 
 The gate **decision** is a pure function (``should_accept``) so it's unit-testable without torch.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import threading
@@ -71,6 +74,57 @@ def should_accept(score: float, threshold: float, has_profile: bool, enabled: bo
     return score >= threshold
 
 
+# -- where the accept bar comes from (SYSTEMS.md 10.F3) --------------------------------------------
+# `settings.speaker_threshold` is one number for every profile, and cosine scores are not comparable
+# across profiles: they depend on the mic, the room, and which acoustic conditions the enrolment
+# happened to cover. The 0.30 default was in fact derived — by hand, once, from a day of live scores
+# on 2026-07-25 — and then went stale the moment the profile changed, with nothing to notice.
+#
+# So the bar is now computed from THIS profile's measured separation, which enrolment records next to
+# the vectors it measured it against. No separation recorded -> the setting, said out loud.
+
+#: A gap narrower than this cannot be split by ANY bar: the profile is the problem, not the threshold.
+MIN_SEPARATION = 0.10
+#: No derived bar goes below this, however clean the enrolment looked. One impostor clip is one
+#: impostor, and the set of voices that are not the owner is far larger than the sample; 0.30 is the
+#: lowest bar a day of live scores supported (owner 0.34-0.45, television and guests 0.16-0.31).
+MIN_DERIVED = 0.30
+#: Window length for the floor/ceiling sample below. Roughly the length of a real spoken command, and
+#: comfortably over embed()'s 0.5s floor.
+FLOOR_WINDOW_S = 2.0
+
+
+def derive_threshold(owner: float, impostor: float, fallback: float) -> tuple[float, str]:
+    """Place the accept bar inside a MEASURED band. Returns (threshold, why).
+
+    The midpoint, because that is all two point measurements support: biasing the bar toward the
+    owner (fewer false rejects) or toward the impostor (fewer false accepts) needs the variance of
+    each, and one clip apiece gives none.
+
+    Both refusals return the fallback rather than a number this data cannot justify. A gate that
+    quietly invents a bar out of a profile that cannot support one is the failure this task exists to
+    remove, and swapping a stale constant for a confident wrong number is not an improvement.
+    """
+    gap = owner - impostor
+    # Order matters, and it is the same order as `separation_verdict`: a too-narrow band and a
+    # correctly-wide band that sits too low are different problems with opposite fixes.
+    if gap < MIN_SEPARATION:
+        return fallback, (f"kept the {fallback:.2f} setting — you score {owner:.2f} and the impostor "
+                          f"{impostor:.2f}, a gap of {gap:+.2f}. No bar splits that; re-enrol on the "
+                          f"mic you actually use.")
+    mid = (owner + impostor) / 2.0
+    if mid < MIN_DERIVED:
+        if MIN_DERIVED >= owner:
+            return fallback, (f"kept the {fallback:.2f} setting — the band {impostor:.2f}-{owner:.2f} "
+                              f"lies entirely below the {MIN_DERIVED:.2f} floor, so any safe bar would "
+                              f"also lock you out. Re-enrol.")
+        return MIN_DERIVED, (f"derived {MIN_DERIVED:.2f} — the {impostor:.2f}-{owner:.2f} midpoint "
+                             f"({mid:.2f}) is under the {MIN_DERIVED:.2f} floor, so the bar sits on "
+                             f"the floor instead, with {owner - MIN_DERIVED:.2f} of headroom left.")
+    return round(mid, 3), (f"derived {mid:.2f} from a measured {impostor:.2f}-{owner:.2f} band "
+                           f"(gap {gap:.2f})")
+
+
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
     if na == 0 or nb == 0:
@@ -94,7 +148,11 @@ class SpeakerVerifier:
         # restart, and the audio watchdog restarts the edge on a device change mid-day.
         self._load_lock = threading.Lock()
         self._profile: np.ndarray | None = None
+        #: (owner, impostor) as measured at the end of the enrolment that wrote THIS profile, or None.
+        self._separation: tuple[float, float] | None = None
         self._load_profile()
+        if self.has_profile:
+            logger.info(f"speaker accept bar: {self.accept_bar()[1]}")
 
     # ---- profile ----------------------------------------------------------------------
     # The profile is a LIST of vectors (one per enrollment clip/condition), scored by MAX cosine —
@@ -109,6 +167,9 @@ class SpeakerVerifier:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 rows = data.get("embeddings") or ([data["embedding"]] if "embedding" in data else [])
                 self._profile = np.asarray(rows, dtype=np.float32) if rows else None
+                sep = data.get("separation")
+                if isinstance(sep, dict) and {"owner", "impostor"} <= sep.keys():
+                    self._separation = (float(sep["owner"]), float(sep["impostor"]))
                 if self._profile is not None:
                     logger.info(f"speaker profile loaded ({self._profile.shape[0]} vector(s), "
                                 f"{self._profile.shape[1]}-dim) from {path.name}")
@@ -118,6 +179,11 @@ class SpeakerVerifier:
     @property
     def has_profile(self) -> bool:
         return self._profile is not None
+
+    @property
+    def separation(self) -> tuple[float, float] | None:
+        """(owner, impostor) as measured against this profile, or None if never measured."""
+        return self._separation
 
     @staticmethod
     def save_profile(embedding: np.ndarray, *, append: bool = False, max_vectors: int = 12) -> Path:
@@ -146,8 +212,36 @@ class SpeakerVerifier:
                                                          encoding="utf-8")
             except Exception:  # noqa: BLE001 — a failed backup never blocks saving
                 pass
+        # No "separation" key: a saved profile has no measured band yet. Deliberately dropped rather
+        # than carried over, including in --append mode — the vectors just changed, so the old
+        # owner/impostor numbers describe a profile that no longer exists. Enrolment measures the new
+        # band a minute later and calls record_separation(); until it does, the gate uses the setting
+        # and says so. A stale band silently reused is exactly the bug 10.F3 is about.
         path.write_text(json.dumps({"embeddings": arr.tolist()}), encoding="utf-8")
         return path
+
+    @staticmethod
+    def record_separation(owner: float, impostor: float) -> Path:
+        """Attach the measured owner/impostor scores to the profile they were measured against.
+
+        Enrolment already took both numbers (`bench/enroll_voice.py`) and did nothing with them but
+        print advice to change a setting by hand. This is where that advice stops being advice.
+        """
+        path = _default_profile_path()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["separation"] = {"owner": round(float(owner), 4), "impostor": round(float(impostor), 4),
+                              "measured": _dt.datetime.now().astimezone().isoformat(timespec="seconds")}
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def accept_bar(self) -> tuple[float, str]:
+        """The score an utterance must reach, and where that number came from."""
+        from afon.config import settings as _s   # re-read: tests and /reload mutate it
+        if self._separation is None:
+            return _s.speaker_threshold, (f"using the {_s.speaker_threshold:.2f} setting — this "
+                                          f"profile has no measured separation. Re-run "
+                                          f"`uv run python bench/enroll_voice.py` to measure one.")
+        return derive_threshold(*self._separation, _s.speaker_threshold)
 
     # ---- embedding backend ------------------------------------------------------------
     #: What a complete ECAPA cache looks like. All five must be present before we trust the cache
@@ -230,14 +324,42 @@ class SpeakerVerifier:
             logger.warning(f"speaker embed failed: {e}")
             return None
 
+    def score(self, pcm16: bytes, sample_rate: int = 16000) -> float | None:
+        """Similarity of this audio to the enrolled profile, or None if it cannot be measured.
+
+        Best match against ANY enrolled vector — each vector covers one acoustic condition.
+        """
+        emb = self.embed(pcm16, sample_rate)
+        if emb is None or self._profile is None:
+            return None
+        return max(cosine(emb, row) for row in np.atleast_2d(self._profile))
+
     def verify(self, pcm16: bytes, sample_rate: int = 16000) -> tuple[bool, float]:
         """Return (accept, score). Degrades to (True, 1.0) when unavailable/unenrolled/off."""
         if not settings.speaker_id_enabled or not self.has_profile:
             return True, 1.0
-        emb = self.embed(pcm16, sample_rate)
-        if emb is None:
+        score = self.score(pcm16, sample_rate)
+        if score is None:
             return True, 1.0  # backend missing -> don't lock the owner out
-        # Best match against ANY enrolled vector — each vector covers one acoustic condition.
-        score = max(cosine(emb, row) for row in np.atleast_2d(self._profile))
-        accept = should_accept(score, settings.speaker_threshold, self.has_profile, True)
+        accept = should_accept(score, self.accept_bar()[0], self.has_profile, True)
         return accept, score
+
+    def window_scores(self, pcm16: bytes, sample_rate: int = 16000) -> list[float]:
+        """Score one clip in short overlapping windows. Empty if nothing could be measured.
+
+        Why this exists, and why the bar depends on it: the enrolment clips are six seconds of the
+        owner reading deliberately, seconds after he enrolled — his BEST case — while a live turn is
+        "yes" or "lights off" in whatever voice he happens to have. A bar derived from the six-second
+        score sits ABOVE his typical live score, and TODO I1 is explicit that raising the bar on data
+        like that starts rejecting the owner (0.29 rejected while the same phrase cleared 0.36 seconds
+        later). Short windows are the cheapest honest sample of that floor: same clip, no extra
+        recording, and it measures the length of audio the gate will actually see.
+        """
+        step = int(FLOOR_WINDOW_S * sample_rate) * 2      # bytes, 16-bit mono
+        hop = max(2, step // 2)
+        out = []
+        for i in range(0, max(1, len(pcm16) - step + 1), hop):
+            s = self.score(pcm16[i:i + step], sample_rate)
+            if s is not None:
+                out.append(s)
+        return out

@@ -1182,10 +1182,15 @@ since the plan was written — the plan's own later addendum supersedes parts of
       still producing confirmed false rejections — one utterance rejected at 0.29 and the *same
       phrase* accepted at 0.36 seconds later. So the item stands: the reference is weak, and the
       ceiling of 0.64 is the ceiling that matters. Re-enrolment remains the unblocking action.
-- [ ] **Then** re-measure and raise `speaker_threshold` to the observed valley (the plan expects
-      ~0.45–0.50). ⚠️ **Sequenced, not immediate** — the plan's own 2026-07-30/31 addendum rules that the
-      threshold **stays at 0.30** on today's data, because raising it now starts rejecting the owner. This
-      item unblocks only after re-enrollment demonstrably moves the owner distribution.
+- [x] ~~**Then** re-measure and raise `speaker_threshold` to the observed valley~~ — **no longer a
+      manual step (SYSTEMS.md 10.F3, 2026-08-17).** Enrolment now records the measured band beside the
+      vectors and `speaker_id.accept_bar()` derives the bar from it, so the valley is found by the run
+      that measures it rather than by a hand edit that has to be remembered. The sequencing this item
+      insisted on is enforced in code, not by discipline: with no band recorded the bar **stays at
+      0.30**, and a band too narrow to split (today's state) is refused rather than acted on. The
+      owner number is his worst 2-second window, not his best six seconds, precisely so the derived
+      bar cannot drift above his typical turn — the failure this item was warning about.
+      What remains is the re-enrolment above, which is what will move the band.
 - [x] Wire face-ID (pc_agent camera over PC_LINK, prod-verified Jul 25) as a **second factor for
       privileged actions**; voice alone stays sufficient for benign queries. Distinct from the shipped
       camera-on-suspicion check, which is a borderline-band tiebreak, not an authorisation factor.

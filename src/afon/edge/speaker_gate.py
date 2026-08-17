@@ -41,9 +41,19 @@ _BORDERLINE_MARGIN = 0.05   # accepts within this of the threshold also earn a f
 _PREROLL_S = 0.3            # VAD fires slightly after speech onset — keep this much of what precedes it
 
 
-def _accept_threshold() -> float:
-    from afon.config import settings
-    return settings.speaker_threshold
+def _borderline_margin(verifier: SpeakerVerifier) -> float:
+    """How close to the bar still counts as "barely passed", and so earns a face check.
+
+    Derived from the same measured band as the bar itself (10.F3). A fixed 0.05 was fine against a
+    hand-placed threshold, but against a derived one it can be wider than a third of the band — and
+    then EVERY accept is borderline and the camera opens on every turn (cooldown-limited, but still
+    a camera opening because a constant outgrew its measurement). A third of the gap keeps the
+    borderline region proportional to how much separation the profile actually has.
+    """
+    sep = verifier.separation
+    if sep is None:
+        return _BORDERLINE_MARGIN
+    return min(_BORDERLINE_MARGIN, max(0.01, (sep[0] - sep[1]) / 3.0))
 
 
 class SpeakerGate(FrameProcessor):
@@ -147,7 +157,7 @@ class SpeakerGate(FrameProcessor):
                 logger.info(f"speaker gate: accepted ({score:.2f}) — {frame.text!r}")
                 if time.monotonic() - self._last_reject <= _OVERLAP_WINDOW_S:
                     self._maybe_look("multiple voices (owner + someone else)")
-                elif score < _accept_threshold() + _BORDERLINE_MARGIN:
+                elif score < self._verifier.accept_bar()[0] + _borderline_margin(self._verifier):
                     # Face as the second factor: a barely-passing voice (live data 2026-07-28: a
                     # YouTube voice cleared at exactly the owner's median) gets a camera check, so the
                     # brain's room context marks the turn as voice-marginal without adding latency.
