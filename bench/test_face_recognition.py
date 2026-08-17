@@ -103,7 +103,11 @@ async def main() -> None:
         check("empty -> 'no one in view'", "No one's in view" in r, r)
 
         print("\n[4] enroll_owner_face tool messaging")
-        camera._capture_burst = lambda *a, **k: [b"\xff\xd8jpeg"]  # frames present; result from the mock
+        camera._capture_burst = lambda *a, **k: [b"\xff\xd8jpeg"] * 6  # frames present; result mocked
+        # 09.F2 — the burst is now judged before anything is written, so a fake JPEG has to come with
+        # fake measurements: cv2 cannot decode `b"\xff\xd8jpeg"`, and an undecodable frame is
+        # (correctly) counted as dark-and-faceless.
+        camera._frame_measurements = lambda jpegs: [(120.0, 1)] * len(jpegs)
         camera._enroll_from_jpegs = lambda jpegs: 5
         r = await camera.enroll_owner_face({"frames": 3})
         check("success line reports refs", "Learned your face" in r and "5 reference" in r, r)
@@ -113,12 +117,98 @@ async def main() -> None:
         camera._capture_burst = lambda *a, **k: []  # enroll_owner_face captures via a burst
         r = await camera.enroll_owner_face({})
         check("no camera -> calm line", "couldn't reach the camera" in r, r)
+
+        await capture_rejection()
     finally:
         camera._FACE_DIR, camera._OWNER_REFS, camera._gray_faces = saved_dir, saved_refs_path, saved_gray
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
+
+
+# -- 09.F2: an unusable capture is rejected AT CAPTURE TIME, and says which problem it was --------
+# Enrolment answered every failed capture with one sentence covering three unrelated problems: "I
+# couldn't spot a face — sit facing the camera in good light. If someone else is in shot, those
+# frames are skipped." No face, too dark, and someone-standing-behind-you have different fixes, and
+# the third matters most: `_enroll_from_jpegs` skips multi-face frames precisely because enrolling a
+# second face makes that person a permanent owner match. A burst where every frame held two faces was
+# reported as "I couldn't spot a face" — while faces were all it saw.
+async def capture_rejection() -> None:
+    from afon.brain.tools import camera as cam
+
+    print("\n[09.F2] the burst is judged, and each cause is named")
+    good = cam.capture_verdict([(120.0, 1)] * 8)
+    # The positive case first: a verdict that rejects everything passes a gate made only of
+    # negatives, and then the owner can never enrol at all.
+    check(f"a clean burst is accepted ({good.summary()})", not good.reject, good.reason)
+
+    cases = (
+        ("two faces throughout", [(120.0, 2)] * 8, ("someone else was in shot", "permanent match")),
+        ("a dark room", [(4.0, 1)] * 8, ("too dark", "exposure floor")),
+        ("camera pointed at a wall", [(120.0, 0)] * 8, ("no face", "facing the lens")),
+    )
+    seen = {}
+    for name, frames, expect in cases:
+        v = cam.capture_verdict(frames)
+        seen[name] = v.reason
+        check(f"{name} is rejected", v.reject, v.summary())
+        for phrase in expect:
+            check(f"...and says why ({phrase!r})", phrase in v.reason, v.reason)
+    check("the three causes do not share a message", len(set(seen.values())) == 3, str(seen))
+
+    print("\n[09.F2] the counts, and the dominant cause")
+    # The `(4.0, 0)` frame is the one that matters: dark AND faceless. A dark frame is normally
+    # faceless *because* it is dark, so counting it under both causes double-counts every dark burst
+    # and can make "no face" the dominant diagnosis for a lighting problem. Without this frame in the
+    # fixture the mistake is invisible — the first version of this check used `(4.0, 1)`, which no
+    # amount of breaking the brightness condition could distinguish.
+    v = cam.capture_verdict([(120.0, 1), (120.0, 1), (4.0, 1), (4.0, 0), (120.0, 0), (120.0, 3)])
+    check("every frame is accounted for exactly once",
+          v.dark + v.empty + v.crowded + v.usable == v.frames, v.summary())
+    check("a dark frame is not also counted as faceless", v.dark == 2 and v.empty == 1, v.summary())
+    # A burst that is mostly fine with one bystander frame must still ENROL — that frame is skipped
+    # downstream. Rejecting a whole capture over one passer-by is how a working feature gets
+    # abandoned.
+    mostly = cam.capture_verdict([(120.0, 1)] * 7 + [(120.0, 2)])
+    check("one bystander frame does not sink an otherwise good burst", not mostly.reject,
+          mostly.summary())
+    check("...but too few usable frames does", cam.capture_verdict([(120.0, 1)] * 2).reject,
+          "two frames seconds apart is one angle in one light")
+    check("an empty burst is rejected rather than enrolled from nothing",
+          cam.capture_verdict([]).reject)
+
+    print("\n[09.F2] the tool refuses to WRITE on a bad capture")
+    # The load-bearing half: the verdict has to stop the write, not just print. Enrolment APPENDS to
+    # the owner refs, so a bad capture is not a wasted minute — it is a permanent contribution.
+    saved_burst, saved_meas, saved_enroll = (cam._capture_burst, cam._frame_measurements,
+                                             cam._enroll_from_jpegs)
+    wrote: list[int] = []
+    cam._enroll_from_jpegs = lambda jpegs: (wrote.append(len(jpegs)), 5)[1]
+    try:
+        cam._capture_burst = lambda *a, **k: [b"jpeg"] * 8
+        cam._frame_measurements = lambda jpegs: [(120.0, 2)] * len(jpegs)
+        r = await cam.enroll_owner_face({})
+        check("a two-face burst is refused with the reason spoken",
+              "didn't learn your face" in r and "someone else was in shot" in r, r)
+        check("...and nothing was written", not wrote, f"enrolled from {wrote} frames anyway")
+        cam._frame_measurements = lambda jpegs: [(120.0, 1)] * len(jpegs)
+        r = await cam.enroll_owner_face({})
+        check("a good burst still enrols", "Learned your face" in r, r)
+        check("...and did write", bool(wrote), "the good path stopped working")
+
+        # A measurement failure must not become a refusal to enrol: this is a guard on quality, not a
+        # new dependency in the middle of the only path to a face profile.
+        def _boom(_jpegs):
+            raise RuntimeError("cv2 exploded")
+
+        cam._frame_measurements = _boom
+        r = await cam.enroll_owner_face({})
+        check("a broken quality check degrades to enrolling, not to failing",
+              "Learned your face" in r, r)
+    finally:
+        cam._capture_burst, cam._frame_measurements = saved_burst, saved_meas
+        cam._enroll_from_jpegs = saved_enroll
 
 
 if __name__ == "__main__":

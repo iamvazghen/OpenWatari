@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from afon.config import settings
+from afon.edge.enroll_quality import score_pcm
 from afon.edge.speaker_id import SpeakerVerifier
 
 SR = 16000
@@ -153,6 +154,7 @@ def main() -> None:
         clips = [(PROMPTS[i], CLIP_S) for i in range(N_CLIPS)]
 
     embeddings = []
+    rejected: list[str] = []
     for i, (prompt, clip_s) in enumerate(clips):
         print(f"\n[{i + 1}/{len(clips)}] {prompt}")
         for c in (3, 2, 1):
@@ -160,6 +162,27 @@ def main() -> None:
             time.sleep(1)
         print(f"  ● recording {clip_s}s — speak now")
         pcm = _record(clip_s)
+        # 08.F2 — judge the clip NOW. The profile scores 0.47 against a 0.60 target and nothing ever
+        # said why; a segment read next to a running fan, or with the wrong mic selected, went in
+        # looking exactly like a good one. One retry per segment, then keep it with a warning: the
+        # owner is sitting at the mic for five minutes and a script that refuses forever is a script
+        # that gets abandoned half-enrolled, which is worse than a slightly noisy vector.
+        q = score_pcm(pcm, SR)
+        print(f"  quality: {q.summary()}")
+        if q.reject:
+            print(f"  ✗ {q.reason}")
+            print("  → re-recording this segment once.")
+            for c in (3, 2, 1):
+                print(f"  recording in {c}…", end="\r", flush=True)
+                time.sleep(1)
+            print(f"  ● recording {clip_s}s — speak now")
+            pcm = _record(clip_s)
+            q2 = score_pcm(pcm, SR)
+            print(f"  quality: {q2.summary()}")
+            if q2.reject:
+                print(f"  ~ still {q2.reason.split(' —')[0]} — keeping it, but this segment is "
+                      f"weakening the profile.")
+                rejected.append(f"[{i + 1}] {q2.reason}")
         emb = verifier.embed(pcm, SR)
         if emb is None:
             print("  (clip too short / failed, retrying)")
@@ -170,6 +193,16 @@ def main() -> None:
     if not embeddings:
         print("No usable clips captured.")
         sys.exit(1)
+
+    # Say it once more at the end. A warning printed four minutes ago, above four screens of
+    # segments, is a warning nobody acts on — and the whole point of 08.F2 is that a weak profile is
+    # discovered at the mic rather than in a threshold nobody can place weeks later.
+    if rejected:
+        print(f"\n! {len(rejected)} of {len(clips)} segment(s) went in below quality:")
+        for line in rejected:
+            print(f"    {line}")
+        print("  Re-run enrolment in a quieter room, or with the mic closer, before trusting the "
+              "separation numbers below.")
 
     # One vector PER CLIP (max-cosine at verify time), not a blurred mean — a mean profile could
     # not cover the mic's two acoustic modes (Bluetooth audio active vs not) and locked the owner

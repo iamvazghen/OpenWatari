@@ -136,8 +136,91 @@ def main() -> None:
           sv(0.36, 0.33, 0.30) != sv(0.55, 0.40, 0.30),
           "one message for two problems sends him to fix the wrong thing")
 
+    capture_quality()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     sys.exit(1 if failed else 0)
+
+
+# ── 08.F2: a bad clip is rejected AT THE MIC, not discovered weeks later ──────────────────────
+# The owner's voiceprint scores 0.47 against a 0.60 target and nothing ever said why. Enrolment
+# embedded whatever the mic produced and printed "captured ✓", so a segment read next to a running
+# fan — or with the wrong input device selected — went into the profile looking exactly like a good
+# one. The cost surfaced as a threshold that could not be placed (`separation_verdict` above),
+# weeks after the five minutes when the owner was sitting at the mic and could have re-read it.
+def capture_quality() -> None:
+    from afon.edge.enroll_quality import (MAX_CLIPPING, MIN_SECONDS, MIN_SNR_DB, MIN_VARIETY,
+                                          score_pcm, _synth)
+
+    print("\n[08.F2] a usable clip passes")
+    good = score_pcm(_synth("speech"))
+    # The check that keeps this from becoming a scorer that rejects everything. A gate with only
+    # negative cases is passed by `return reject`, and then enrolment can never complete.
+    check(f"a clip with speech in it is accepted ({good.summary()})", not good.reject, good.reason)
+    check("...and its numbers are clear of the thresholds, not scraping them",
+          good.snr_db > MIN_SNR_DB and good.variety > MIN_VARIETY, good.summary())
+
+    print("\n[08.F2] each way a clip can be unusable is named separately")
+    # One "check your setup" message for six different problems sends the owner to fix the wrong
+    # thing — the same reasoning as `separation_verdict` above, at capture time instead of after.
+    cases = (("silence", "no speech", "a silent clip"),
+             ("tone", "no speech", "a steady tone — loud, clean, long, and no speech in it"),
+             ("noise", "noisy", "broadband noise"),
+             ("clipped", "clipping", "a clipped recording"),
+             ("quiet_speech", "quiet", "speech too far from the mic"),
+             ("noisy_speech", "noisy", "speech under a fan"))
+    reasons = {}
+    for kind, expect, desc in cases:
+        q = score_pcm(_synth(kind))
+        reasons[kind] = q.reason
+        check(f"{desc} is rejected, and told apart ({expect})",
+              q.reject and expect in q.reason, f"{q.reason!r} [{q.summary()}]")
+    check("no two failures share a message",
+          len(set(reasons.values())) == len(reasons),
+          "one message for several problems is how a diagnostic stops helping")
+
+    print("\n[08.F2] the measurements themselves")
+    short = score_pcm(_synth("speech", seconds=1.0))
+    check(f"a clip under {MIN_SECONDS}s is rejected on duration",
+          short.reject and "at least" in short.reason, short.reason)
+    check("a clip shorter than one frame does not crash the scorer",
+          score_pcm(b"\x00\x00" * 10).reject)
+    check("an empty recording is rejected, not treated as silence-that-passes",
+          score_pcm(b"").reject)
+    # The bug this measurement had, and the reason it is checked rather than assumed: variety used to
+    # be computed over frames selected by `noise_rms * 2`, which on pure noise selected NOTHING —
+    # every frame has the same energy — and then reported variety 0.0, i.e. "no speech detected", for
+    # a recording that is nothing but noise. It diagnosed the wrong problem, confidently.
+    noise = score_pcm(_synth("noise"))
+    check("noise is diagnosed as noise, not as 'no speech'",
+          noise.variety > MIN_VARIETY and "noisy" in noise.reason,
+          f"variety={noise.variety:.3f} reason={noise.reason!r}")
+    tone = score_pcm(_synth("tone"))
+    check("...while a tone really does read as no speech",
+          tone.variety < MIN_VARIETY, f"variety={tone.variety:.3f}")
+    clipped = score_pcm(_synth("clipped"))
+    check("clipping is measured as a fraction of samples at full scale",
+          clipped.clipping > MAX_CLIPPING, f"{clipped.clipping:.3f}")
+
+    print("\n[08.F2] the enrolment script actually consults it")
+    # A scorer nothing calls is a scorer that changes nothing. Checked structurally because the call
+    # site is inside a mic loop that cannot run in a test.
+    src = (Path(__file__).resolve().parents[1] / "bench" / "enroll_voice.py").read_text(
+        encoding="utf-8")
+    check("enroll_voice imports the scorer", "from afon.edge.enroll_quality import score_pcm" in src)
+    # Counting >= 1 was not enough: deleting the FIRST call left the retry-path call in place, so the
+    # check passed while every clip went in unscored. Both the capture and the retry must score, and
+    # the scoring must happen BEFORE the embedding — after it, the clip is already in the profile.
+    check("...scores both the capture and the re-record", src.count("score_pcm(pcm") == 2,
+          f"{src.count('score_pcm(pcm')} call(s)")
+    check("...before embedding it, not after",
+          src.index("score_pcm(pcm") < src.index("verifier.embed(pcm"),
+          "a quality verdict after the vector is in the profile changes nothing")
+    check("...re-records a rejected segment instead of accepting it",
+          "re-recording this segment" in src)
+    check("...and repeats the warning at the end, where it will be read",
+          "went in below quality" in src,
+          "a warning four screens up during a five-minute read is a warning nobody acts on")
 
 
 if __name__ == "__main__":

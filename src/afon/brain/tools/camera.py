@@ -361,6 +361,94 @@ def _owner_refs():
         return None
 
 
+# ---- 09.F2: judge the capture before it becomes a permanent reference --------------------------
+
+#: Mean frame brightness (0-255) below which a frame is too dark to enrol from. Same number the
+#: burst uses for its exposure early-exit, named once so the two cannot drift apart.
+DARK_FLOOR = 12.0
+
+#: How many frames of the burst must be usable. A burst is 6-30 frames and the owner is allowed to
+#: blink, glance away, or be walked past. Three is a floor on "did the capture work at all" rather
+#: than on diversity — frames from one burst are seconds apart and highly correlated, so the real
+#: angle and lighting variety comes from enrolling more than once (the refs append).
+MIN_USABLE_FRAMES = 3
+
+
+class CaptureVerdict:
+    """What the burst actually contained, and what to tell the owner.
+
+    Enrolment used to answer with one sentence for three different problems: "I couldn't spot a face
+    — sit facing the camera in good light. If someone else is in shot, those frames are skipped."
+    That covers no-face, too-dark and someone-standing-behind-you at once, and the owner cannot tell
+    which of the three to fix. Worse, a burst where every frame held two faces looked identical to a
+    burst where the camera was pointed at a wall — and one of those is a security-relevant near-miss
+    (see `_enroll_from_jpegs`: enrolling a second face makes that person a permanent owner).
+    """
+
+    __slots__ = ("frames", "dark", "empty", "crowded", "usable", "reason")
+
+    def __init__(self, frames: int, dark: int, empty: int, crowded: int, usable: int,
+                 reason: str = "") -> None:
+        self.frames, self.dark, self.empty = frames, dark, empty
+        self.crowded, self.usable, self.reason = crowded, usable, reason
+
+    @property
+    def reject(self) -> bool:
+        return bool(self.reason)
+
+    def summary(self) -> str:
+        return (f"{self.frames} frames: {self.usable} usable, {self.dark} too dark, "
+                f"{self.empty} with no face, {self.crowded} with more than one")
+
+
+def capture_verdict(frames: list) -> CaptureVerdict:
+    """Judge a burst from `(brightness, face_count)` per frame. Pure — no camera, no cv2.
+
+    Deliberately takes measurements rather than JPEGs so the decision can be tested without a webcam
+    and without OpenCV's haar detector, which is the part that cannot be pinned in a hermetic test.
+    """
+    total = len(frames)
+    dark = sum(1 for b, _n in frames if b < DARK_FLOOR)
+    empty = sum(1 for b, n in frames if b >= DARK_FLOOR and n == 0)
+    crowded = sum(1 for b, n in frames if b >= DARK_FLOOR and n > 1)
+    usable = sum(1 for b, n in frames if b >= DARK_FLOOR and n == 1)
+    v = CaptureVerdict(total, dark, empty, crowded, usable)
+    if usable >= MIN_USABLE_FRAMES:
+        return v
+    # Report the DOMINANT cause, in the order that makes the owner's next action unambiguous. Two
+    # faces first: it is the only one of the three with a security consequence, and it is the one
+    # that would otherwise be reported as "I couldn't spot a face" while faces were all it saw.
+    if crowded and crowded >= max(dark, empty):
+        v.reason = (f"someone else was in shot for {crowded} of {total} frames, so I skipped them — "
+                    f"enrolling a second face would make that person a permanent match for you. "
+                    f"Try again alone, sir.")
+    elif dark and dark >= max(empty, crowded):
+        v.reason = (f"too dark — {dark} of {total} frames were under the exposure floor. Turn a light "
+                    f"on or face a window, then try again.")
+    elif empty:
+        v.reason = (f"no face in {empty} of {total} frames — sit facing the lens and look up at it "
+                    f"while I capture.")
+    else:
+        v.reason = (f"only {usable} usable frame{'s' if usable != 1 else ''} of {total}, and I need "
+                    f"{MIN_USABLE_FRAMES} to cover more than one angle.")
+    return v
+
+
+def _frame_measurements(jpegs: list) -> list:
+    """`(brightness, face_count)` per JPEG. The cv2 half of `capture_verdict`."""
+    import cv2
+    import numpy as np
+
+    out = []
+    for j in jpegs:
+        img = cv2.imdecode(np.frombuffer(j, np.uint8), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            out.append((0.0, 0))
+            continue
+        out.append((float(img.mean()), len(_detect_boxes(img))))
+    return out
+
+
 def _enroll_from_jpegs(jpegs: list) -> int:
     """Enrol the owner from frames: store the signature of every detected face. APPENDS to any
     existing refs (each session adds lighting/angle diversity instead of discarding it), keeping the
@@ -598,6 +686,17 @@ async def _enroll_owner_face_local(args: dict) -> str:
     jpegs = await asyncio.to_thread(_capture_burst, idx, shots, 20, 12.0, 0.2)
     if not jpegs:
         return "I couldn't reach the camera to learn your face, sir — check it's connected and not in use."
+    # 09.F2 — judge the burst BEFORE anything is written. An unusable capture used to be reported as
+    # one sentence covering three unrelated problems, and a burst full of two-face frames read as
+    # "I couldn't spot a face" while faces were all it saw.
+    try:
+        verdict = capture_verdict(await asyncio.to_thread(_frame_measurements, jpegs))
+    except Exception as e:  # noqa: BLE001 — a measurement failure must not block enrolment entirely
+        logger.warning(f"camera: capture quality check skipped ({type(e).__name__})")
+        verdict = None
+    if verdict is not None and verdict.reject:
+        logger.info(f"camera enrol rejected — {verdict.summary()}")
+        return f"I didn't learn your face, sir: {verdict.reason}"
     try:
         n = await asyncio.to_thread(_enroll_from_jpegs, jpegs)
     except Exception as e:  # noqa: BLE001

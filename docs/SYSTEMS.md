@@ -959,9 +959,26 @@ per-condition vectors so scoring stays one dot product.
 **Floor**
 - [ ] 08.F1 **Re-enrol on good audio** — the current profile is below target and every downstream
       identity decision inherits that. *gate:* `test_phase5_identity_bench.py` — owner median ≥0.60.
-- [ ] 08.F2 Enrolment quality is *reported at enrolment time*: too short, too noisy, too uniform is
+- [x] 08.F2 Enrolment quality is *reported at enrolment time*: too short, too noisy, too uniform is
       rejected on the spot rather than discovered later.
-      *gate:* `test_enroll_script_parse.py` extended with quality thresholds.
+      `edge/enroll_quality.py` measures each clip before it joins the profile — duration, level and
+      clipping, speech-to-noise-floor, and **spectral variety**, which is the one that catches what
+      the others miss: a hum, a tone or a stretch of silence can be long, loud and clean and contain
+      no speech at all. Six distinct verdicts rather than one "check your setup", for the same reason
+      `separation_verdict` has three: the fixes are different (move closer · turn the fan off · back
+      off the mic · pick the right input device), and one message sends the owner to the wrong one.
+      A rejected segment is re-recorded once, then kept with a warning that is repeated at the end —
+      a script that refuses forever gets abandoned half-enrolled, and a warning four screens above
+      the end of a five-minute read is a warning nobody acts on.
+      **The thresholds are documented as defaults, not measurements**, because there is no enrolment
+      corpus in this repo yet (that is 08.R1). They are set loose deliberately: a false reject costs
+      thirty seconds of re-reading, a false accept costs weeks of a profile nobody can place a
+      threshold inside.
+      *gate:* `test_enroll_script_parse.py` extended — 42/42, twelve plants. Includes a positive case
+      (a scorer that rejects everything passes a gate made only of negatives, and then enrolment can
+      never finish) and the bug the variety measure actually had: frames selected by `noise_rms * 2`
+      selected *nothing* on a clip of pure noise, so it reported "no speech detected" for a recording
+      that was nothing but noise — a measurement that returns zero when it could not measure.
 
 **Raise**
 - [ ] 08.R1 Multi-condition enrolment: near mic, across the room, headset, with music — stored as
@@ -1014,8 +1031,25 @@ confirmed at adoption for anything beyond personal use.**
 **Floor**
 - [ ] 09.F1 **Enrol on ArcFace.** The backend is wired and tested but only the legacy LBP references
       exist. *gate:* `test_face_arcface_backend.py` — a real owner embedding present and loadable.
-- [ ] 09.F2 Enrolment rejects unusable captures (no face, two faces, too dark) at capture time.
-      *gate:* `test_face_recognition.py` extended.
+- [x] 09.F2 Enrolment rejects unusable captures (no face, two faces, too dark) at capture time.
+      Enrolment answered every failed capture with one sentence covering all three: *"I couldn't spot
+      a face — sit facing the camera in good light. If someone else is in shot, those frames are
+      skipped."* The three have different fixes, and the third is the one that matters: multi-face
+      frames are skipped precisely because enrolling a second face makes that person a **permanent**
+      owner match, and best-of-N matching needs only one such reference. A burst in which every frame
+      held two faces was therefore reported as "I couldn't spot a face" — while faces were all it saw.
+      `camera.capture_verdict()` now judges the burst from `(brightness, face_count)` per frame and
+      names the dominant cause, before anything is written. Two-faces is diagnosed first of the three
+      because it is the only one with a security consequence. Taking measurements rather than JPEGs
+      keeps the decision hermetic: OpenCV's haar detector is the part a test cannot pin, and it is not
+      the part that was wrong. A burst that is mostly good with one passer-by frame still enrols —
+      rejecting the whole capture over a bystander is how a working feature gets abandoned — and a
+      failure inside the quality check degrades to enrolling rather than blocking the only path to a
+      face profile.
+      *gate:* `test_face_recognition.py` extended — 35/35, ten plants. Includes the positive case, the
+      write-is-actually-blocked case (enrolment appends, so a bad capture is permanent, not a wasted
+      minute), and a fixture with a frame that is dark *and* faceless — without it, counting a dark
+      frame under both causes is invisible.
 
 **Raise**
 - [ ] 09.R1 Multi-condition capture set with per-condition scores reported after enrolment.
@@ -3388,8 +3422,8 @@ green, `E` = elite green.
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
 | S07 | Session & Context | structured badly | 0/3 | 0/3 | 0/1 |
-| S08 | Voice Enrollment | weak | 0/2 | 0/3 | 0/1 |
-| S09 | Face Enrollment | not enrolled | 0/2 | 0/3 | 0/1 |
+| S08 | Voice Enrollment | weak | 1/2 | 0/3 | 0/1 |
+| S09 | Face Enrollment | not enrolled | 1/2 | 0/3 | 0/1 |
 | S10 | Voice Recognition | structured badly | 2/3 | 0/3 | 0/1 |
 | S11 | Face Recognition | structured badly | 2/3 | 0/3 | 0/1 |
 | S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
@@ -3432,7 +3466,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 79 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 79 of 360.**
+**Totals: 81 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 81 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
