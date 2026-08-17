@@ -1179,9 +1179,26 @@ skip the occupancy cascades entirely when a frontal face was already found.
 - [x] 11.F1 "Nobody there" and "can't tell" are different answers; the confirm gate fails open on
       the latter (fixed 2026-08-13). *gate:* `test_camera.py`, `test_face_second_factor.py`
 - [x] 11.F2 ArcFace backend wired with a legacy fallback. *gate:* `test_face_arcface_backend.py`
-- [ ] 11.F3 **Liveness.** A printed photo or a phone screen currently passes. Add a cheap
-      anti-spoof (blink / micro-motion / texture) before the camera is ever load-bearing.
-      *gate:* new `test_face_liveness.py` — static-image fixtures rejected, live frames accepted.
+- [x] 11.F3 **Liveness.** A printed photo or a phone screen used to pass. *gate:* new
+      `test_face_liveness.py` (29/29) — static-image fixtures rejected, live frames accepted.
+      The threat was narrower and worse than "spoof your way in": `matched` never authorises
+      anything, it only declines to refuse, so a photo **propped against the monitor** granted
+      `matched` on every check from then on and silently retired the second factor. Nothing reported
+      it. `liveness_verdict()` differences consecutive face crops after removing whole-crop
+      translation by phase correlation — a raw frame difference is dominated by haar box jitter,
+      which moves the crop for a print and a face alike. What is left is the non-rigid change.
+      A still burst **withdraws** the verdict (`available` goes False) rather than inverting it:
+      reporting `matched: false` would send the caller down the "someone is there and it is not him"
+      branch and block a very still owner, which is the absence claim 11.F1 forbids. Liveness runs
+      only when he matched — the only verdict it can change — and a check that throws leaves
+      behaviour exactly as it was, rather than quietly retiring the factor it guards.
+      **Two gaps, measured and asserted rather than implied** (`test_face_liveness.py` [2b]): a print
+      held in a *hand* jitters sub-pixel, which resamples and blurs, and that survives alignment —
+      3.5 against a moving face's 4.5, a margin but not a separation; and a *video replay* has
+      genuine micro-motion and is not addressed at all. Sizing either needs real prints on this
+      camera in this room, not the synthetic fixtures, so both are **11.R1's corpus**. Shipping the
+      narrow version is still right: an uncaught spoof leaves the second factor exactly where it was
+      before this existed, while the propped photo it does catch was permanent.
 
 **Raise**
 - [ ] 11.R1 Recognition under real desk conditions: backlight, partial profile, glasses.
@@ -3446,7 +3463,7 @@ green, `E` = elite green.
 | S08 | Voice Enrollment | weak | 1/2 | 0/3 | 0/1 |
 | S09 | Face Enrollment | not enrolled | 1/2 | 0/3 | 0/1 |
 | S10 | Voice Recognition | structured badly | 3/3 | 0/3 | 0/1 |
-| S11 | Face Recognition | structured badly | 2/3 | 0/3 | 0/1 |
+| S11 | Face Recognition | structured badly | 3/3 | 0/3 | 0/1 |
 | S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
 | S13 | Notifications | structured badly | 2/3 | 0/3 | 0/1 |
 | S14 | Proactivity | complete for now | 2/3 | 0/3 | 0/1 |
@@ -3487,7 +3504,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 82 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 82 of 360.**
+**Totals: 83 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 83 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

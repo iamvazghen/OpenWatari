@@ -149,6 +149,8 @@ TESTS = [
      "test_face_identity_separation.py", "offline", ["checks passed ==="]),
     ("Face ArcFace backend: real embeddings when available, LBP fallback when not — never mixed",
      "test_face_arcface_backend.py", "offline", ["checks passed ==="]),
+    ("Face liveness (11.F3): a photograph propped at the camera withdraws the second factor",
+     "test_face_liveness.py", "offline", ["checks passed ==="]),
     ("Ops scripts (J4.4): the deploy parses, its gates stay in order, the restart stays LAST",
      "test_ops_scripts.py", "offline", ["checks passed ==="]),
     ("Deploy prune (H2.13): --prune removes stale code on the brain, and refuses everything else",

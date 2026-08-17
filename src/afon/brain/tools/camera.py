@@ -449,6 +449,119 @@ def _frame_measurements(jpegs: list) -> list:
     return out
 
 
+# ---- liveness: is that a face, or a picture of one? (SYSTEMS.md 11.F3) -------------------------
+# The camera is a SECOND FACTOR whose only power is to block: `matched` does not authorise anything,
+# it just declines to refuse. So the attack that mattered was never "spoof your way in" — it was a
+# printed photo of the owner propped in front of the webcam, which grants `matched` on every check
+# forever and silently retires the second factor. Nothing would have reported that.
+#
+# What this covers, precisely: a burst that is the SAME IMAGE, held still relative to the camera — a
+# print propped against the monitor, a photo taped up, a paused screen. That is the attack worth
+# closing, because it is the one that is silently PERMANENT.
+#
+# What it does NOT cover, measured rather than assumed (bench/test_face_liveness.py [2b]):
+#   * a print held in a HAND. Sub-pixel jitter resamples, resampling blurs, and blur survives
+#     alignment, so it arrives as motion: ~3.5 against a moving face's ~4.5, with the floor at 2.0.
+#     There is a margin but not a separation, and sizing it needs real prints on this camera, not
+#     synthetic fixtures (11.R1's corpus).
+#   * a VIDEO replay, which has genuine micro-motion. That is the texture-CNN / depth-camera tier the
+#     plan declines until the cheap check has been measured and found wanting.
+# Both are stated here and asserted in the gate, because a check believed to stop more than it does
+# stops being watched — and the cost of each gap is bounded: an uncaught spoof leaves the second
+# factor exactly where it was before this existed.
+#
+# The measurement is a frame difference, which is what the plan specifies — done properly. A raw
+# difference is dominated by haar box jitter: the detector's box wanders a few pixels between frames,
+# which moves the whole crop and swamps the signal for a live face and a photograph alike. So each
+# pair is aligned by phase correlation first, and what is left is the NON-RIGID change: expression,
+# blink, the parallax of a face that has depth. A flat picture has none of it, however much the hand
+# holding it shakes.
+#
+# ponytail: the thresholds are defaults from the geometry (100x100 equalised crops, 8-bit grey), not
+# measurements — there is no spoof corpus in this repo. MIN_LIVENESS_MOTION is deliberately LOW: it
+# is sized to catch the unambiguous still image and to let anything arguable through, because a false
+# "still" verdict only removes the second factor (see _verify_owner_present_local) while a false
+# "live" verdict leaves things exactly as they were before this existed.
+
+#: Mean absolute grey-level change between shift-corrected consecutive face crops, below which the
+#: burst is one image rather than a face.
+MIN_LIVENESS_MOTION = 2.0
+#: Face crops needed before liveness can be judged at all. Fewer is "can't tell", never "still".
+MIN_LIVENESS_FRAMES = 4
+#: Border to drop before differencing. Warping and box jitter both corrupt the edges of a crop, and
+#: those edges are where a rigid shift leaves its largest residue — exactly the confound being removed.
+_LIVENESS_MARGIN = 8
+
+
+class Liveness:
+    """One burst, judged. ``verdict`` is "live" | "still" | "unknown"; ``reason`` is what to log."""
+
+    __slots__ = ("verdict", "motion", "frames", "reason")
+
+    def __init__(self, verdict: str, motion: float, frames: int, reason: str) -> None:
+        self.verdict, self.motion, self.frames, self.reason = verdict, motion, frames, reason
+
+    @property
+    def live(self) -> bool:
+        return self.verdict == "live"
+
+    def summary(self) -> str:
+        return f"{self.verdict} ({self.frames} frames, motion {self.motion:.2f})"
+
+
+def _aligned_diff(a, b) -> float:
+    """Mean |a - b| over two face crops, after removing whole-crop translation.
+
+    Translation is the confound: the haar box wanders between frames, so an unaligned difference
+    measures the detector's jitter rather than the face. Phase correlation finds that shift in one
+    FFT pair and it is subtracted, leaving only what changed WITHIN the face.
+    """
+    import cv2
+    import numpy as np
+
+    fa, fb = a.astype(np.float32), b.astype(np.float32)
+    try:
+        (dx, dy), _ = cv2.phaseCorrelate(fa, fb)
+    except Exception:  # noqa: BLE001 — a failed alignment measures more motion, never less
+        dx = dy = 0.0
+    if abs(dx) > 0.05 or abs(dy) > 0.05:
+        shift = np.float32([[1, 0, -dx], [0, 1, -dy]])
+        fb = cv2.warpAffine(fb, shift, (fb.shape[1], fb.shape[0]),
+                            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    m = _LIVENESS_MARGIN
+    return float(np.mean(np.abs(fa[m:-m, m:-m] - fb[m:-m, m:-m])))
+
+
+def liveness_verdict(crops: list) -> Liveness:
+    """Judge a burst of aligned face crops (one per frame, as `_gray_faces` returns them)."""
+    n = len(crops)
+    if n < MIN_LIVENESS_FRAMES:
+        return Liveness("unknown", 0.0, n,
+                        f"only {n} frame(s) with a face — too few to tell a person from a picture")
+    diffs = [_aligned_diff(crops[i], crops[i + 1]) for i in range(n - 1)]
+    motion = sum(diffs) / len(diffs)
+    if motion < MIN_LIVENESS_MOTION:
+        return Liveness("still", motion, n,
+                        f"the face did not change across {n} frames (motion {motion:.2f} < "
+                        f"{MIN_LIVENESS_MOTION}) — a photograph or a screen, not a person")
+    return Liveness("live", motion, n, f"micro-motion across {n} frames (motion {motion:.2f})")
+
+
+def _burst_crops(jpegs: list, limit: int = 6) -> list:
+    """The first face crop from each of up to `limit` frames — the input to `liveness_verdict`.
+
+    ponytail: first face, not largest. A second person in shot is already the multi-face case that
+    `_enroll_from_jpegs` skips and `_majority_matched` votes on; picking a different face per frame
+    would only inflate the motion figure, which errs toward "live" — the safe direction here.
+    """
+    out = []
+    for j in jpegs[:limit]:
+        faces = _gray_faces(j)
+        if faces:
+            out.append(faces[0])
+    return out
+
+
 def _enroll_from_jpegs(jpegs: list) -> int:
     """Enrol the owner from frames: store the signature of every detected face. APPENDS to any
     existing refs (each session adds lighting/angle diversity instead of discarding it), keeping the
@@ -615,7 +728,8 @@ async def verify_owner_present() -> dict:
     """I1 — a STRUCTURED owner verdict for use as a second authorisation factor.
 
     ``visual_presence`` answers the owner in prose, which is right for him and useless to a gate.
-    This returns ``{"available": bool, "matched": bool, "faces": int, "evidence": bool}``:
+    This returns ``{"available": bool, "matched": bool, "faces": int, "evidence": bool,
+    "live": bool | None}``:
 
       * ``available`` False — no camera, no enrolment, or the laptop is offline. The caller must then
         fall back to whatever it did before. A second factor that LOCKS THE OWNER OUT when a webcam is
@@ -628,6 +742,10 @@ async def verify_owner_present() -> dict:
         cannot rule on that, so this is a CAN'T TELL, not a negative verdict. Reporting it as an
         empty room told the owner "nobody is at the desk" while he sat at it.
       * ``available`` True, ``matched`` False, ``faces`` >0 — someone is there and it is not him.
+      * ``live`` — False means the matching face never moved across the burst, i.e. a photograph or a
+        screen (11.F3). That WITHDRAWS the verdict (``available`` goes False) rather than inverting
+        it, so a very still owner is never accused of being an impostor. None means liveness was not
+        consulted, which is every case where he did not match and it could change nothing.
 
     Not a tool: nothing should let the MODEL decide whether the owner is present.
     """
@@ -635,11 +753,13 @@ async def verify_owner_present() -> dict:
     try:
         d = json.loads(raw)
         return {"available": bool(d.get("available")), "matched": bool(d.get("matched")),
-                "faces": int(d.get("faces") or 0), "evidence": bool(d.get("evidence"))}
+                "faces": int(d.get("faces") or 0), "evidence": bool(d.get("evidence")),
+                # None = liveness was not consulted (he did not match, so it could change nothing).
+                "live": None if d.get("live") is None else bool(d.get("live"))}
     except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
         # _dispatch turns a dropped PC_LINK into a spoken sentence rather than JSON — that is the
         # "can't tell" case, not a negative verdict.
-        return {"available": False, "matched": False, "faces": 0, "evidence": False}
+        return {"available": False, "matched": False, "faces": 0, "evidence": False, "live": None}
 
 
 async def _verify_owner_present_local(_args: dict) -> str:
@@ -662,9 +782,31 @@ async def _verify_owner_present_local(_args: dict) -> str:
                 if await asyncio.to_thread(_person_evidence, j):
                     evidence = True
                     break
-        return json.dumps({"available": True,
-                           "matched": _majority_matched(results),
-                           "faces": faces, "evidence": evidence})
+        matched = _majority_matched(results)
+        # 11.F3 — only when he MATCHED, because that is the only verdict liveness can change, and a
+        # second haar pass over the burst is not free on a confirm-gate's critical path.
+        live = None
+        if matched:
+            try:
+                verdict = await asyncio.to_thread(lambda: liveness_verdict(_burst_crops(jpegs)))
+                live = verdict.live
+                if not live:
+                    # WITHDRAW the verdict; never invert it. Reporting "matched: false" here would
+                    # send the caller down the "someone is there and it is not him" path and BLOCK a
+                    # very still owner — the same absence claim 11.F1 exists to forbid. Unavailable
+                    # means can't-tell, and can't-tell behaves exactly as it did before the camera
+                    # was a factor at all: the action proceeds on the spoken yes.
+                    logger.warning(f"face second factor: WITHDRAWN — {verdict.reason}. If this "
+                                   "repeats, check whether a photograph is propped in front of the "
+                                   "camera.")
+                    return json.dumps({"available": False, "matched": False, "faces": faces,
+                                       "evidence": evidence, "live": False})
+            except Exception as e:  # noqa: BLE001
+                # A broken liveness check must not quietly retire the second factor — same rule as
+                # the enrolment quality gate. Degrade to the behaviour that existed before it.
+                logger.warning(f"face second factor: liveness check skipped ({type(e).__name__}: {e})")
+        return json.dumps({"available": True, "matched": matched, "faces": faces,
+                           "evidence": evidence, "live": live})
     except Exception as e:  # noqa: BLE001 — an unreadable camera is "can't tell", never "not him"
         logger.warning(f"face second factor: camera check failed ({type(e).__name__}: {e})")
         return json.dumps({"available": False, "matched": False, "faces": 0})
