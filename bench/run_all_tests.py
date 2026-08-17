@@ -225,6 +225,8 @@ TESTS = [
      "test_memory_salience.py", "offline", ["checks passed ==="]),
     ("30.F1: one memory origin — every store follows one state root, and a merge unions two hosts",
      "test_memory_single_origin.py", "offline", ["checks passed ==="]),
+    ("01.F2: calibrated uncertainty — an unknowable is not answered flat, an answerable is not refused",
+     "test_uncertainty.py", "offline", ["checks passed ==="]),
     ("B1: intent router — high-precision intents narrow to the one right tool; multi-intent/chat untouched",
      "test_intent_router.py", "offline", ["checks passed ==="]),
     ("B6: clause routing — each clause of a multi-intent turn asks for its own tool, not just the first",

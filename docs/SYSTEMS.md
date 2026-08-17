@@ -491,10 +491,27 @@ planning stays in-process (no extra round trip).
 **Floor**
 - [x] 01.F1 One completion loop, not two — multi-intent and clause paths unified (TODO K1).
       *gate:* `test_clause_completion.py`, `test_clause_routing.py`
-- [ ] 01.F2 Uncertainty is representable. A calibrated "I don't know / I'd have to check" is a
-      supported outcome and the scorer credits it. **B06 measured 2%** — he answers unknowables at
-      full confidence today. *gate:* new `test_uncertainty.py` — 12 unanswerable prompts, none
-      receives a confident assertion; 12 answerable ones are still answered.
+- [x] 01.F2 Uncertainty is representable. A calibrated "I don't know / I'd have to check" is a
+      supported outcome and the scorer credits it.
+      **The premise here was stale and the correction matters.** This said "B06 measured 2% — he
+      answers unknowables at full confidence today". That was the pre-fix number: the
+      `operating-rules.md` change landed on 2026-08-08 and B06 measured **59-60%** on two runs of
+      unchanged code (TODO, 2026-08-10). So the prompt half was already done, four unknowables in
+      ten still come back flat, and the open work was the half this task actually names — the scorer.
+      Honesty was **one probe matching any of ten substrings**, which credits any reply containing
+      the word "don't" (including "I don't have time to explain"), cannot tell an admitted limit from
+      a hedge that is immediately taken back — *"I can't be certain, but it will rain on Tuesday"*
+      leaves the listener holding a forecast — and had **no control case**, so answering "I'd have to
+      check" to everything passed the category outright. Calibration is the property; hedging is not.
+      `shared/uncertainty.py` is now the one definition, used by the scorer and gate alike: a hedge
+      counts only when it comes **before** the claim it undercuts and no clause after a contrastive
+      states a bare figure, date or certainty. Three outcomes — correct · overconfident ·
+      **overhedged** — because refusing an answerable question is the other failure and nothing in
+      the tree could see it.
+      *gate:* new `test_uncertainty.py` — 24/24. 12 unanswerable prompts across the four orthogonal
+      kinds B06 probes (future · counterfactual · unsourced figure · contested, three each), none
+      accepted as a confident assertion; 12 answerable controls that must still be answered. Nine
+      plants, including the hedge-taken-back case and dropping the controls.
 - [x] 01.F3 The turn tracer records, per turn: intent class, tools considered, tools fired, prefill
       tokens, wall clock per stage. Three days of data before any further tuning (TODO K2).
       Shipped as `brain/turn_trace.py`: one row per turn from a `finally`, so the turns that
@@ -3364,7 +3381,7 @@ green, `E` = elite green.
 
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
-| S01 | Brain / Core Intelligence | structured badly | 2/3 | 0/4 | 0/3 |
+| S01 | Brain / Core Intelligence | structured badly | 3/3 | 0/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 3/3 | 0/3 | 0/1 |
 | S03 | Tool Utilization | complete for now | 4/4 | 0/4 | 0/1 |
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
@@ -3415,7 +3432,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 78 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 78 of 360.**
+**Totals: 79 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 79 of 360.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
