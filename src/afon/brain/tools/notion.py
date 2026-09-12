@@ -361,6 +361,35 @@ async def notion_tasks_structured() -> list[dict]:
         return []
 
 
+async def queue_pointer_ok() -> tuple[bool, str]:
+    """Is the configured tasks database actually there? (16.F3)
+
+    The pointer went stale for weeks and nothing noticed, because every caller treats a failed query
+    as "no tasks" — an empty answer and a broken pointer are indistinguishable at the call site. So
+    this asks the one question that separates them: retrieve the database itself.
+
+    Returns `(ok, detail)` for a health snapshot. Not configured is **not** a fault: an owner who has
+    not wired Notion has nothing broken. A configured pointer that 404s is a fault, and a loud one,
+    because the visible symptom is a brief that cheerfully says nothing is due.
+    """
+    db_id = (settings.notion_tasks_db_id or "").strip()
+    if not settings.notion_token:
+        return True, "notion not configured (optional)"
+    if not db_id:
+        return True, "no tasks database configured (optional)"
+    try:
+        d = await _get(f"/databases/{db_id}")
+    except Exception as e:  # noqa: BLE001
+        return False, f"tasks database unreachable ({type(e).__name__})"
+    # The API answers 200 with an error object for a bad id, so the status code alone is not the
+    # answer — which is exactly how a stale pointer survived: something came back and looked fine.
+    if isinstance(d, dict) and d.get("object") == "error":
+        return False, f"tasks database rejected: {d.get('code') or 'unknown'}"
+    if not (isinstance(d, dict) and d.get("id")):
+        return False, "tasks database returned no id"
+    return True, "tasks database reachable"
+
+
 async def overdue_and_today() -> tuple[list[str], list[str]]:
     """Structured (overdue_titles, due_today_titles) from the Notion tasks DB, for the daily digest.
 

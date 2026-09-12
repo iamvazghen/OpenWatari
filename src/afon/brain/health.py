@@ -79,7 +79,25 @@ def _check_cache() -> tuple[bool, str]:
 #: what this snapshot looked at, so a component added here cannot silently fall out of the sentence
 #: (and one that is never added cannot be implied by it).
 _SPOKEN = {"vault": "your vault", "ticker": "reminders", "cache": "the cache",
-           "pc_link": "the laptop"}
+           "pc_link": "the laptop", "task_queue": "your task board"}
+
+
+async def _check_task_queue() -> tuple[bool, str]:
+    """The external task-queue pointer (16.F3).
+
+    Its database id went stale for weeks and nothing noticed, because every caller reads a failed
+    query as "no tasks": an empty queue and a broken pointer look identical at the call site. The
+    visible symptom was a morning brief cheerfully reporting nothing due. Not configured is not a
+    fault; a configured pointer that does not resolve is.
+    """
+    try:
+        from afon.brain.tools.notion import queue_pointer_ok
+
+        return await queue_pointer_ok()
+    except Exception as e:  # noqa: BLE001
+        # A health check that raises takes the whole snapshot with it, which would hide the four
+        # components that were fine.
+        return False, f"task queue check failed ({type(e).__name__})"
 
 
 async def check() -> dict:
@@ -95,11 +113,13 @@ async def check() -> dict:
     ticker_ok, ticker_msg = await _check_ticker()
     cache_ok, cache_msg = _check_cache()
     pc_ok, pc_msg = _check_pc_link()
+    queue_ok, queue_msg = await _check_task_queue()
     return {
         "vault": {"ok": vault_ok, "detail": vault_msg},
         "ticker": {"ok": ticker_ok, "detail": ticker_msg},
         "cache": {"ok": cache_ok, "detail": cache_msg},
         "pc_link": {"ok": pc_ok, "detail": pc_msg},
+        "task_queue": {"ok": queue_ok, "detail": queue_msg},
     }
 
 
@@ -135,6 +155,13 @@ async def health_signals() -> list[Signal]:
         signals.append(Signal(
             key="health-ticker", kind="health", urgency=0.65,
             message="Sir, your always-on reminder host isn't responding — recurring reminders may not fire.",
+        ))
+    if not snap["task_queue"]["ok"]:
+        signals.append(Signal(
+            key="health-task-queue", kind="health", urgency=0.7,
+            message=("Sir, I can't resolve your task board — "
+                     f"{snap['task_queue']['detail']}. Anything I say about what's due is "
+                     "incomplete until that's fixed."),
         ))
     # No signal for pc_link on purpose: a closed laptop is a normal state of the world. It is
     # reported in the snapshot and spoken when he ASKS how he is, never pushed at him.

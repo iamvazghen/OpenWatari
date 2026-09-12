@@ -102,6 +102,40 @@ async def main() -> None:
     gm.important_email_phrase = lambda: _empty1()
     check("no tasks + no email -> ''", (await dd.build_body()) == "")
 
+    print("\n[2b] a failed source degrades its section, never the brief  [source down]")
+
+    async def boom_overdue():
+        raise RuntimeError("notion 404")
+
+    async def boom_email():
+        raise RuntimeError("gmail token expired")
+
+    # One source down, the other fine: the good section is still delivered, and the gap is named.
+    nt.overdue_and_today = boom_overdue
+    gm.important_email_phrase = fake_email
+    body = await dd.build_body()
+    check("a working section still reaches him", "3 important emails unread" in body, body)
+    check("the failed source is NAMED", "task board" in body, body)
+    check("and the gap is admitted", "may be incomplete" in body, body)
+    check("last_failed() reports the id", dd.last_failed() == ["notion"], str(dd.last_failed()))
+
+    # Every source down. '' would be read by the caller as "nothing worth saying", which is how the
+    # single most alarming morning produced silence.
+    nt.overdue_and_today = boom_overdue
+    gm.important_email_phrase = boom_email
+    body = await dd.build_body()
+    check("total failure is NOT silence", body != "", repr(body))
+    check("it says a full brief is not possible", "can't give you a full brief" in body, body)
+    check("and names both sources", "task board" in body and "your mail" in body, body)
+    check("last_failed() reports both", dd.last_failed() == ["notion", "gmail"],
+          str(dd.last_failed()))
+
+    # The contract that a genuinely empty day stays empty must survive all of the above.
+    nt.overdue_and_today = lambda: _empty2()
+    gm.important_email_phrase = lambda: _empty1()
+    check("a complete brief with nothing in it is still ''", (await dd.build_body()) == "")
+    check("and last_failed() is clear again", dd.last_failed() == [], str(dd.last_failed()))
+
     print("\n[3] due()/mark_delivered() gate each channel once per day, persisted")
     dd._save({})
     check("edge due on a fresh day", dd.due("edge"))

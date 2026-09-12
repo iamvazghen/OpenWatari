@@ -137,6 +137,65 @@ def main() -> None:
     check("undated inbox surfaced", "inbox" in out and "Refactor the parser" in out, out)
     check("completed task excluded", "Old finished thing" not in out, out)
 
+    print("\n[queue pointer] a stale tasks database is LOUD, not an empty task list  [16.F3]")
+    import afon.brain.health as _h
+
+    _saved = (notion._get, settings.notion_token, settings.notion_tasks_db_id, _h.check)
+    try:
+        settings.notion_token, settings.notion_tasks_db_id = "tok", "deadbeef"
+
+        # Notion answers 200 with an error OBJECT for a bad id, so a status code is not the answer.
+        # That is precisely how the stale pointer survived for weeks: something came back, and it
+        # looked fine.
+        async def _error_object(path):
+            return {"object": "error", "code": "object_not_found", "status": 404}
+
+        notion._get = _error_object
+        ok, detail = asyncio.run(notion.queue_pointer_ok())
+        check("a 404-as-200 error object is a FAULT", ok is False, detail)
+        check("and the detail names the reason", "object_not_found" in detail, detail)
+
+        async def _no_id(path):
+            return {"object": "database"}
+
+        notion._get = _no_id
+        check("a response with no id is a fault too",
+              asyncio.run(notion.queue_pointer_ok())[0] is False)
+
+        async def _fine(path):
+            return {"object": "database", "id": "deadbeef"}
+
+        notion._get = _fine
+        check("a real database resolves", asyncio.run(notion.queue_pointer_ok())[0] is True)
+
+        # Not configured is NOT a fault: an owner who never wired Notion has nothing broken.
+        settings.notion_token = None
+        check("unconfigured is not a fault", asyncio.run(notion.queue_pointer_ok())[0] is True)
+        settings.notion_token, settings.notion_tasks_db_id = "tok", ""
+        check("a token with no database is not a fault either",
+              asyncio.run(notion.queue_pointer_ok())[0] is True)
+
+        # The whole point of 16.F3: it must reach the OWNER as a signal, not only a log line.
+        settings.notion_tasks_db_id = "deadbeef"
+        notion._get = _error_object
+        queue = asyncio.run(_h._check_task_queue())
+        check("the health snapshot carries the queue as a component", queue[0] is False, queue[1])
+
+        async def _degraded_snapshot():
+            return {"vault": {"ok": True, "detail": ""}, "ticker": {"ok": True, "detail": ""},
+                    "cache": {"ok": True, "detail": ""}, "pc_link": {"ok": True, "detail": ""},
+                    "task_queue": {"ok": queue[0], "detail": queue[1]}}
+
+        _h.check = _degraded_snapshot
+        sigs = asyncio.run(_h.health_signals())
+        keys = [s.key for s in sigs]
+        check("an unreachable queue raises a health signal", "health-task-queue" in keys, str(keys))
+        if "health-task-queue" in keys:
+            msg = next(s.message for s in sigs if s.key == "health-task-queue")
+            check("and the signal says what it means for his answers", "incomplete" in msg, msg)
+    finally:
+        notion._get, settings.notion_token, settings.notion_tasks_db_id, _h.check = _saved
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

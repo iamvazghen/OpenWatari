@@ -90,6 +90,11 @@ inherits. Concretely, three prohibitions apply everywhere:
    token cost and pay for it. The tool catalogue is the dominant per-turn cost (TODO K2).
 3. **No silent work.** Every background loop declares its period, its budget, and its kill switch,
    and appears in the HUD.
+4. **A budget with no enforcement is a wish.** Added 2026-09-12. Every budget in this document is
+   currently a number a test checks after the fact. At least the three on the answer path — prefill
+   tokens, catalogue tokens, p95 turn latency — must *degrade the system automatically* when they are
+   breached: narrow the catalogue, drop to a cheaper model, go quieter. And say so, because silent
+   degradation is the failure mode this whole document is written against. See 31.R5.
 
 ---
 
@@ -175,6 +180,10 @@ by saying so and giving a reason.
 | Schemathesis | It fuzzes the OpenAPI surface *you* expose; Afon consumes APIs and exposes almost none. |
 | pytest as the runner | Deliberate, and load-bearing: `run_all_tests.py` executes each bench file as a **subprocess**, so every test runs standalone with no conftest and no shared harness that the failure under diagnosis could itself have broken (J3.1). pytest is fine *inside* a file; it is not the gate. |
 | Rust / Go rewrites | Nothing is measured CPU-bound. The latency budget is model inference and network. |
+| A digital twin / simulation layer for the home (proposed 2026-09-12) | Recommended in the same review that praised this plan for refusing over-engineering, which is the tell. For one owner's smart home the proportionate version is a dry-run flag on scene application (S28), not a simulated model of the house to keep in step with the house. |
+| Household / multi-user sophistication (proposed 2026-09-12) | Out of scope by design, and not cheaply retrofitted: the confirm tier, the biometric gate and `pass` all assume exactly one principal. Guest mode (S25) covers "someone else is in the room"; it deliberately does not cover a second owner. |
+| Write-behind / durable-queue memory writes (proposed 2026-09-12) | Buys write throughput nobody here needs and creates a window in which a fact is acknowledged and not stored. For a memory system that is the wrong trade at any throughput. |
+| A 7–8B local model on the brain host | No GPU, and the host already OOMed on one embedding worker (2026-08-31). A local tier is welcome at the size that fits: see 03.R1. |
 
 ---
 
@@ -270,6 +279,7 @@ process, two laptop processes, and a set of stores.
 | **3 · Cross-system scenario** | Several systems produce one coherent outcome | A journey: drive the agent with stubbed *externals* but real internals, then assert on spoken output, emitted signals **and final store state**. |
 | **4 · Behavioural** | The whole assistant, judged | `behavioral_suite.py` against the deployed brain with a real model and an LLM judge, median-5. |
 | **5 · Live drill** | Reality, once | A recorded run: unplug the VPS, churn the AirPods, sit at the desk. Logged in `TODO.md` with a date. |
+| **6 · Continuous** | Reality, always | Added 2026-09-12. Every real turn scored in the background against the same rubric the behavioural suite uses, with the outcome recorded: did he act, ignore, correct, or repeat himself. Tiers 1–5 all test what we thought to write down; this is the only tier whose cases the owner writes by living. It is what 31.R6 builds. |
 
 **The journeys (tier 3) are the coherence suite.** Each crosses many systems, and each asserts three
 things — what he said, what he emitted, and what the stores hold afterwards. Golden state snapshots
@@ -321,6 +331,38 @@ waves, and do not start a wave until the previous wave's floors are green.
 | **4 — Reach & control** | S04, S05, S12, S19, S20, S28, S29, S38, S42, S43 | Hands, devices, homes, channels. |
 | **5 — Judgment** | S25, S41, S44, S45, S37, S39, S48 | Personality, research, ethics, explanation, delegation. |
 | **6 — New ground** | S06, S15, S32, S34, S35, S40, S46, S47, S49, S50 | The systems that are missing or half-built; floors first, then raise. |
+
+### The unpark gate — added 2026-09-12, and it outranks every raise in this document
+
+**Afon goes back into production when Wave 3's floors are green. Not when the raises are done, and
+not when the behavioural score reaches 95.**
+
+This is a change, and the reason is that the current order has a failure mode nobody had named:
+*it never finishes.* Two independent reviews landed on the same risk from opposite directions — 424
+engineering-days is one to two years of realistic solo throughput, and a culture where nothing lands
+red plus a target of ≥95 with no category below 90 can keep the system parked while floors are
+polished forever. Both are right, and the plan as written had no answer.
+
+The deciding argument is not schedule pressure, it is evidence. **He has been parked since
+2026-08-13. Zero real turns have been measured since.** Every gate in this document tests what we
+imagined a turn would do. The behavioural suite is the closest thing to truth here and it is a
+periodic exam against fixtures, run by us, scored by a judge we chose. Nothing in 366 tasks tells us
+what actually happens when the owner talks to him for a week.
+
+So: **floors are the product. Raises and elite are optional improvements, and they wait.** A raise
+may only jump the queue if a floor it blocks cannot pass without it, and that has to be said in the
+task.
+
+What must hold before the lock comes off, beyond Wave 3's floors:
+
+| | Why |
+|---|---|
+| Wave 0 floors green | Watchable and recoverable before trusted. Already green. |
+| Wave 1 + 2 + 3 floors green | Organs, senses, daily loop. |
+| 31.R5 and 31.R6 shipped | Governors and continuous evaluation. These are the two raises that make unparking *safe* rather than hopeful, which is why they are the exception to the rule above. |
+| One live drill recorded | Tier 5. Unplug the VPS, churn the AirPods, sit at the desk. |
+
+After that, the order is set by what real use shows, not by this document's numbering.
 
 ---
 
@@ -722,6 +764,13 @@ A router that calls a model to choose tools adds a round trip to every turn — 
 get deterministically. *Test:* a 60-prompt reachability corpus · fuzzing · schema validation →
 **corpus + validation**; reachability is the number that matters (correct tool still findable at
 ≤20 presented).
+**Already shipped, so it stops being recommended.** A 2026-09-12 review named an intent-gated
+catalogue as the single highest-leverage change available. It is largely built: `intent_router.py`
+narrows to the one tool a high-precision intent needs and forces the call, and `tools/__init__.py`
+loads families lazily (`groups_for_text`, `core_tool_schemas`, `group_tool_schemas`). It is rules,
+not a model, and for this job that is a feature — deterministic, readable, and testable without a
+corpus. What is actually left is measurement and schema size (03.R1, 03.R5), not architecture.
+
 **Open-source base.** jsonschema (MIT) for pre-dispatch validation; pydantic v2 (MIT) only if schema
 authoring becomes the bottleneck.
 **Speed & efficiency.** 58 tools ≈10k tokens today → ≤20 / ≤2.5k · minify schemas (drop prose the
@@ -759,14 +808,36 @@ cannot own the turn.
 
 **Raise**
 - [ ] 03.R1 Two-stage selection: a cheap router picks a *family* (10–20 tools), the model picks
-      within it. *gate:* new `test_catalogue_narrowing.py` — 60 prompts, correct tool still reachable
-      ≥98% at ≤20 presented.
+      within it. **The bar is the rules it would replace**, not the full catalogue: today's
+      `intent_router` already narrows, so a learned router that scores worse than it is a regression
+      wearing a model. If a model is used at all it is the size that fits the host — an embedding
+      plus a linear classifier, or a distilled ~100MB classifier with a declared RSS ceiling.
+      *gate:* new `test_catalogue_narrowing.py` — 60 prompts, correct tool still reachable ≥98% at
+      ≤20 presented, **and no worse than `intent_router` on the same 60**.
 - [ ] 03.R2 Argument validation before dispatch, with a repair prompt on the first failure only.
       *gate:* `test_reminder_args.py`, `test_tool_error_handling.py`
 - [ ] 03.R3 Chaining: a result that obviously feeds another (search→open, contact→message) chains in
       one turn, not across two. *gate:* new `test_tool_chaining.py`
 - [ ] 03.R4 Dead-tool sweep: every tool not fired in 90 days is either exercised by a bench case or
       retired. *gate:* `test_tool_usage.py` extended with a staleness report.
+- [ ] 03.R5 **Schema minification.** The catalogue is the dominant per-turn cost and its *size* has
+      never been attacked, only its membership: descriptions written for a human reader, parameters
+      no caller sets, names longer than they need to be. Measure first with `tiktoken`, then cut, and
+      keep a hard per-turn ceiling with an automatic fallback to one clarifying question when the
+      router is unsure.
+      *gate:* `test_speed.py` [catalogue-tokens] — a declared ceiling, enforced, with the before and
+      after recorded; `test_registry_complete.py` still green, because a minified schema that the
+      model can no longer use is not a saving.
+- [ ] 03.R6 **Speculative dispatch, read tier only.** When the router is confident, start the likely
+      call before the model's response completes, and allow genuinely independent calls to run in
+      parallel.
+      **The rule is not "where safe", it is a tier check**: only tools in the read tier may be
+      speculated or parallelised, never anything in the confirm tier. A speculative confirm-tier
+      call is a mechanism for acting on a guess, which is precisely what the confirm tier exists to
+      prevent, and "the model probably wanted this" is not consent.
+      *gate:* new `test_speculative_dispatch.py` — a confirm-tier tool is never dispatched
+      speculatively (asserted over the whole registry, not a sample), a cancelled speculation leaves
+      no side effect, and p50 improves on a recorded set of multi-tool turns.
 
 **Elite**
 - [ ] 03.E1 Wrong-tool selection <2% across the behavioural suite (the original 74.8 diagnosis was
@@ -1420,8 +1491,11 @@ into the next brief instead of interrupting · push p95 ≤3s.
       *gate:* `test_proactive_suppression.py`, `test_proactive_windows.py`
 - [x] 13.F2 No duplicate delivery — one sender, one path. *gate:* `test_acknowledgements.py`
 - [ ] 13.F3 **Acknowledgement tracking.** Afon must know delivered vs seen vs acted-on; today he does
-      not. *gate:* `test_acknowledgements.py` extended — an unacknowledged urgent item is re-raised
-      once and only once.
+      not.
+      *gate:* new `test_delivery_ledger.py` — an unacknowledged urgent item is re-raised once and only
+      once. **Not** `test_acknowledgements.py`, which this task named until 2026-09-12: that file is
+      about the phrasing of spoken acks ("Right away, sir") and shares nothing with delivery state but
+      the word. Extending it would have buried a new capability inside an unrelated test.
 
 **Raise**
 - [ ] 13.R1 Channel choice by urgency and context: voice if present, push if away, Telegram if
@@ -1477,9 +1551,17 @@ IO · budget and quiet hours enforced before any scoring work.
       `test_proactive_thresholds.py`
 - [x] 14.F2 Every autonomous act produces a report: what, why, and the reasoning.
       *gate:* `test_proactive_report.py`
-- [ ] 14.F3 Every signal kind is asserted to be *reachable* — a dormant kind is a bug, not a
+- [x] 14.F3 Every signal kind is asserted to be *reachable* — a dormant kind is a bug, not a
       preference (five companion capabilities were dormant for weeks at urgency <0.60).
-      *gate:* `test_proactive_thresholds.py` extended — each kind fires at least once in fixtures.
+      The declared set is now **read out of the source** rather than written down in the test, so a
+      new kind that nobody exercises fails this file instead of going quietly dormant. Kinds this
+      file cannot drive are handed off explicitly, each naming the file that covers it, and a
+      hand-off for a kind that no longer exists is also a failure — otherwise the list rots into a
+      dumping ground.
+      **It found one on its first run.** `kind="calendar"` was registered as a tick source, wired,
+      and above threshold, but no fixture had ever driven it — the same state the five companion
+      sources were in before anyone noticed. Now driven with a stubbed API.
+      *gate:* `test_proactive_thresholds.py` — 19/19, eight kinds fired here, eleven handed off.
 
 **Raise**
 - [ ] 14.R1 Outcome tracking: did the intervention help? Feed the answer back into value estimation.
@@ -1593,9 +1675,16 @@ narrated at milestones rather than on a timer.
       *gate:* `test_task_todos.py`, `test_background_tasks.py`, `test_task_restart_expiry.py`
 - [x] 16.F2 The autonomous worker defers every outward action to approval.
       *gate:* `test_safety_autonomy.py`
-- [ ] 16.F3 **The external queue pointer is validated at startup.** The Notion database id went
-      stale for weeks unnoticed; a 404 must be loud. *gate:* `test_phase11_notion.py` extended —
-      unreachable queue raises a health signal.
+- [x] 16.F3 **The external queue pointer is validated at startup.** The Notion database id went
+      stale for weeks unnoticed; a 404 must be loud.
+      `notion.queue_pointer_ok()` retrieves the database itself, and `health._check_task_queue()`
+      carries it as a component with a proactive signal behind it. The subtlety that let the stale
+      pointer survive: **Notion answers 200 with an error object for a bad id**, so a status code is
+      not the answer — something came back and it looked fine, while every caller read the failed
+      query as "no tasks". Unconfigured stays a non-fault; a configured pointer that does not
+      resolve is a fault, and the signal says what it means for his answers rather than just naming
+      a component.
+      *gate:* `test_phase11_notion.py` — 38/38, including the 404-as-200 case.
 
 **Raise**
 - [ ] 16.R1 Dependencies: task B blocked by task A, surfaced as "waiting on".
@@ -1643,8 +1732,15 @@ the overnight fetch · a section with nothing to say is dropped, not padded.
 **Floor**
 - [x] 17.F1 Digest at 06:00 with calendar, tasks, news, reminders. *gate:* `test_daily_digest.py`
 - [x] 17.F2 No duplicate delivery. *gate:* `test_daily_digest.py`, `test_acknowledgements.py`
-- [ ] 17.F3 A failed source degrades the section, never the brief — and says which source failed.
-      *gate:* `test_daily_digest.py` extended [source down]
+- [x] 17.F3 A failed source degrades the section, never the brief — and says which source failed.
+      Every source was fail-quiet into a log line the owner never sees, so an unreachable task board
+      produced a brief that confidently reported nothing past due. **And a total failure returned
+      `''`** — which the caller reads as "nothing worth saying", so the most alarming possible
+      morning produced silence. A failed source is now named in the body in spoken terms, the
+      sections that did answer are still delivered, a total failure says so outright, and
+      `last_failed()` exposes the ids. The contract a caller relies on is unchanged: a genuinely
+      empty day is still `''`.
+      *gate:* `test_daily_digest.py` [source down] — 31/31.
 
 **Raise**
 - [ ] 17.R1 Adaptive timing from the wake pattern rather than a fixed 06:00.
@@ -2561,6 +2657,25 @@ the last probe rather than re-probing per poll.
       tool call, audit row and error-journal entry — so a single owner action can be read end to end.
       The OpenTelemetry idea, without adopting a collector.
       *gate:* new `test_correlation_id.py` — one turn, one id, no orphaned rows.
+- [ ] 31.R5 **Governors: the budgets act, not just report.** Prefill tokens, catalogue tokens and p95
+      latency already have numbers and a test that checks them afterwards. When one is breached the
+      system must narrow the catalogue, drop to a cheaper model or go quieter **by itself**, and tell
+      the owner it did. A budget that only fails a test in the morning did not protect the turn that
+      broke it.
+      *gate:* new `test_governors.py` — each breach triggers its named degradation, the degradation
+      is announced, and a governor cannot silently stay engaged once the pressure is gone.
+      **Blocks the unpark gate.**
+- [ ] 31.R6 **Continuous evaluation of real turns.** Every tier in this document tests what we thought
+      to write down. This one scores what actually happened: each real turn judged in the background
+      against the behavioural rubric, with the owner's own response recorded as the outcome — acted,
+      ignored, corrected, or asked again. Then alert on a regression rather than waiting for the next
+      periodic run.
+      This is the only measurement that can tell us the 84.9 is moving for real, and the trace
+      already carries most of the inputs (intent, tools fired, stages, prefill).
+      *gate:* new `test_continuous_eval.py` — a scored turn per real turn, an outcome label per
+      scored turn, a seeded regression detected, and **judging never on the answer path** (a turn
+      must not wait for its own grade).
+      **Blocks the unpark gate.**
 
 **Elite**
 - [ ] 31.E1 A month where every incident was self-detected before the owner noticed.
@@ -2616,7 +2731,14 @@ replication is a background stream, not a batch job.
 - [ ] 32.R1 State replication: memory and task stores mirrored between hosts on a schedule, with a
       verified restore. *gate:* `test_backup_restore.py` [cross-host]
 - [ ] 32.R2 Automatic promotion — the laptop takes over brain duties when the VPS is unreachable for
-      N minutes. *gate:* `test_degraded_modes.py` [promotion]
+      N minutes.
+      **Half of this already exists and should not be rebuilt:** `edge/remote_brain.py` carries
+      `_fallback_agent`, a lazily-built local `AfonAgent` held as a warm standby. What is missing is
+      not the mechanism but the evidence — nothing tests that the fallback can carry a real turn, so
+      its quality is unknown. A 2026-09-12 review called the single brain the plan's biggest
+      structural weakness and it is right; the cheap answer is this standby made good, not a second
+      VPS.
+      *gate:* `test_degraded_modes.py` [promotion]
 - [ ] 32.R3 Split-brain prevention when both come back. *gate:* `test_degraded_modes.py` [reconcile]
 
 **Elite**
@@ -3621,7 +3743,7 @@ green, `E` = elite green.
 |---|---|---|---|---|---|
 | S01 | Brain / Core Intelligence | structured badly | 3/3 | 0/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 3/3 | 0/3 | 0/1 |
-| S03 | Tool Utilization | complete for now | 4/4 | 0/4 | 0/1 |
+| S03 | Tool Utilization | complete for now | 4/4 | 0/6 | 0/1 |
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
@@ -3632,10 +3754,10 @@ green, `E` = elite green.
 | S11 | Face Recognition | structured badly | 3/3 | 0/3 | 0/1 |
 | S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
 | S13 | Notifications | structured badly | 2/3 | 0/3 | 0/1 |
-| S14 | Proactivity | complete for now | 2/3 | 0/3 | 0/1 |
+| S14 | Proactivity | floor green | 3/3 | 0/3 | 0/1 |
 | S15 | Recommendations | missing | 0/3 | 0/3 | 0/1 |
-| S16 | Task Queue | structured badly | 2/3 | 0/3 | 0/1 |
-| S17 | Morning Brief | complete for now | 2/3 | 0/3 | 0/1 |
+| S16 | Task Queue | floor green | 3/3 | 0/3 | 0/1 |
+| S17 | Morning Brief | floor green | 3/3 | 0/3 | 0/1 |
 | S18 | Mic & Speaker | complete for now | 4/4 | 0/3 | 0/1 |
 | S19 | Composio / MCP | structured badly | 2/3 | 0/3 | 0/1 |
 | S20 | External APIs | complete for now | 2/3 | 0/3 | 0/1 |
@@ -3649,7 +3771,7 @@ green, `E` = elite green.
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
 | S30 | Persistent Memory | structured badly | 3/3 | 0/9 | 0/2 |
-| S31 | Self-Monitoring | complete for now | 4/4 | 0/4 | 0/1 |
+| S31 | Self-Monitoring | complete for now | 4/4 | 0/6 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
@@ -3670,7 +3792,13 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 90 of 157 floor tasks green, 0 of 157 raise tasks, 0 of 52 elite tasks — 90 of 366.**
+**Totals: 93 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 93 of 370.**
+
+> The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
+> columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are
+> therefore an undercount, and deliberately left uncorrected rather than adjusted by guess: a
+> re-estimate belongs in the per-system tables where each number can be defended, not in a total
+> nobody can trace. Two of the four block the unpark gate and are the only raises that do.
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are

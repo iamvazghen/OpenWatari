@@ -66,11 +66,51 @@ def mark_delivered(channel: str, now: datetime | None = None) -> None:
     _save(state)
 
 
-async def build_body() -> str:
-    """Compose the digest body (no greeting): past-due tasks + important email. '' if nothing.
+#: Spoken names for the sources, so a failure is reported in words the owner can act on rather than
+#: a module path. Keys are the ids `last_failed()` returns.
+SOURCE_NAMES = {
+    "notion": "your task board",
+    "queue": "the local task queue",
+    "gmail": "your mail",
+}
 
-    Sources, each fail-quiet: Notion tasks DB (overdue + due-today), the local task queue (todos
-    with a past deadline), and Gmail (important unread). Deliberately compact — it's spoken."""
+#: Sources that failed in the most recent build. Exposed because 17.F3 requires the brief to say
+#: WHICH source failed, and because a health snapshot wants the same answer without rebuilding the
+#: brief to get it.
+_LAST_FAILED: list[str] = []
+
+
+def last_failed() -> list[str]:
+    """Source ids that failed the last time the brief was built. Empty when all of them answered."""
+    return list(_LAST_FAILED)
+
+
+def _spoken_list(items: list[str]) -> str:
+    """'a', 'a and b', 'a, b and c' — spoken, so no Oxford comma and no dangling 'and'."""
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+async def build_body() -> str:
+    """Compose the digest body (no greeting): past-due tasks + important email.
+
+    **`''` means "a complete brief with nothing in it", and nothing else.** Every source here is
+    fail-quiet, and before 17.F3 a failure was logged and then dropped: an unreachable task board
+    produced a brief that confidently reported no past-due tasks. Worse, when *every* source failed
+    the result was `''` — and `''` tells the caller there is nothing worth saying, so the single most
+    alarming state produced silence.
+
+    A failed source is therefore named in the body, and a total failure never returns `''`. A
+    genuinely empty day still does, which is what the caller relies on.
+
+    Sources, each fail-quiet: the Notion tasks DB (overdue + due-today), the local task queue (todos
+    with a past deadline), and Gmail (important unread). Deliberately compact — it is spoken.
+    """
+    global _LAST_FAILED
+    failed: list[str] = []
     overdue: list[str] = []
     due_today: list[str] = []
 
@@ -80,6 +120,7 @@ async def build_body() -> str:
         overdue, due_today = await overdue_and_today()
     except Exception as e:  # noqa: BLE001
         logger.warning(f"digest: notion source failed: {e}")
+        failed.append("notion")
 
     try:  # local task-queue todos whose deadline has passed
         from afon.brain.tasks import TASKS
@@ -90,6 +131,7 @@ async def build_body() -> str:
                 overdue.append(f"{t.title} ({t.human_deadline()})")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"digest: local queue source failed: {e}")
+        failed.append("queue")
 
     overdue = list(dict.fromkeys(overdue))
 
@@ -100,6 +142,7 @@ async def build_body() -> str:
         email_phrase = await important_email_phrase()
     except Exception as e:  # noqa: BLE001
         logger.warning(f"digest: gmail source failed: {e}")
+        failed.append("gmail")
 
     lead: list[str] = []
     if overdue:
@@ -110,4 +153,13 @@ async def build_body() -> str:
     body = ". ".join(lead)
     if email_phrase:
         body = (body + ". And " + email_phrase) if body else ("You have " + email_phrase)
+
+    _LAST_FAILED = failed
+    if failed:
+        names = _spoken_list([SOURCE_NAMES.get(f, f) for f in failed])
+        if body:
+            # What DID answer is still delivered; the caveat is scoped to the part that is missing.
+            body = f"{body}. I couldn't reach {names}, so that part may be incomplete"
+        else:
+            body = f"I couldn't reach {names} this morning, so I can't give you a full brief"
     return body.strip()

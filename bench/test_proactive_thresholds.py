@@ -5,7 +5,7 @@ memory-resurface were all authored on a ~0.5 scale while the threshold is 0.60, 
 """
 import sys
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -25,7 +25,16 @@ def check(cond, label):
         print(f"  FAIL: {label}")
 
 
+#: Every signal kind seen firing above threshold during this run (14.F3). Recording it here turns
+#: "is this capability reachable?" from something a person remembers to ask into something the
+#: suite asserts — which is the whole lesson of five companion sources sitting dormant for weeks.
+SEEN_KINDS: set[str] = set()
+
+
 def clears(sigs, label):
+    for s in sigs or ():
+        if getattr(s, "urgency", 0) >= THRESH:
+            SEEN_KINDS.add(getattr(s, "kind", "?"))
     check(bool(sigs) and all(s.urgency >= THRESH for s in sigs),
           f"{label}: fires AND clears threshold {THRESH} (got {[round(s.urgency,2) for s in sigs]})")
 
@@ -120,8 +129,72 @@ routines_mod._DAY_PLAN.write_text(json.dumps({"date": str(morning.date()), "trai
                                   encoding="utf-8")
 check(ps.routine_planning_signal(morning) == [], "planning prompt silent once today is planned")
 
+# --- calendar: an imminent event, with the API stubbed --------------------------------------
+# Found by the coverage check below on its first run: this kind is registered as a tick source and
+# perfectly reachable, but no fixture had ever driven it — which is the state five companion
+# capabilities were in before anyone noticed.
+import afon.brain.tools.calendar as cal_mod  # noqa: E402
+
+
+async def _one_imminent_event(url, params=None, **kw):
+    soon = datetime.now(timezone.utc) + timedelta(minutes=7)
+    return {"items": [{"id": "ev1", "summary": "dentist",
+                       "start": {"dateTime": soon.isoformat()}}]}
+
+
+_saved_api_get = cal_mod.api_get
+_saved_configured = cal_mod.configured
+cal_mod.api_get = _one_imminent_event
+cal_mod.configured = lambda: True   # this box has no Google creds; the SIGNAL is what is under test
+try:
+    _cal_sigs = asyncio.run(cal_mod.calendar_signals())
+    clears(_cal_sigs, "calendar (imminent event)")
+    check(_cal_sigs and "dentist" in _cal_sigs[0].message, "calendar signal names the event")
+finally:
+    cal_mod.api_get, cal_mod.configured = _saved_api_get, _saved_configured
+
 # --- the invariant, stated directly ---------------------------------------------------------
 check(THRESH <= 0.66, f"threshold {THRESH} is not above the companion sources' ceiling")
+
+# --- 14.F3: EVERY declared kind is accounted for ---------------------------------------------
+# A dormant kind is a bug, not a preference. The declared set is read out of the source rather
+# than written down here, so adding a new kind and forgetting to exercise it fails this file
+# instead of going quietly dormant — which is exactly how five capabilities were lost for weeks.
+import re  # noqa: E402
+
+_BRAIN = Path(__file__).resolve().parents[1] / "src" / "afon" / "brain"
+DECLARED = set()
+for _py in list(_BRAIN.glob("*.py")) + list((_BRAIN / "tools").glob("*.py")):
+    DECLARED |= set(re.findall(r'kind\s*=\s*"([a-z][a-z_-]*)"', _py.read_text(encoding="utf-8")))
+
+#: Kinds this file cannot drive, each with the reason and the file that does cover it. An entry
+#: here is a deliberate hand-off, not an excuse — the check below still fails if a kind is in
+#: neither set, so a new capability cannot be added silently.
+COVERED_ELSEWHERE = {
+    "health": "needs a failing component — test_health_agreement.py / test_phase11_notion.py",
+    "fleet": "needs an authorised fleet link — test_phase3_tools.py",
+    "news": "needs the feed reader — test_mynews.py",
+    "weekly-digest": "weekly cadence — test_daily_digest.py",
+    "calendar-prep": "needs a real calendar event — test_calendar_dates.py",
+    "conflict": "needs a booked conflict — test_interventions.py",
+    "todo": "task-queue sourced — test_phase10_proactive.py",
+    "work": "task-queue sourced — test_phase10_proactive.py",
+    "coaching": "needs a skill review due — test_coaching.py",
+    "routine-plan": "planning prompt, asserted above by message rather than kind",
+    "resurface": "memory resurfacing, asserted above by message rather than kind",
+}
+
+_unaccounted = sorted(DECLARED - SEEN_KINDS - set(COVERED_ELSEWHERE))
+check(not _unaccounted,
+      f"every declared signal kind is exercised here or handed off explicitly "
+      f"(unaccounted: {_unaccounted})")
+
+# The hand-off list must not rot into a dumping ground for kinds that no longer exist.
+_stale = sorted(set(COVERED_ELSEWHERE) - DECLARED)
+check(not _stale, f"the hand-off list names only kinds that still exist (stale: {_stale})")
+
+print(f"  kinds fired here: {sorted(SEEN_KINDS)}")
+print(f"  kinds handed off: {sorted(set(COVERED_ELSEWHERE) & DECLARED)}")
 
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")
 sys.exit(1 if _fail else 0)
