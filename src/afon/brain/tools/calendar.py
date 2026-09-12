@@ -31,10 +31,16 @@ def _fmt_when(ev: dict) -> str:
         return when
     if not start.get("dateTime"):          # all-day event: no clock to speak
         return f"on {dt.strftime('%a %d %B')}"
-    today = datetime.now(dt.tzinfo).date() if dt.tzinfo else datetime.now().date()
-    delta = (dt.date() - today).days
-    day = {0: "today", 1: "tomorrow"}.get(delta) or f"on {dt.strftime('%a %d %B')}"
-    return f"{day} at {dt.strftime('%H:%M')}"
+    # "Today" is the owner's day, not the machine's (21.F3). The brain runs on a UTC VPS and he
+    # does not, so reading the process clock meant that between midnight and 02:00 his time,
+    # tonight's events were spoken as "tomorrow" — correct for the server, wrong for the person
+    # being spoken to. Two hours a day of confidently wrong answers, every day, invisible in a
+    # suite that only ever ran in the afternoon.
+    tz = ZoneInfo(settings.user_tz)
+    local = dt.astimezone(tz) if dt.tzinfo else dt
+    delta = (local.date() - datetime.now(tz).date()).days
+    day = {0: "today", 1: "tomorrow"}.get(delta) or f"on {local.strftime('%a %d %B')}"
+    return f"{day} at {local.strftime('%H:%M')}"
 
 
 async def list_events(args: dict) -> str:
@@ -91,6 +97,32 @@ async def list_events(args: dict) -> str:
         return f"You have {len(parts)} event(s), sir: " + "; ".join(parts)
     except Exception as e:  # noqa: BLE001
         return tool_error("calendar read", e)
+
+
+async def raw_events(date: str = "", days: int = 1, max_n: int = 25) -> list[dict]:
+    """One day's events as Google returns them (21.F2).
+
+    `list_events` composes a spoken sentence, which is right for an answer and useless as input:
+    re-parsing "dentist on Tue 11 August at 10:00" back into datetimes would be a second date parser
+    to keep in step with the first. The clash checker needs the objects.
+    """
+    tz = ZoneInfo(settings.user_tz)
+    try:
+        day = datetime.fromisoformat(date).date() if date else datetime.now(tz).date()
+    except ValueError:
+        day = datetime.now(tz).date()
+    start_dt = datetime.combine(day, time.min, tzinfo=tz)
+    data = await api_get(
+        _CAL,
+        params={
+            "timeMin": start_dt.isoformat(),
+            "timeMax": (start_dt + timedelta(days=max(1, days))).isoformat(),
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": max_n,
+        },
+    )
+    return data.get("items") or []
 
 
 def _rfc3339(value: str) -> str:

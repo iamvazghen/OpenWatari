@@ -193,6 +193,15 @@ TESTS = [
      "test_session_identity.py", "offline", ["checks passed ==="]),
     ("Reference resolution (07.F3): twenty cases for 'it', 'that' and 'the second one'",
      "test_reference_resolution.py", "offline", ["checks passed ==="]),
+    ("Delivery ledger (13.F3): delivered is not seen, and an urgent miss is re-raised once",
+     "test_delivery_ledger.py", "offline", ["checks passed ==="]),
+    ("Day shape (21.F1/21.F2): routines drafted from evidence, and a broken day named",
+     "test_day_shape.py", "offline", ["checks passed ==="]),
+    # 21.F3 — replays the clock-sensitive tests across 6 awkward dates and 4 timezones. It was
+    # manual-only until 2026-09-12, and a gate nobody runs is not a gate: registering it caught a
+    # real bug the same day. ~60s, parallel; the cost is process startup, not the tests.
+    ("Clock robustness (21.F3): the date-sensitive tests replayed across 6 days and 4 timezones",
+     "check_date_robustness.py", "offline", ["no clock-dependent failures"]),
     ("Health agreement (J3.6): when a component is broken, no surface reports it healthy",
      "test_health_agreement.py", "offline", ["checks passed ==="]),
     ("Error taxonomy (J7.3): WHY a tool failed is a value, not a sentence to grep",

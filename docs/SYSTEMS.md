@@ -1490,8 +1490,17 @@ into the next brief instead of interrupting · push p95 ≤3s.
 - [x] 13.F1 Push + Telegram delivery with quiet hours and suppression.
       *gate:* `test_proactive_suppression.py`, `test_proactive_windows.py`
 - [x] 13.F2 No duplicate delivery — one sender, one path. *gate:* `test_acknowledgements.py`
-- [ ] 13.F3 **Acknowledgement tracking.** Afon must know delivered vs seen vs acted-on; today he does
-      not.
+- [x] 13.F3 **Acknowledgement tracking.** Afon knows delivered vs seen vs acted-on, and an urgent
+      item he never acknowledged is offered back exactly once.
+      *done 2026-09-12:* `src/afon/brain/delivery.py`. A push is only ever `delivered` — ntfy reports
+      nothing about eyes, so inferring "seen" from a successful POST would be the same overclaim as a
+      status page that shows green because it never asked. Exactly one inference is allowed and it is
+      named in the code: a line spoken into a live session and answered inside the reaction window was
+      heard. A dismissal marks *seen* but not *acted*. The second chance is spent when the re-raise is
+      **delivered**, not when it is generated, because quiet hours and the daily budget hold signals
+      after a source produces them — spending it at generation would burn his one second chance on a
+      message he never heard. A re-raise is never recorded as a fresh delivery: it is urgent by
+      construction and would come due for its own re-raise forever.
       *gate:* new `test_delivery_ledger.py` — an unacknowledged urgent item is re-raised once and only
       once. **Not** `test_acknowledgements.py`, which this task named until 2026-09-12: that file is
       about the phrasing of spoken acks ("Right away, sir") and shares nothing with delivery state but
@@ -1955,14 +1964,48 @@ routines read from one file, not recomputed.
 | reasoned | a month of adherence data against the real routines | 3 / 5 / 2 d | **30 min (write the real routines)** | 0 | proposals are suggestions; nothing writes without confirm |
 
 **Floor**
-- [ ] 21.F1 **`routines.json` holds the owner's real routines.** It is effectively empty today — the
+- [x] 21.F1 **`routines.json` holds the owner's real routines.** It is effectively empty today — the
       language slot and the evening review are absent, so everything downstream reasons about a day
-      that does not exist. *gate:* `test_scheduler_brain.py` extended — routines non-empty and
-      structurally valid.
-- [ ] 21.F2 Conflict detection: double-booked, no-travel-time, no-breaks are detected and named.
-      *gate:* `test_calendar_dates.py` extended.
-- [ ] 21.F3 Date and time handling is robust across timezones and phrasings.
-      *gate:* `check_date_robustness.py`, `test_weather_when.py`
+      that does not exist. *gate:* `test_day_shape.py` [1]-[4].
+      *gate moved 2026-09-12:* the plan named `test_scheduler_brain.py`, which is about the reminder
+      scheduler firing round the clock. Whether a routine file describes a real day is a different
+      question that happens to live near it, and hanging both on one file would have meant a gate
+      that passes for the wrong reason.
+      *done 2026-09-12:* the task sat at "owner: 30 minutes to write the real routines" for a month
+      because a blank file is the whole obstacle — nobody composes their own schedule from nothing.
+      `routine_draft.py` reads fourteen days of the presence database and drafts windowed routines
+      with the evidence attached ("active on 8 of the last 10 days"), so the owner corrects rather
+      than composes. It refuses to call anything a habit on fewer than three days or half the
+      observed days, because a routine drafted from two afternoons is worse than none: it looks
+      like knowledge. Drafting never installs — `propose_routines` writes to a separate file and
+      `adopt_routines` is confirm-gated, since a system that learns your habits and starts nagging
+      you about them unasked is the thing people uninstall. `validate()` refuses to install what
+      the live loader silently swallows: a typo'd window does not fail today, it just means that
+      routine never fires again and nothing ever says so.
+- [x] 21.F2 Conflict detection: double-booked, no-travel-time, no-breaks are detected and named.
+      *gate:* `test_day_shape.py` [5]-[8].
+      *gate moved 2026-09-12:* `test_calendar_dates.py` is about formatting a date into speech, not
+      about whether a day holds together. Same reason as 21.F1.
+      *done 2026-09-12:* `schedule.py` — arithmetic on a sorted list, no model consulted, which the
+      gate asserts by reading the source. A non-deterministic answer to "am I double-booked" is
+      worse than no answer: the owner cannot tell a hallucinated clash from a real one, and
+      checking costs him the time the check was meant to save. It says nothing about all-day
+      events, unrecorded locations or touching-but-not-overlapping events, because a checker that
+      cries wolf gets switched off. `raw_events` was added to `calendar.py` so the checker reads
+      objects; re-parsing `list_events`' spoken sentence would have been a second date parser to
+      keep in step with the first.
+- [x] 21.F3 Date and time handling is robust across timezones and phrasings.
+      *gate:* `check_date_robustness.py` (now in `run_all_tests.py`), `test_weather_when.py`
+      *done 2026-09-12:* the replay existed but covered only dates, and was reachable only by
+      typing its name — a gate nobody runs is not a gate. Added a timezone axis over UTC, a large
+      negative offset, a large positive one and a half-hour offset, and registered it in the suite.
+      It found a real defect on the first run: `_fmt_when` resolved "today" from the process clock,
+      so with the brain on a UTC VPS and the owner in Europe/Berlin, every event between midnight
+      and 02:00 his time was spoken as "tomorrow". Correct for the server, wrong for the person
+      being spoken to, two hours a day, every day — and invisible to a suite that only ever ran in
+      the afternoon from the same machine as the reader. "Today" now means the owner's day.
+      The replay runs both axes through a thread pool: ten minutes serially is long enough that a
+      gate gets skipped, and the cost is entirely process startup.
 
 **Raise**
 - [ ] 21.R1 Time-blocking proposals for committed work, offered not imposed.
@@ -3753,7 +3796,7 @@ green, `E` = elite green.
 | S10 | Voice Recognition | structured badly | 3/3 | 0/3 | 0/1 |
 | S11 | Face Recognition | structured badly | 3/3 | 0/3 | 0/1 |
 | S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
-| S13 | Notifications | structured badly | 2/3 | 0/3 | 0/1 |
+| S13 | Notifications | structured badly | 3/3 | 0/3 | 0/1 |
 | S14 | Proactivity | floor green | 3/3 | 0/3 | 0/1 |
 | S15 | Recommendations | missing | 0/3 | 0/3 | 0/1 |
 | S16 | Task Queue | floor green | 3/3 | 0/3 | 0/1 |
@@ -3761,7 +3804,7 @@ green, `E` = elite green.
 | S18 | Mic & Speaker | complete for now | 4/4 | 0/3 | 0/1 |
 | S19 | Composio / MCP | structured badly | 2/3 | 0/3 | 0/1 |
 | S20 | External APIs | complete for now | 2/3 | 0/3 | 0/1 |
-| S21 | Personal Time Mgmt | structured badly | 0/3 | 0/3 | 0/1 |
+| S21 | Personal Time Mgmt | structured badly | 3/3 | 0/3 | 0/1 |
 | S22 | Recoverability | complete for now | 4/4 | 0/3 | 0/1 |
 | S23 | 24/7 Reachability | complete, parked | 4/4 | 0/3 | 0/1 |
 | S24 | Knowledge & World Model | structured badly | 2/2 | 0/3 | 0/1 |
@@ -3792,7 +3835,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 93 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 93 of 370.**
+**Totals: 97 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 97 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

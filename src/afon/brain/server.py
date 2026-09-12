@@ -289,11 +289,24 @@ class BrainServer:
             kind = self._proactive.pending_feedback(now)
             if not kind:
                 return
+            # Read the key BEFORE grading: record_feedback resolves the pending slot, and a key
+            # fetched afterwards is always None.
+            key = self._proactive.pending_key(now)
             verdict = classify_reaction(text)
             if verdict == "positive":
                 self._proactive.record_feedback(kind, "act", now)
             elif verdict == "negative":
                 self._proactive.record_feedback(kind, "dismiss", now)
+            # 13.F3 — this turn is the ONE inference the ledger allows that he received it: a line
+            # spoken into a live session, answered inside the window, was heard. A dismissal is
+            # still evidence he saw it, which is why every verdict marks seen and only a positive
+            # marks acted-on.
+            if key:
+                from afon.brain.delivery import ACTED, SEEN, mark
+
+                mark(key, SEEN, f"replied in-session ({verdict})")
+                if verdict == "positive":
+                    mark(key, ACTED, "accepted the interjection")
         except Exception as e:  # noqa: BLE001
             logger.debug(f"proactive reaction grading skipped: {e}")
 

@@ -103,6 +103,8 @@ CONFIRM_TIER = {
     "file_op", "process_op", "run_powershell", "browser",
     "run_protocol", "ha_call",
     "create_event",
+    # Replacing routines.json rewrites the rules for when Afon speaks up unprompted (21.F1).
+    "adopt_routines",
     # Phase 13 — self-improvement writes are reversible via git, but still consequential.
     "write_source", "git_commit", "git_push", "git_revert",
     # Filing a GitHub issue is outward-facing (posts to a public/shared repo).
@@ -437,6 +439,32 @@ class ProactiveEngine:
             return None
         return self._pending["kind"]
 
+    def pending_key(self, now: datetime | None = None) -> str | None:
+        """The KEY of that same interjection (13.F3). The kind identifies what learns from the
+        reaction; the key identifies which delivery it acknowledges, and those are not the same
+        question — one kind covers many items."""
+        if self.pending_feedback(now) is None:
+            return None
+        return self._pending.get("key")
+
+    def _record_delivery(self, signal: Signal, channel: str) -> None:
+        """13.F3 — note what left, so 'he never answered' is answerable later. Fail-quiet: the
+        ledger is a record of the interjection, never a precondition for making it."""
+        from afon.brain.delivery import RERAISE_PREFIX, mark_reraised, record
+
+        try:
+            if signal.key.startswith(RERAISE_PREFIX):
+                # The second chance is spent HERE, where it actually reached him — not when it was
+                # generated, because a signal held by quiet hours or the budget never arrived. And
+                # it is never recorded as a fresh delivery: it is urgent by construction, so it
+                # would come due for its own re-raise and the ledger would become the notification
+                # loop it exists to prevent.
+                mark_reraised(signal.key[len(RERAISE_PREFIX):])
+                return
+            record(signal.key, signal.message, signal.urgency, channel)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"delivery ledger skipped: {type(e).__name__}: {e}")
+
     def _note_emitted(self, signal: Signal, now: datetime) -> None:
         """Record that we just interjected: close out a prior unaddressed one as an 'ignore', count
         the 'shown', and arm the pending-reaction slot for this one."""
@@ -585,6 +613,7 @@ class ProactiveEngine:
         self._spoken_at[signal.key] = now
         self._used_today += 1
         self._note_emitted(signal, now)  # arm reaction tracking (feedback learning)
+        self._record_delivery(signal, channel)  # 13.F3 — delivered is not seen, nor acted-on
         self._save_state()  # persist so a restart keeps the budget + suppression + learning
         logger.info(f"proactive [{signal.kind}] via {channel}: {signal.message[:60]!r}")
         return Interjection(signal, channel)
@@ -672,6 +701,12 @@ def default_signal_sources() -> list[SignalSource]:
     # They used to re-fire every repeat-suppress window (and reset on restart), which spammed the
     # owner with the same two lines 7-8x a day. They're now a single once-daily digest delivered by
     # the 06:00 briefing + the first live-edge turn of the day (see brain/daily_digest.py).
+    try:
+        from afon.brain.delivery import reraise_signals
+
+        sources.append(reraise_signals)   # 13.F3 — one second chance for an unacknowledged urgent
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from afon.brain.mynews import news_signals   # brain/, not tools/ — it is not a tool
 

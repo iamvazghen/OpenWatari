@@ -180,6 +180,7 @@ COVERED_ELSEWHERE = {
     "todo": "task-queue sourced — test_phase10_proactive.py",
     "work": "task-queue sourced — test_phase10_proactive.py",
     "coaching": "needs a skill review due — test_coaching.py",
+    "reraise": "needs an unacknowledged urgent delivery — test_delivery_ledger.py",
     "routine-plan": "planning prompt, asserted above by message rather than kind",
     "resurface": "memory resurfacing, asserted above by message rather than kind",
 }
