@@ -469,7 +469,6 @@ async def _activity_snapshot_local(args: dict) -> str:
     try:
         import json as _json
         import time as _time
-        from pathlib import Path as _Path
         rc = _json.loads((state_dir() / "room_context.json").read_text(encoding="utf-8"))
         if _time.time() - float(rc.get("ts", 0)) < 600:
             d = _json.loads(snap or "{}")

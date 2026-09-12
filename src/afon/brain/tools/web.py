@@ -120,6 +120,61 @@ async def _scrape_firecrawl(url: str) -> str:
     return (((r.json() or {}).get("data") or {}).get("markdown") or "").strip()
 
 
+# ---- 05.F3: is this the page, or the thing standing in front of the page? -------------------
+# A scrape that returns *nothing* was already reported honestly. The dangerous case is the one that
+# returns *something*: a Cloudflare interstitial, a paywall, a cookie wall, or a JS shell holding
+# only the headline. Those read as content, so the model summarised the obstruction and the owner
+# got a confident answer assembled from a title and a subscribe button. He cannot tell that apart
+# from a real summary, which makes it worse than an error.
+
+#: Below this, there is no article here whatever the page says.
+_MIN_BODY = 400
+
+#: Phrases only count as an obstruction inside a short body. An article ABOUT Cloudflare or about
+#: paywalls contains every one of these words, and flagging it would train him to ignore the
+#: warning — which costs more than the warning is worth.
+_BLOCK_WINDOW = 1500
+
+_BLOCK_PHRASES = (
+    ("enable javascript", "the page needs JavaScript and none of my readers ran it"),
+    ("javascript is disabled", "the page needs JavaScript and none of my readers ran it"),
+    ("checking your browser", "it stopped at a bot check"),
+    ("verify you are human", "it stopped at a bot check"),
+    ("are you a robot", "it stopped at a bot check"),
+    ("captcha", "it stopped at a bot check"),
+    ("access denied", "the site refused the request"),
+    ("403 forbidden", "the site refused the request"),
+    ("429 too many requests", "the site is rate-limiting me"),
+    ("subscribe to continue", "it is behind a paywall"),
+    ("subscribers only", "it is behind a paywall"),
+    ("subscription required", "it is behind a paywall"),
+    ("to continue reading", "it is behind a paywall"),
+    ("create a free account", "it wants an account first"),
+    ("sign in to read", "it wants an account first"),
+    ("log in to continue", "it wants an account first"),
+    ("accept cookies", "it stopped at a cookie wall"),
+    ("cookie preferences", "it stopped at a cookie wall"),
+)
+
+
+def obstructed(text: str) -> str:
+    """Why this scrape is not the page's content, or "" if it looks like the real thing."""
+    body = (text or "").strip()
+    if not body:
+        return "nothing came back at all"
+    # Name the wall before measuring it. "It is behind a paywall" tells him whether to try another
+    # source or reach for his subscription; "only 244 characters came back" tells him nothing he
+    # can act on, and both sentences describe the same page.
+    if len(body) <= _BLOCK_WINDOW:
+        low = body.lower()
+        for phrase, why in _BLOCK_PHRASES:
+            if phrase in low:
+                return why
+    if len(body) < _MIN_BODY:
+        return f"only {len(body)} characters came back, which is not an article"
+    return ""
+
+
 def _scrape_providers():
     chain = [("Jina", _scrape_jina)]          # keyless primary
     if settings.firecrawl_api_key:
@@ -128,16 +183,25 @@ def _scrape_providers():
 
 
 async def _scrape_chain(url: str) -> str:
+    """The best body any provider returned. Obstructed bodies are kept only as a last resort, so
+    the caller can say WHAT stood in the way rather than just that it failed."""
     last_err: Exception | None = None
+    blocked = ""
     for name, fn in _scrape_providers():
         try:
             out = (await fn(url) or "").strip()
-            if out:
+            why = obstructed(out)
+            if not why:
                 return out
-            logger.info(f"scrape via {name} returned nothing; trying next provider")
+            # An obstruction is worth another provider: Firecrawl renders pages Jina will not.
+            logger.info(f"scrape via {name} looks obstructed ({why}); trying next provider")
+            if len(out) > len(blocked):
+                blocked = out
         except Exception as e:  # noqa: BLE001
             last_err = e
             logger.warning(f"scrape provider {name} failed ({type(e).__name__}); trying next")
+    if blocked:
+        return blocked
     if last_err:
         raise last_err
     return ""
@@ -152,7 +216,16 @@ async def scrape_url(args: dict) -> str:
     try:
         # Cache briefly so "read me that page" repeated in one session is instant.
         md = await CACHE.cached("scrape", key=url, ttl=300, factory=lambda: _scrape_chain(url))
-        return clip(md, 3500) if md else f"I opened {url} but found no readable text, sir."
+        # Re-derived rather than cached alongside the body: `obstructed` is pure, so one cached
+        # string stays the single thing to invalidate.
+        why = obstructed(md)
+        if why:
+            # The obstruction text is deliberately NOT returned. Handing back a subscribe button
+            # and a headline is an invitation to summarise them, and a summary of a paywall is
+            # indistinguishable to the owner from a summary of the article behind it.
+            return (f"I couldn't read {url}, sir — {why}. I'd rather tell you that than summarise "
+                    "the wall in front of it.")
+        return clip(md, 3500)
     except Exception as e:  # noqa: BLE001
         return tool_error("page scrape", e)
 

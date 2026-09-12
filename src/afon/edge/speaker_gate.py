@@ -16,7 +16,6 @@ import asyncio
 import json
 import time
 from collections import deque
-from pathlib import Path
 
 from loguru import logger
 from pipecat.frames.frames import (

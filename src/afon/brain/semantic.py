@@ -151,13 +151,20 @@ class SemanticIndex:
         return [list(v) for v in self._model.encode(texts, normalize_embeddings=False)]
 
     def _jina_embed(self, texts: list[str]) -> list[Vector]:
+        # The one synchronous outbound call in the brain: the embedder is called from sync recall
+        # paths, and making it async would push a rewrite through every caller for no behavioural
+        # gain. It still reads its timeout from the one policy table (20.F3) rather than carrying
+        # a number of its own.
         import httpx
 
+        from afon.brain.tools.base import policy_for
+
+        url = "https://api.jina.ai/v1/embeddings"
         r = httpx.post(
-            "https://api.jina.ai/v1/embeddings",
+            url,
             headers={"Authorization": f"Bearer {settings.jina_api_key}"},
             json={"model": "jina-embeddings-v3", "task": "text-matching", "input": texts},
-            timeout=10,
+            timeout=policy_for(url).timeout,
         )
         r.raise_for_status()
         data = sorted(r.json()["data"], key=lambda d: d["index"])

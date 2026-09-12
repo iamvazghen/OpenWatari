@@ -168,6 +168,10 @@ def _http_ok(url: str, headers: dict[str, str] | None = None) -> bool | None:
     try:
         import httpx
 
+        # The one number in the repo that is deliberately NOT read from the policy table
+        # (20.F3): the wizard imports nothing from brain/ or edge/ by design, because it has to
+        # run before either of them is configured, and test_layering enforces that. A key check
+        # the user is watching should also fail fast rather than sit for the default window.
         return httpx.get(url, headers=headers or {}, timeout=8).status_code < 400
     except Exception:  # noqa: BLE001
         return None

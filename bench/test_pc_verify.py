@@ -68,5 +68,89 @@ async def run():
 
 asyncio.run(run())
 
+
+# ---- 04.F4: a dead link is unreachable within one turn, never a success and never a long wait --
+# The executor can verify what it did. What it could not do is notice it was never asked. A laptop
+# that closes its lid leaves the websocket open for over a minute, so every device command was
+# accepted, waited the full ninety-second result window, and only then failed — several turns after
+# the owner asked, having said nothing in the turn where he did.
+async def run_linkdown():
+    import time as _t
+
+    from afon.brain.pc_link import STALE_AFTER_S, PcLink
+
+    class DeadWS:
+        """A socket whose peer is gone: the send succeeds, the ping is never answered."""
+
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, data):
+            self.sent.append(data)
+
+        def ping(self):
+            return asyncio.get_event_loop().create_future()   # never resolves
+
+    class LiveWS(DeadWS):
+        def ping(self):
+            fut = asyncio.get_event_loop().create_future()
+            fut.set_result(b"")
+            return fut
+
+    link = PcLink()
+    check(link.active is False, "with nothing registered, the link is not active")
+    raised = ""
+    try:
+        await link.forward("file_op", {})
+    except Exception as e:
+        raised = type(e).__name__
+    check(raised == "ConnectionError", f"an unregistered link refuses immediately (got {raised!r})")
+
+    dead = DeadWS()
+    link.register(dead, "laptop")
+    check(link.active is True, "a registered socket reads as active")
+    started = _t.monotonic()
+    raised = ""
+    try:
+        await link.forward("file_op", {}, timeout=90.0)
+    except Exception as e:
+        raised = type(e).__name__
+    took = _t.monotonic() - started
+    check(raised == "ConnectionError", f"a dead peer is reported as unreachable (got {raised!r})")
+    check(took < 10.0, f"...within one turn, not the 90s result window (took {took:.1f}s)")
+    check(not dead.sent, "and the command was never sent into the void")
+
+    live = LiveWS()
+    link.register(live, "laptop")
+    check(await link.reachable() is True, "a live peer answers the ping")
+    # A ping that comes back is proof of life, so the staleness clock resets on it.
+    link._seen = _t.monotonic() - (STALE_AFTER_S + 60)
+    check(link.stale is True, "a long-silent link reads as stale")
+    await link.reachable()
+    check(link.stale is False, "...and a successful ping clears that")
+
+    # Health used to call `PC_LINK.active()` — a property, so it raised TypeError, was swallowed,
+    # and the laptop was reported down with a made-up reason even while it was connected.
+    from afon.brain import health
+
+    from afon.brain import pc_link as pl
+
+    real = pl.PC_LINK
+    pl.PC_LINK = link
+    try:
+        ok, detail = await health._check_pc_link()
+        check(ok is True, f"health reports a live laptop as healthy (got {detail!r})")
+        check("TypeError" not in detail, "...without a swallowed error standing in for the answer")
+        pl.PC_LINK = PcLink()
+        pl.PC_LINK.register(DeadWS(), "laptop")
+        ok2, detail2 = await health._check_pc_link()
+        check(ok2 is False, "a registered-but-silent laptop is NOT reported as connected")
+        check("not answering" in detail2, f"...and the reason says so (got {detail2!r})")
+    finally:
+        pl.PC_LINK = real
+
+
+asyncio.run(run_linkdown())
+
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")
 sys.exit(1 if _fail else 0)

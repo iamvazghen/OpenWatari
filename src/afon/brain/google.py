@@ -15,9 +15,13 @@ from __future__ import annotations
 
 import time
 
-import httpx
 from loguru import logger
 
+# 20.F3 — the timeout and retry policy for every outbound call lives in one table. Google's own
+# endpoints were passing settings.http_timeout_seconds by hand, which was the right number by
+# coincidence: nothing stopped the next module from picking a different one, and nothing anywhere
+# said what should happen when a call simply drops.
+from afon.brain.tools.base import http_get, http_post
 from afon.config import settings
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -53,18 +57,16 @@ async def access_token() -> str | None:
     if _token_cache["value"] and float(_token_cache["expires"]) > now + 60:
         return str(_token_cache["value"])
     try:
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-            r = await c.post(
-                TOKEN_URL,
-                data={
-                    "client_id": settings.google_client_id,
-                    "client_secret": settings.google_client_secret,
-                    "refresh_token": settings.google_refresh_token,
-                    "grant_type": "refresh_token",
-                },
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await http_post(
+            TOKEN_URL,
+            data={
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "refresh_token": settings.google_refresh_token,
+                "grant_type": "refresh_token",
+            },
+        )
+        data = r.json()
         token = data.get("access_token")
         if not token:
             return None
@@ -80,17 +82,13 @@ async def api_get(url: str, params: dict | None = None) -> dict:
     token = await access_token()
     if not token:
         raise RuntimeError("google not authorized")
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-        r = await c.get(url, params=params, headers={"Authorization": f"Bearer {token}"})
-        r.raise_for_status()
-        return r.json()
+    r = await http_get(url, params=params, headers={"Authorization": f"Bearer {token}"})
+    return r.json()
 
 
 async def api_post(url: str, json: dict) -> dict:
     token = await access_token()
     if not token:
         raise RuntimeError("google not authorized")
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-        r = await c.post(url, json=json, headers={"Authorization": f"Bearer {token}"})
-        r.raise_for_status()
-        return r.json()
+    r = await http_post(url, json=json, headers={"Authorization": f"Bearer {token}"})
+    return r.json()

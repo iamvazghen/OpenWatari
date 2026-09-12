@@ -14,7 +14,7 @@ Adds/edits/deletes go straight to the persisted SQLite queue, so the list surviv
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from loguru import logger

@@ -126,6 +126,62 @@ async def main() -> None:
     tids = {sid for sid, _ in server._speak_targets()}
     check("ghost active -> broadcast to real conns", tids == {"phone"} and "ghost-device" not in tids)
 
+    print("\n[double-wake] one sentence, two microphones, ONE answer  [12.F3]")
+    srv = BrainServer(agent=StubAgent())
+    # Direct arbitration checks first: they are the decision, and the message path below only
+    # proves it is wired to it.
+    check("the first device to claim an utterance answers",
+          srv._claim_wake("what's the weather", "laptop", 0.0, now=1000.0) is None)
+    check("a second device hearing the SAME sentence stays silent",
+          srv._claim_wake("what's the weather", "phone", 0.0, now=1000.3) == "laptop")
+    check("...and case and spacing do not let it through",
+          srv._claim_wake("  What's   the WEATHER ", "glasses", 0.0, now=1000.4) == "laptop")
+    check("a DIFFERENT sentence from the second device is answered normally",
+          srv._claim_wake("turn the lights off", "phone", 0.0, now=1000.5) is None)
+    check("the same device repeating itself is never blocked by its own claim",
+          srv._claim_wake("what's the weather", "laptop", 0.0, now=1000.6) is None)
+
+    # Louder wins. Without a score every device reports 0.0 and arrival order decides, which is why
+    # the checks above hold for an older edge that knows nothing about this.
+    srv2 = BrainServer(agent=StubAgent())
+    check("a quiet device claims first", srv2._claim_wake("play some music", "phone", 0.2,
+                                                          now=2000.0) is None)
+    check("a louder device takes the turn from it",
+          srv2._claim_wake("play some music", "laptop", 0.9, now=2000.2) is None)
+    check("...and the quieter one is now the loser on record",
+          srv2._claim_wake("play some music", "phone", 0.2, now=2000.3) == "laptop")
+
+    # Outside the window it is a genuine repeat, not an echo of one sentence.
+    srv3 = BrainServer(agent=StubAgent())
+    from afon.brain.server import DOUBLE_WAKE_S
+    check("an old claim does not silence a later ask",
+          srv3._claim_wake("what time is it", "laptop", 0.0, now=3000.0) is None
+          and srv3._claim_wake("what time is it", "phone", 0.0,
+                               now=3000.0 + DOUBLE_WAKE_S + 1) is None)
+    check("stale claims are pruned rather than accumulating forever",
+          len(srv3._wake_claims) == 1, str(srv3._wake_claims))
+
+    # And the wire: the losing device is told the turn is over so it stops listening, and it
+    # speaks nothing.
+    srv4 = BrainServer(agent=StubAgent())
+    ws_a, ws_b = FakeWS(), FakeWS()
+    await srv4.handle_message(ws_a, Hello(session_id="a", device_id="laptop",
+                                          headphones_connected=False))
+    await srv4.handle_message(ws_b, Hello(session_id="b", device_id="iphone",
+                                          headphones_connected=False))
+    ws_a.sent.clear(); ws_b.sent.clear()
+    await srv4.handle_message(ws_a, Utterance(session_id="a", text="remind me at six",
+                                              ts_user_stop_ms=1))
+    await srv4.handle_message(ws_b, Utterance(session_id="b", text="remind me at six",
+                                              ts_user_stop_ms=1))
+    check("only one device is given the turn", "b" not in srv4._turns, str(list(srv4._turns)))
+    check("the losing device says nothing at all", ws_b.spoke() == [], str(ws_b.spoke()))
+    check("...but is told the turn is over, so it isn't left listening",
+          any(f.get("kind") == "lifecycle" and f.get("final") for f in ws_b.sent),
+          str(ws_b.sent))
+    for t in srv4._turns.values():
+        t.cancel()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

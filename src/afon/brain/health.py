@@ -15,7 +15,6 @@ crash.
 
 from __future__ import annotations
 
-import httpx
 from loguru import logger
 
 from afon.brain.proactive import Signal
@@ -40,15 +39,15 @@ async def _check_ticker() -> tuple[bool, str]:
         headers = {}
         if settings.ticker_token:
             headers["Authorization"] = f"Bearer {settings.ticker_token}"
-        async with httpx.AsyncClient(timeout=5) as c:
-            r = await c.get(f"{settings.ticker_url.rstrip('/')}/health", headers=headers)
-            r.raise_for_status()
+        from afon.brain.tools.base import http_get
+
+        await http_get(f"{settings.ticker_url.rstrip('/')}/health", headers=headers)
         return True, "ticker reachable"
     except Exception as e:  # noqa: BLE001
         return False, f"ticker unreachable ({type(e).__name__})"
 
 
-def _check_pc_link() -> tuple[bool, str]:
+async def _check_pc_link() -> tuple[bool, str]:
     """The laptop executor. Down means device control, the camera and the screen are all unreachable.
 
     Reported, but deliberately NOT a proactive signal (see ``health_signals``): a closed laptop is a
@@ -59,9 +58,17 @@ def _check_pc_link() -> tuple[bool, str]:
     try:
         from afon.brain.pc_link import PC_LINK
 
-        if PC_LINK.active():
-            return True, f"laptop connected ({PC_LINK.host() or 'unknown host'})"
-        return False, "laptop executor not connected — device control, camera and screen are dark"
+        if not PC_LINK.active:
+            return False, ("laptop executor not connected — device control, camera and screen "
+                           "are dark")
+        # `active` only says a socket is registered. A laptop that closed its lid leaves that
+        # socket open for over a minute, and reporting "connected" on the strength of it is the
+        # same overclaim as a status page that shows green because it never asked. So ask.
+        if not await PC_LINK.reachable():
+            return False, (f"laptop registered but not answering (silent "
+                           f"{int(PC_LINK.silent_for)}s) — device control, camera and screen "
+                           "are dark")
+        return True, f"laptop connected ({PC_LINK.host or 'unknown host'})"
     except Exception as e:  # noqa: BLE001
         return False, f"pc-link check error: {type(e).__name__}"
 
@@ -112,7 +119,7 @@ async def check() -> dict:
     vault_ok, vault_msg = await _check_vault()
     ticker_ok, ticker_msg = await _check_ticker()
     cache_ok, cache_msg = _check_cache()
-    pc_ok, pc_msg = _check_pc_link()
+    pc_ok, pc_msg = await _check_pc_link()
     queue_ok, queue_msg = await _check_task_queue()
     return {
         "vault": {"ok": vault_ok, "detail": vault_msg},

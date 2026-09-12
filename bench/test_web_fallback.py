@@ -74,7 +74,11 @@ def main() -> None:
 
     async def fc_ok(u):
         used2.append("Firecrawl")
-        return f"# Page\nscraped {u}"
+        # Long enough to read as a real article: since 05.F3 a body this short is reported
+        # as an obstruction rather than returned, which is the right answer and the wrong
+        # fixture.
+        return (f"# Page\nscraped {u}\n\n"
+                + "Body text long enough to count as an article. " * 20)
 
     origs = (web._scrape_jina, web._scrape_firecrawl)
     web._scrape_jina, web._scrape_firecrawl = boom, fc_ok
@@ -104,6 +108,35 @@ def main() -> None:
     # The interactive Playwright browser CAN log in / submit forms / spend, so it MUST stay gated —
     # the line that separates 'read the web' (free) from 'act on the web' (confirm).
     check("interactive browser IS confirm-gated", confirm_required("browser", {"url": "x"}) is True)
+
+    print("\n[empty-body case] a wall in front of a page is never summarised as the page  [05.F3]")
+    from afon.brain.tools.web import obstructed
+
+    check("nothing at all is named as nothing", "nothing came back" in obstructed(""))
+    check("a title-only JS shell is not an article",
+          "not an article" in obstructed("# Some Headline"))
+    body = "x" * 5000
+    check("a real article passes clean", obstructed(body) == "", obstructed(body))
+
+    walls = [
+        ("Please enable JavaScript to view this site.", "JavaScript"),
+        ("Checking your browser before accessing example.com. " + "." * 200, "bot check"),
+        ("Access denied. You do not have permission to view this page." + "." * 200, "refused"),
+        ("Subscribe to continue reading this article. " + "." * 200, "paywall"),
+        ("Sign in to read the full story. " + "." * 200, "account"),
+        ("We use cookies. Please accept cookies to continue. " + "." * 200, "cookie"),
+    ]
+    for text, expect in walls:
+        why = obstructed(text)
+        check(f"a {expect} wall is named as one", expect.lower() in why.lower(), f"{expect}: {why!r}")
+
+    # The false positive that would make the whole check useless: a long, genuine article ABOUT
+    # paywalls and bot checks contains every phrase above. Flagging it would teach him to ignore
+    # the warning, which costs more than the warning is worth.
+    essay = ("A long piece about the web. " * 60 + "Publishers now ask you to subscribe to "
+             "continue reading, and Cloudflare will be checking your browser first. " * 4)
+    check("a long article ABOUT paywalls is not mistaken for one", obstructed(essay) == "",
+          obstructed(essay)[:80])
 
     settings.tavily_api_key = settings.brave_api_key = settings.firecrawl_api_key = None
     print(f"\n=== {passed}/{passed + failed} checks passed ===")

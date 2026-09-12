@@ -543,6 +543,11 @@ class Settings(BaseSettings):
     # the base URL of your HA instance (e.g. http://homeassistant.local:8123). Locks/alarms confirm.
     ha_url: str | None = None
     ha_token: str | None = None
+    # 28.F3 — comma-separated entity-id fragments naming rooms other people live in, e.g.
+    # "living_room,kitchen,hallway". Actuating anything matching one of these confirms
+    # first. Empty by default: only the owner knows which of his rooms are shared, and a
+    # list invented for him would gate the wrong lamps and get ignored.
+    ha_shared_areas: str = ""
 
     # Notion — internal integration token (https://www.notion.so/my-integrations). SHARE the pages
     # you want Afon to touch with the integration (Notion is deny-by-default). read/append/comment/

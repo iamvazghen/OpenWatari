@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
 from loguru import logger
 
 from afon.config import settings
@@ -26,11 +25,11 @@ async def transcribe_audio(audio: bytes, content_type: str = "audio/ogg") -> str
         params["language"] = settings.deepgram_language
     headers = {"Authorization": f"Token {settings.deepgram_api_key}", "Content-Type": content_type}
     try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post("https://api.deepgram.com/v1/listen",
-                             params=params, headers=headers, content=audio)
-            r.raise_for_status()
-            data = r.json()
+        from afon.brain.tools.base import http_post
+
+        r = await http_post("https://api.deepgram.com/v1/listen",
+                            params=params, headers=headers, content=audio)
+        data = r.json()
         return (data["results"]["channels"][0]["alternatives"][0]["transcript"] or "").strip()
     except Exception as e:  # noqa: BLE001
         logger.warning(f"transcribe_audio failed ({type(e).__name__}: {e})")
@@ -50,10 +49,9 @@ async def synthesize(text: str, *, voice_settings: dict | None = None) -> bytes 
     if voice_settings:
         body["voice_settings"] = voice_settings
     try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post(url, headers=headers, json=body)
-            r.raise_for_status()
-            return r.content  # mp3
+        from afon.brain.tools.base import http_post
+
+        return (await http_post(url, headers=headers, json=body)).content  # mp3
     except Exception as e:  # noqa: BLE001
         logger.warning(f"synthesize failed ({type(e).__name__}: {e})")
         return None
@@ -93,12 +91,13 @@ async def send_voice_note(text: str, chat_id: str | None = None) -> bool:
     if not ogg:
         return False
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                f"https://api.telegram.org/bot{token}/sendVoice",
-                data={"chat_id": chat},
-                files={"voice": ("afon.ogg", ogg, "audio/ogg")},
-            )
+        from afon.brain.tools.base import http_post
+
+        r = await http_post(
+            f"https://api.telegram.org/bot{token}/sendVoice",
+            data={"chat_id": chat},
+            files={"voice": ("afon.ogg", ogg, "audio/ogg")},
+        )
         return bool(r.json().get("ok"))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"send_voice_note failed ({type(e).__name__}: {e})")

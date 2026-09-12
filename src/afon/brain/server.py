@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from datetime import datetime
 from typing import Union
 from urllib.parse import urlparse
@@ -35,6 +36,13 @@ from afon.config import settings
 from afon.shared.protocol import Barge, ErrorReport, Hello, StreamEvent, StreamKind, Utterance
 
 ClientMessage = Union[Hello, Utterance, Barge, ErrorReport]
+
+#: How long two edges hearing ONE sentence can be apart (12.F3). Generous on purpose: two
+#: microphones in a room see the end of speech within a few hundred milliseconds of each other, but
+#: their transcripts arrive after independent STT calls. Too short and both devices answer, which
+#: is the failure this exists to stop; too long and a genuine immediate repeat is swallowed, which
+#: is only an annoyance. So it errs long.
+DOUBLE_WAKE_S = 6.0
 
 # Split a reply into sentence-ish chunks so the client speaks incrementally instead of
 # waiting for the whole paragraph (lower perceived latency).
@@ -81,6 +89,7 @@ class BrainServer:
         self._sessions: dict[str, dict] = {}           # session_id -> device/headphones info
         self._conns: dict[str, object] = {}            # session_id -> live websocket (for push)
         self._active_sid: str | None = None            # Phase 5.2 handoff: the device last spoken to
+        self._wake_claims: dict[str, tuple[float, str, float]] = {}   # 12.F3: utterance -> claim
         self._tg_bridge = None                         # set in serve(): proactive VOICE to the phone
         self._proactive = None                         # set in serve(): the ProactiveEngine (feedback)
 
@@ -245,6 +254,16 @@ class BrainServer:
             return
 
         if isinstance(msg, Utterance):
+            # 12.F3 — two edges in one room hear one sentence and both send it. Answering both
+            # means Afon talks over himself from two speakers, which is the most obviously broken
+            # thing a multi-device assistant can do.
+            winner = self._claim_wake(msg.text, msg.session_id, msg.wake_score)
+            if winner is not None:
+                logger.info(f"double-wake: '{msg.session_id}' stays silent; '{winner}' is answering")
+                await self._send(ws, StreamEvent(session_id=msg.session_id,
+                                                 kind=StreamKind.lifecycle,
+                                                 delta="another device is answering", final=True))
+                return
             self._active_sid = msg.session_id  # Phase 5.2 handoff: this is now the owner's live device
             self._cancel(msg.session_id)  # a new utterance supersedes the previous turn
             self._turns[msg.session_id] = asyncio.create_task(self._run_turn(ws, msg))
@@ -254,6 +273,38 @@ class BrainServer:
         task = self._turns.get(session_id)
         if task and not task.done():
             task.cancel()
+
+    def _claim_wake(self, text: str, sid: str, score: float,
+                    now: float | None = None) -> str | None:
+        """Decide which device answers one utterance. None to answer; else the winner's session id.
+
+        The owner says one sentence; the laptop and the phone both hear it and both send it. Louder
+        or nearer wins and the rest stay silent. A device that reports no score is not penalised:
+        with everything at 0.0 this is first-arrival, and the closer microphone usually finishes
+        transcribing first anyway.
+
+        ponytail: a dict of recent utterances, pruned on write. The alternative is holding every
+        turn open for a 300ms arbitration window, which taxes every turn of a one-device day to fix
+        a problem that only exists in a room with two edges in it.
+        """
+        key = " ".join((text or "").lower().split())
+        if not key:
+            return None
+        now = now if now is not None else time.time()
+        for k, (at, _s, _sc) in list(self._wake_claims.items()):
+            if now - at > DOUBLE_WAKE_S:
+                self._wake_claims.pop(k, None)
+        prev = self._wake_claims.get(key)
+        if prev and prev[1] != sid and now - prev[0] <= DOUBLE_WAKE_S:
+            if score > prev[2]:
+                # A better-placed device spoke the same words. It takes over, and the first
+                # device's turn is cancelled so exactly one answer is ever produced.
+                self._cancel(prev[1])
+                self._wake_claims[key] = (now, sid, score)
+                return None
+            return prev[1]
+        self._wake_claims[key] = (now, sid, score)
+        return None
 
     async def _daily_digest_addendum(self, digest_task, now) -> str:
         """Resolve the first-turn daily catch-up: if a build was kicked off for this (first-of-day)
@@ -396,6 +447,7 @@ class BrainServer:
                     data = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
                     continue
+                PC_LINK.touch()   # 04.F4 — anything it says is proof it is still there
                 if data.get("type") == "pc_hello":
                     PC_LINK.register(ws, data.get("host"))
                     logger.info(f"pc-control: laptop '{data.get('host')}' ready (executor {data.get('ver', '?')})")
@@ -631,7 +683,6 @@ async def serve(host: str | None = None, port: int | None = None) -> None:
     # background tick may speak to listening clients (or push) within its budget + quiet hours.
     engine = None
     if settings.proactive_enabled:
-        from pathlib import Path
 
         from afon.brain.proactive import ProactiveEngine, default_signal_sources
 

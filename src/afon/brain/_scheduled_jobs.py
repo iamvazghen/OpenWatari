@@ -1,5 +1,4 @@
 """Module-level job targets so apscheduler can serialise them."""
-import asyncio
 
 from loguru import logger
 

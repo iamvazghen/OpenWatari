@@ -8,10 +8,9 @@ proactive scheduler's delivery fallback (see ``brain/scheduler.py``).
 
 from __future__ import annotations
 
-import httpx
 from loguru import logger
 
-from afon.brain.tools.base import missing_arg, not_configured, tool_error
+from afon.brain.tools.base import http_post, missing_arg, not_configured, tool_error
 from afon.config import settings
 
 
@@ -45,9 +44,7 @@ async def push(message: str, title: str = "Afon", at: float | None = None) -> bo
         headers = {"Title": title}
         if at is not None and ntfy_can_schedule(at):
             headers["At"] = str(int(at))  # ntfy accepts a Unix timestamp for delayed delivery
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-            r = await c.post(url, content=message.encode("utf-8"), headers=headers)
-            r.raise_for_status()
+        await http_post(url, content=message.encode("utf-8"), headers=headers)
         return True
     except Exception as e:  # noqa: BLE001
         logger.warning(f"ntfy push failed: {type(e).__name__}: {e}")

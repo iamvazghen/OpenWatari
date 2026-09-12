@@ -200,6 +200,20 @@ def _update_is_destructive(args: dict | None) -> bool:
     return any(k in a and not str(a[k] or "").strip() for k in _CLEARABLE)
 
 
+#: Mirrors smarthome.SENSITIVE_DOMAINS. Kept local on purpose: importing a tool module here would
+#: drag the whole tool registry into the policy layer that decides whether to call it.
+_HA_SENSITIVE_DOMAINS = {"lock", "alarm_control_panel", "cover", "garage_door",
+                         "climate", "water_heater"}
+
+
+def _ha_shared_areas() -> tuple[str, ...]:
+    """Entity-id fragments naming rooms other people live in (28.F3). Empty unless configured."""
+    from afon.config import settings
+
+    raw = getattr(settings, "ha_shared_areas", "") or ""
+    return tuple(p.strip().lower() for p in raw.split(",") if p.strip())
+
+
 def confirm_required(tool_name: str, args: dict | None = None) -> bool:
     """True if Afon should re-ask for confirmation before running this tool.
 
@@ -229,10 +243,17 @@ def confirm_required(tool_name: str, args: dict | None = None) -> bool:
             return True
         return _is_bulk(args or {})
     if name == "ha_call":
-        # Only security-sensitive actuation confirms (locks/alarms/covers/garage). Turning on a
-        # light or a scene should flow without friction — that's the whole point of a voice home.
-        # Mirrors smarthome.SENSITIVE_DOMAINS (kept local to avoid importing a tool module here).
-        return (args or {}).get("domain", "") in {"lock", "alarm_control_panel", "cover", "garage_door"}
+        # Actuation that reaches past the owner confirms: locks, alarms, covers, garage doors, and
+        # heating. Turning on his own lamp should flow without friction — that is the whole point
+        # of a voice home, and gating it teaches him to say yes without reading.
+        args = args or {}
+        if args.get("domain", "") in _HA_SENSITIVE_DOMAINS:
+            return True
+        # A light in a shared room is his to switch and everyone else's to live with, and only he
+        # knows which rooms those are — so it is configured, not guessed. Empty by default: a
+        # shared-space list invented on his behalf would gate the wrong lamps and be ignored.
+        entity = str(args.get("entity") or "").lower()
+        return bool(entity) and any(a and a in entity for a in _ha_shared_areas())
     return True
 
 

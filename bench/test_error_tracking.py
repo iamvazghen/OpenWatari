@@ -177,6 +177,14 @@ async def main() -> None:
         async def send(self, raw):
             sent.append(_json.loads(raw))
 
+        def ping(self):
+            # Shaped like the real websockets connection: ping() returns an awaitable that
+            # resolves on the pong. PcLink.forward pings before sending (04.F4), so a stub
+            # without this reports the laptop unreachable and nothing is ever forwarded.
+            fut = asyncio.get_running_loop().create_future()
+            fut.set_result(None)
+            return fut
+
     link = pc_link.PcLink() if hasattr(pc_link, "PcLink") else pc_link.PC_LINK
     link.register(_FakeWS())
     trace = err.new_turn()

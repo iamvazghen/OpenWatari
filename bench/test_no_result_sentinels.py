@@ -109,6 +109,50 @@ def main() -> None:
     finally:
         settings.vault_path = saved_vault
 
+    print("\n[19.F3] an unlinked app is a missing credential, not a failed action")
+    import asyncio as _aio
+
+    import afon.brain.tools.composio as cx
+    from afon.brain.tools.base import is_not_configured
+
+    real_configured, real_context, real_post = cx._configured, cx._context, cx._post
+    cx._configured = lambda: True
+
+    async def _ctx_slack_missing():
+        return "u1", {"github", "linear"}
+
+    async def _ctx_unknown():
+        return "u1", set()
+
+    async def _post_unlinked(path, body):
+        return {"successful": False, "error": "No connected account found for toolkit SLACK"}
+
+    async def _post_real_failure(path, body):
+        return {"successful": False, "error": "channel_not_found"}
+
+    try:
+        cx._context = _ctx_slack_missing
+        cx._post = _post_unlinked
+        r = _aio.run(cx.composio_run_tool({"tool_slug": "SLACK_SEND_MESSAGE", "arguments": {}}))
+        check("an app Afon knows is unlinked types as not-configured", is_not_configured(r), r)
+        check("...and it never claims the send was attempted",
+              "didn't go through" not in r, r)
+
+        # The lookup itself failing gives an EMPTY set, which is not evidence of anything. Refusing
+        # on it would turn a network blip into "you never connected Slack".
+        cx._context = _ctx_unknown
+        r2 = _aio.run(cx.composio_run_tool({"tool_slug": "SLACK_SEND_MESSAGE", "arguments": {}}))
+        check("an unknown connection list still types as not-configured via the API's own answer",
+              is_not_configured(r2), r2)
+
+        cx._context = _ctx_slack_missing
+        cx._post = _post_real_failure
+        r3 = _aio.run(cx.composio_run_tool({"tool_slug": "GITHUB_CREATE_ISSUE", "arguments": {}}))
+        check("a genuine action failure on a LINKED app is still reported as a failure",
+              not is_not_configured(r3) and "didn't go through" in r3, r3)
+    finally:
+        cx._configured, cx._context, cx._post = real_configured, real_context, real_post
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

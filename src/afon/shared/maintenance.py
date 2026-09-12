@@ -24,7 +24,6 @@ parked it and why), and removing it is the entire undo — no elevation, no serv
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from afon.shared.paths import state_dir
 
 LOCK = state_dir() / "MAINTENANCE"

@@ -15,7 +15,6 @@ nothing to archive" is an answer the owner can act on; silence is not.
 
 from __future__ import annotations
 
-import shutil
 import sys
 import zipfile
 from datetime import datetime

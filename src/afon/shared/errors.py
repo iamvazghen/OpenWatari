@@ -30,7 +30,6 @@ Non-negotiables, because this writes to disk and crosses the network:
 from __future__ import annotations
 
 import json
-import os
 import re
 import socket
 import sys

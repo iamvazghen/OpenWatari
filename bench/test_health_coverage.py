@@ -59,18 +59,49 @@ def check(ok: bool, name: str, detail: str = "") -> None:
 
 
 class _Link:
+    """Stands in for PcLink.
+
+    It used to expose `active` and `host` as METHODS, which is how the real defect survived for
+    months: health.py called `PC_LINK.active()`, the stub answered, and against the real class —
+    where both are properties — that call raised TypeError, was swallowed by the surrounding
+    except, and reported the laptop as down with "pc-link check error" whenever it was up. A stub
+    that disagrees with the class it stands for turns a green test into evidence of nothing, so
+    the shape is asserted below rather than assumed.
+    """
+
     def __init__(self, up: bool):
         self.up = up
 
+    @property
     def active(self) -> bool:
         return self.up
 
+    @property
     def host(self) -> str | None:
         return "laptop-01" if self.up else None
+
+    @property
+    def silent_for(self) -> float:
+        return 0.0
+
+    async def reachable(self, timeout: float = 3.0) -> bool:
+        return self.up
 
 
 async def main() -> None:
     from afon.brain import pc_link as pl
+
+    print("[0] the stub agrees with the class it stands for")
+    real = pl.PcLink
+    for name in ("active", "host", "silent_for"):
+        check(f"{name} is a property on both",
+              isinstance(getattr(real, name), property)
+              and isinstance(getattr(_Link, name), property),
+              f"{name}: real={type(getattr(real, name)).__name__}, "
+              f"stub={type(getattr(_Link, name)).__name__}")
+    check("reachable is awaitable on both",
+          callable(real.reachable) and callable(_Link.reachable))
+
 
     saved = (health._check_vault, health._check_ticker, health._check_cache, pl.PC_LINK)
 

@@ -884,8 +884,19 @@ after idle is not a reconnect · verify-after-act only where the check is cheape
 - [x] 04.F2 Destructive operations refuse or confirm. *gate:* `test_pc_agent_refuse.py`,
       `test_security_hardening.py`
 - [x] 04.F3 Sleep/suspend and post-resume behaviour. *gate:* `test_pc_suspend.py`
-- [ ] 04.F4 A dead PC link is reported as unreachable within one turn, never as success.
+- [x] 04.F4 A dead PC link is reported as unreachable within one turn, never as success.
       *gate:* `test_pc_verify.py` extended with a link-down case.
+      *done 2026-09-12:* a laptop that closes its lid leaves the websocket open for over a minute,
+      so the link still read as connected, the command was accepted, and it failed after the full
+      ninety-second result window — several turns after he asked, having said nothing in the turn
+      where he asked it. `forward` now proves the peer is there with a websocket ping before
+      committing to that window. The ping needs no change to the executor, because pongs are
+      answered by the library itself, so an agent that is running but busy still replies.
+      It also fixed a defect the health check had been carrying since it was written: it called
+      `PC_LINK.active()` and `PC_LINK.host()`, which are properties, so every check raised
+      TypeError, was swallowed, and reported the laptop down with "pc-link check error" whenever
+      it was up. The test stub had the same shape as the broken caller, which is how it survived;
+      the gate now asserts the stub agrees with the class it stands for.
 
 **Raise**
 - [ ] 04.R1 Verify-after-act: an action that can be checked (app opened, volume set) is checked, and
@@ -941,8 +952,17 @@ fonts on scrape-only fetches · cap page-wait and fall through to the HTTP chain
 - [x] 05.F1 Twelve browser operations over PC_LINK with a persistent session.
       *gate:* `test_pc_agent_routing.py`, `test_screenshot_transport.py`
 - [x] 05.F2 Scrape/search degradation chain is typed. *gate:* `test_web_fallback.py`
-- [ ] 05.F3 A blocked, paywalled or JS-empty page is reported as such, never summarised from the
+- [x] 05.F3 A blocked, paywalled or JS-empty page is reported as such, never summarised from the
       title alone. *gate:* `test_web_fallback.py` extended [empty-body case].
+      *done 2026-09-12:* an empty scrape was already honest. The dangerous case is the one that
+      returns *something*: a bot check, a paywall, a cookie wall, or a JS shell holding only the
+      headline. Those read as content, so the model summarised the obstruction and he got a
+      confident answer assembled from a title and a subscribe button — indistinguishable, to him,
+      from a summary of the article behind it. `obstructed()` names which wall it is, the chain
+      tries the next provider before giving up, and the tool returns the reason instead of the
+      body, because handing back the interstitial is an invitation to summarise it.
+      The phrase rules only apply to a short body: a long article ABOUT paywalls contains every
+      one of those phrases, and flagging it would teach him to ignore the warning.
 
 **Raise**
 - [ ] 05.R1 Form interaction with a confirm gate before any submit that spends money or sends data.
@@ -1431,8 +1451,16 @@ one answering device, others silent · capability registry so routing stops prob
 - [x] 12.F1 Device profiles and edge-lite clients. *gate:* `test_edge_lite.py`,
       `test_phase6_multidevice.py`
 - [x] 12.F2 Reconnect without losing the brain link. *gate:* `test_edge_reconnect.py`
-- [ ] 12.F3 **One answering device.** Arbitration when two edges hear the same wake word — nearest or
+- [x] 12.F3 **One answering device.** Arbitration when two edges hear the same wake word — nearest or
       loudest wins, others stay silent. *gate:* `test_device_handoff.py` extended [double-wake]
+      *done 2026-09-12:* one sentence, two microphones, two turns, Afon talking over himself from
+      two speakers. `_claim_wake` gives the turn to the better-placed device and tells the others
+      the turn is over, so they stop listening and say nothing. `wake_score` was added to the wire
+      as an optional field with a default, so an older edge still talks to a newer brain: with
+      every device reporting zero this is first-arrival, which is a fair proxy for nearest because
+      the closer microphone usually finishes transcribing first.
+      Deliberately not a 300ms arbitration window: that taxes every turn of a one-device day to
+      fix a problem that only exists in a room with two edges in it.
 
 **Raise**
 - [ ] 12.R1 Session follows the owner between devices (depends on S07.F1).
@@ -1856,8 +1884,16 @@ long-tail lookup runs locally against the cache · context memoised on success o
       configured user id cached "no active toolkits" for the whole process lifetime, and a
       successful empty one re-hit the network on every call. Memoises on success now (J3.8).
       *gate:* `test_composio_context_cache.py`
-- [ ] 19.F3 An unconnected account produces `is_not_configured`, never a plausible-sounding failure.
+- [x] 19.F3 An unconnected account produces `is_not_configured`, never a plausible-sounding failure.
       *gate:* `test_no_result_sentinels.py` extended.
+      *done 2026-09-12:* the key check only asked whether Composio was configured. An owner with a
+      Composio key but no Slack account got "That didn't go through, sir: no connected account
+      found" — a sentence that reads like the send was attempted and failed. It was never
+      attempted, and the difference decides what he does next: retry, or go and link the account.
+      Refused before the call when the toolkit is known to be unlinked, and the API's own
+      "no connected account" answer is mapped too, because the cached list can be stale. An EMPTY
+      connection list is never used as evidence: that is what a failed lookup looks like, and
+      refusing on it would turn a network blip into "you never connected Slack".
 
 **Raise**
 - [ ] 19.R1 Catalogue hygiene: only connected apps' tools enter the narrowed family.
@@ -1910,8 +1946,21 @@ failure.
 - [x] 20.F1 Typed "not configured" contract across all integrations.
       *gate:* `test_no_result_sentinels.py`, `test_phase11_integrations.py`
 - [x] 20.F2 Google OAuth verified live on the VPS. *gate:* `test_new_integrations.py`
-- [ ] 20.F3 Every integration declares a timeout and a retry policy in one place, not per module.
+- [x] 20.F3 Every integration declares a timeout and a retry policy in one place, not per module.
       *gate:* new `test_api_policy.py`
+      *done 2026-09-12:* the timeout was already central; the retry policy was not, because there
+      wasn't one. Every integration got exactly one attempt, so a single dropped packet to the
+      weather API reached him as "I couldn't reach the weather service" — a sentence describing an
+      outage, produced by a hiccup. It is a table rather than a blanket rule because the opposite
+      mistake is worse: retrying a slow render turns a thirty-second wait into ninety, retrying a
+      GitHub issue files it twice, and retrying a 401 spends quota to be told no again. A 429 is
+      retried, being the one 4xx that means "later" rather than "no".
+      Fifteen call sites across eleven modules were building their own clients with their own
+      numbers, which is what made the old central timeout central by coincidence. All now go
+      through the shared helpers, and the gate fails the build if a new one appears. Three
+      exemptions, each stated: the LLM client and the edge have their own failover rules, the one
+      synchronous embedder call reads the table without being rewritten async, and the setup
+      wizard imports nothing from brain/ by design so its number stays at the call site.
 
 **Raise**
 - [ ] 20.R1 Response caching where the data is slow-moving (weather, fx, maps) with explicit TTLs.
@@ -2423,10 +2472,25 @@ device calls concurrently.
 **Floor**
 - [ ] 28.F1 **Home Assistant token** installed and the connection verified live. This is the single
       blocker for the whole system. *gate:* `test_new_integrations.py` — a real entity listed.
-- [ ] 28.F2 Read-back verification: Afon reports the state he *observed*, not the command he sent.
+- [x] 28.F2 Read-back verification: Afon reports the state he *observed*, not the command he sent.
       *gate:* new `test_smarthome_verify.py`
-- [ ] 28.F3 Anything that affects other people (lights in shared rooms, locks, heating) is in the
-      confirm tier. *gate:* `test_confirm_tier_documented.py`
+      *done 2026-09-12:* Home Assistant answers 200 to a service call for a device that is
+      unplugged, out of battery or simply not listening, and returns an empty change list. The old
+      reply was "Done, sir — light.turn_on on kitchen. 0 entity change(s)": a claim about the world
+      assembled from the absence of an error, and he walks into a dark kitchen having been told the
+      light is on. Afon now reports the state that came back, reads the entity when nothing
+      changed, says so when the device did not do it, and says he cannot confirm when he cannot
+      read it back. A service with no unambiguous target state — `toggle` — is reported and never
+      graded, because grading it would mean claiming a result he cannot check.
+- [x] 28.F3 Anything that affects other people (lights in shared rooms, locks, heating) is in the
+      confirm tier. *gate:* `test_confirm_tier_documented.py`, `test_smarthome_verify.py` [7]-[9]
+      *done 2026-09-12:* heating and hot water joined locks, alarms, covers and garage doors.
+      Everyone in the building lives in the temperature he sets, and unlike a lamp nobody else can
+      undo it from the wall. Shared rooms are configured (`AFON_HA_SHARED_AREAS`), never guessed:
+      only he knows which of his rooms other people live in, and a list invented for him would gate
+      the wrong lamps and get ignored. His own lamp still flows without friction, because gating
+      everything is how an owner learns to say yes without reading. The gate also asserts the
+      policy layer's copy of the sensitive-domain set matches the tool's, so the two cannot drift.
 
 **Raise**
 - [ ] 28.R1 Scenes: named multi-device states ("bed", "leaving", "focus") with one command.
@@ -2483,8 +2547,18 @@ it is the same evaluation without the effect.
 - [x] 29.F2 Macro guard against runaway/self-triggering chains.
       *gate:* `test_singleton_and_macro_guard.py`
 - [x] 29.F3 Human approval gates for outward actions. *gate:* `test_approvals.py`
-- [ ] 29.F4 Every automation is listable with its last run, next run, and outcome.
+- [x] 29.F4 Every automation is listable with its last run, next run, and outcome.
       *gate:* `test_skill_runtime.py` extended.
+      *done 2026-09-12:* three kinds of automation each knew only about itself — loops had a tick
+      registry, reminders had a next fire time, macros recorded nothing at all. So "what do you run
+      for me, and is any of it broken" had no answer: the information existed and nobody could
+      reach it, which is the same failure as an automation that silently stopped. `automations.py`
+      merges all three into one shape, worst first, and macros now record their own runs.
+      It never leaves a blank where it does not know: a macro that has never run says so, and a
+      reminder whose last run nobody records says "not recorded" rather than showing an empty cell
+      the owner reads as "never". And it never implies a next run that does not exist — a macro
+      fires when he asks, and a guessed time would turn a list he checks into one he stops
+      trusting.
 
 **Raise**
 - [ ] 29.R1 Dry-run mode: "what would this do" before enabling.
@@ -3806,36 +3880,36 @@ green, `E` = elite green.
 | S01 | Brain / Core Intelligence | structured badly | 3/3 | 0/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 3/3 | 0/3 | 0/1 |
 | S03 | Tool Utilization | complete for now | 4/4 | 0/6 | 0/1 |
-| S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
-| S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
+| S04 | Device Control | floor green | 4/4 | 0/3 | 0/1 |
+| S05 | Browser Control | floor green | 3/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
 | S07 | Session & Context | floor green | 3/3 | 0/3 | 0/1 |
 | S08 | Voice Enrollment | weak | 1/2 | 0/3 | 0/1 |
 | S09 | Face Enrollment | not enrolled | 1/2 | 0/3 | 0/1 |
 | S10 | Voice Recognition | structured badly | 3/3 | 0/3 | 0/1 |
 | S11 | Face Recognition | structured badly | 3/3 | 0/3 | 0/1 |
-| S12 | Multi-Device | structured badly | 2/3 | 0/4 | 0/1 |
-| S13 | Notifications | structured badly | 3/3 | 0/3 | 0/1 |
+| S12 | Multi-Device | floor green | 3/3 | 0/4 | 0/1 |
+| S13 | Notifications | floor green | 3/3 | 0/3 | 0/1 |
 | S14 | Proactivity | floor green | 3/3 | 0/3 | 0/1 |
 | S15 | Recommendations | missing | 0/3 | 0/3 | 0/1 |
 | S16 | Task Queue | floor green | 3/3 | 0/3 | 0/1 |
 | S17 | Morning Brief | floor green | 3/3 | 0/3 | 0/1 |
 | S18 | Mic & Speaker | complete for now | 4/4 | 0/3 | 0/1 |
-| S19 | Composio / MCP | structured badly | 2/3 | 0/3 | 0/1 |
-| S20 | External APIs | complete for now | 2/3 | 0/3 | 0/1 |
-| S21 | Personal Time Mgmt | structured badly | 3/3 | 0/3 | 0/1 |
+| S19 | Composio / MCP | floor green | 3/3 | 0/3 | 0/1 |
+| S20 | External APIs | floor green | 3/3 | 0/3 | 0/1 |
+| S21 | Personal Time Mgmt | floor green | 3/3 | 0/3 | 0/1 |
 | S22 | Recoverability | complete for now | 4/4 | 0/3 | 0/1 |
 | S23 | 24/7 Reachability | complete, parked | 4/4 | 0/3 | 0/1 |
 | S24 | Knowledge & World Model | structured badly | 2/2 | 0/3 | 0/1 |
 | S25 | Personality | complete for now | 2/3 | 0/3 | 0/1 |
 | S26 | Multi-Modal Perception | floor green | 3/3 | 0/3 | 0/1 |
 | S27 | Context Awareness | floor green | 2/2 | 0/3 | 0/1 |
-| S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
-| S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
+| S28 | IoT Orchestration | token blocked | 2/3 | 0/3 | 0/1 |
+| S29 | Automation & Workflow | floor green | 4/4 | 0/3 | 0/1 |
 | S30 | Persistent Memory | structured badly | 3/3 | 0/9 | 0/2 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/6 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
-| S33 | Goal & Project Mgmt | structured badly | 3/3 | 0/3 | 0/1 |
+| S33 | Goal & Project Mgmt | floor green | 3/3 | 0/3 | 0/1 |
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
 | S35 | Crisis Response | half-built | 1/3 | 0/3 | 0/1 |
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
@@ -3854,7 +3928,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 99 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 99 of 370.**
+**Totals: 107 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 107 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

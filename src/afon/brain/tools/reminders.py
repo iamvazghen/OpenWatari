@@ -11,7 +11,7 @@ import re
 from loguru import logger
 
 from afon.brain.scheduler import SCHEDULER
-from afon.brain.tools.base import missing_arg, tool_error
+from afon.brain.tools.base import http_post, missing_arg, tool_error
 from afon.config import settings
 
 # A relative delay phrase a model may put anywhere ("in 90 minutes", "90 min", "in 2 hours", "in a day").
@@ -65,18 +65,15 @@ async def _register_daily_with_ticker(job_id: str, message: str, daily: str) -> 
     if not settings.ticker_url:
         return False
     try:
-        import httpx
 
         headers = {}
         if settings.ticker_token:
             headers["Authorization"] = f"Bearer {settings.ticker_token}"
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-            r = await c.post(
-                f"{settings.ticker_url.rstrip('/')}/reminders",
-                json={"id": job_id, "message": message, "daily": daily},
-                headers=headers,
-            )
-            r.raise_for_status()
+        await http_post(
+            f"{settings.ticker_url.rstrip('/')}/reminders",
+            json={"id": job_id, "message": message, "daily": daily},
+            headers=headers,
+        )
         return True
     except Exception as e:  # noqa: BLE001
         logger.warning(f"ticker register failed: {type(e).__name__}: {e}")

@@ -471,16 +471,15 @@ async def create_github_issue(args: dict) -> str:
     if labels:
         payload["labels"] = labels
     try:
-        import httpx
+        from afon.brain.tools.base import http_post
 
-        async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.post(
-                f"https://api.github.com/repos/{repo}/issues",
-                headers={"Authorization": f"Bearer {token}",
-                         "Accept": "application/vnd.github+json",
-                         "X-GitHub-Api-Version": "2022-11-28"},
-                json=payload,
-            )
+        r = await http_post(
+            f"https://api.github.com/repos/{repo}/issues",
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28"},
+            json=payload,
+        )
     except Exception as e:  # noqa: BLE001
         return tool_error("GitHub issue", e)
     if r.status_code == 201:

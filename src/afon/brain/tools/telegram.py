@@ -14,7 +14,7 @@ Both degrade gracefully when their credentials/session are absent.
 
 from __future__ import annotations
 
-from afon.brain.tools.base import clip, http_post, not_configured, tool_error
+from afon.brain.tools.base import clip, http_get, http_post, not_configured, tool_error
 from afon.config import settings
 
 
@@ -66,16 +66,11 @@ async def _resolve_gif(term: str) -> str | None:
     term = term.strip()
     if term.startswith(("http://", "https://")):
         return term
-    import httpx
 
     key = settings.giphy_api_key or _GIPHY_PUBLIC
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-        r = await c.get(
-            "https://api.giphy.com/v1/gifs/search",
-            params={"api_key": key, "q": term, "limit": 1, "rating": "pg"},
-        )
-        r.raise_for_status()
-        data = r.json().get("data", [])
+    r = await http_get("https://api.giphy.com/v1/gifs/search",
+                       params={"api_key": key, "q": term, "limit": 1, "rating": "pg"})
+    data = r.json().get("data", [])
     return data[0]["images"]["original"]["url"] if data else None
 
 
@@ -388,12 +383,9 @@ async def _fetch_media(url_or_path: str) -> str:
         return url_or_path  # already a local path
     import tempfile
 
-    import httpx
 
     suffix = ".gif" if ".gif" in url_or_path.lower() else ""
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, follow_redirects=True) as c:
-        r = await c.get(url_or_path)
-        r.raise_for_status()
+    r = await http_get(url_or_path)
     fd, path = tempfile.mkstemp(suffix=suffix)
     import os
 

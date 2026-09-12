@@ -570,16 +570,13 @@ async def _cancel_on_ticker(job_id: str) -> None:
     if not settings.ticker_url:
         return
     try:
-        import httpx
+        from afon.brain.tools.base import http_post
 
         headers = {}
         if settings.ticker_token:
             headers["Authorization"] = f"Bearer {settings.ticker_token}"
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
-            await c.post(
-                f"{settings.ticker_url.rstrip('/')}/reminders/cancel",
-                json={"id": job_id}, headers=headers,
-            )
+        await http_post(f"{settings.ticker_url.rstrip('/')}/reminders/cancel",
+                        json={"id": job_id}, headers=headers)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"ticker cancel failed: {type(e).__name__}: {e}")
 

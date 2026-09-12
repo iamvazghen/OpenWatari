@@ -18,10 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 
-import httpx
 from loguru import logger
 
-from afon.brain.tools.base import not_configured, tool_error
+from afon.brain.tools.base import http_get, http_post, not_configured, tool_error
 from afon.config import settings
 
 _API = "https://backend.composio.dev/api/v3"
@@ -57,18 +56,15 @@ def _headers() -> dict:
 
 
 async def _get(path: str, params: dict | None = None) -> dict:
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(f"{_API}{path}", headers=_headers(), params=params or {})
-        r.raise_for_status()
-        return r.json()
+    r = await http_get(f"{_API}{path}", headers=_headers(), params=params or {})
+    return r.json()
 
 
 async def _post(path: str, body: dict) -> dict:
-    async with httpx.AsyncClient(timeout=45) as c:
-        r = await c.post(f"{_API}{path}", headers=_headers(), json=body)
-        if r.headers.get("content-type", "").startswith("application/json"):
-            return r.json()
-        return {"raw": r.text}
+    r = await http_post(f"{_API}{path}", headers=_headers(), json=body)
+    if r.headers.get("content-type", "").startswith("application/json"):
+        return r.json()
+    return {"raw": r.text}
 
 
 async def _context() -> tuple[str | None, set[str]]:
@@ -94,6 +90,28 @@ async def _context() -> tuple[str | None, set[str]]:
                 uid = a.get("user_id")
     _user_id, _active_toolkits, _context_resolved = uid, toolkits, True
     return uid, toolkits
+
+
+# ---- 19.F3: "not connected" is a missing credential, not a failed action --------------------
+# The key check above only asks whether COMPOSIO is configured. An owner with a Composio key but no
+# Slack account connected asked Afon to post to Slack and got "That didn't go through, sir: no
+# connected account found" — a sentence that reads like the send was attempted and failed. It was
+# never attempted, and the difference decides what he does next: retry, or go and link the account.
+# Every other integration in the repo answers this case with `not_configured`; this one did not.
+
+#: Phrases Composio uses when the toolkit itself is unlinked. Matched as a fallback, because the
+#: locally cached toolkit set can be stale — an account can be revoked between two turns.
+_UNLINKED_MARKERS = ("no connected account", "not connected", "connected account not found",
+                     "no connected_account", "connection not found", "account is not active")
+
+
+def _toolkit_of(slug: str) -> str:
+    """The app a tool slug belongs to. Composio slugs are TOOLKIT_VERB_NOUN."""
+    return (slug or "").split("_", 1)[0].lower()
+
+
+def _needs_app(app: str) -> str:
+    return (f"your {app.title()} account linked in Composio — connect it there and I can run this")
 
 
 def _required_params(tool: dict) -> list[str]:
@@ -205,13 +223,21 @@ async def composio_run_tool(args: dict) -> str:
         except json.JSONDecodeError:
             arguments = {}
     try:
-        uid, _ = await _context()
+        uid, connected = await _context()
+        app = _toolkit_of(slug)
+        # Refuse BEFORE the call when we already know the app is unlinked. `connected` is empty
+        # when the lookup itself failed, and an empty set is not evidence of anything — refusing on
+        # it would turn a network blip into "you haven't connected Slack".
+        if connected and app and app not in connected:
+            return not_configured(app.title(), _needs_app(app))
         data = await _post(f"/tools/execute/{slug}", {"user_id": uid, "arguments": arguments})
     except Exception as e:  # noqa: BLE001
         return tool_error("Composio run", e)
     if not data.get("successful", data.get("success", False)):
-        err = data.get("error") or data.get("raw") or "the tool reported an error"
-        return f"That didn't go through, sir: {str(err)[:200]}"
+        err = str(data.get("error") or data.get("raw") or "the tool reported an error")
+        if any(m in err.lower() for m in _UNLINKED_MARKERS):
+            return not_configured(_toolkit_of(slug).title() or "that app", _needs_app(_toolkit_of(slug)))
+        return f"That didn't go through, sir: {err[:200]}"
     result = data.get("data") or {}
     text = json.dumps(result, default=str) if not isinstance(result, str) else result
     return f"Done, sir. {text[:600]}"

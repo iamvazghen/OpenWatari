@@ -13,7 +13,7 @@ Wired into the proactive engine's tick loop alongside the default sources. Each 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -263,7 +263,6 @@ def routine_planning_signal(now: datetime | None = None) -> list[Signal]:
     be timed purposefully instead of guessed. Fires 08:00–10:30 local, once per day, and only while
     at least one dynamic commitment is still unplanned for today."""
     try:
-        import json
 
         from zoneinfo import ZoneInfo
 

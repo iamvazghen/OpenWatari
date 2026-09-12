@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import httpx
 
 from afon.config import settings
 
@@ -30,10 +29,10 @@ async def news_signals(now: datetime | None = None):
     # the date-keyed signal clears suppression mid-window and the brief fires twice.
     if not (8 <= now.hour < 10):
         return []
-    async with httpx.AsyncClient(timeout=8) as client:
-        r = await client.get(f"{base}/api/news", params={"limit": 5})
-        r.raise_for_status()
-        items = r.json().get("items") or []
+    from afon.brain.tools.base import http_get
+
+    r = await http_get(f"{base}/api/news", params={"limit": 5})
+    items = r.json().get("items") or []
     heads = []
     for item in items[:3]:
         t = (item.get("title") or "").strip()

@@ -15,11 +15,17 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Callable
 
-import httpx
 from loguru import logger
 
 from afon.brain.loops import tick
 from afon.config import settings
+
+#: Seconds of slack on top of the long-poll window Telegram is holding open for us.
+_POLL_SLACK_S = 10.0
+
+#: Voice notes are an upload and a download of real audio, so they are sized by bytes, not
+#: by an API's thinking time.
+_MEDIA_TIMEOUT_S = 60.0
 
 Responder = Callable[[str], Awaitable[str]]
 
@@ -41,10 +47,17 @@ class TelegramBridge:
         return bool(self._token and self._chat)
 
     async def _api(self, method: str, **params) -> dict:
+        from afon.brain.tools.base import http_post, policy_for
+
         url = f"https://api.telegram.org/bot{self._token}/{method}"
-        async with httpx.AsyncClient(timeout=40) as c:
-            r = await c.post(url, json=params)
-            return r.json()
+        # The HTTP wait must OUTLAST the long poll: getUpdates is asked to hold the connection for
+        # `timeout` seconds before answering, so a shorter client timeout aborts our own request
+        # every time. This number is derived from the protocol, not chosen — which is why it
+        # overrides the declared policy (20.F3) rather than quietly contradicting it.
+        held = float(params.get("timeout") or 0)
+        wait = held + _POLL_SLACK_S if held else policy_for(url).timeout
+        r = await http_post(url, json=params, timeout=wait)
+        return r.json()
 
     async def _download(self, file_id: str) -> bytes | None:
         """Resolve a Telegram file_id to its bytes (used for voice messages)."""
@@ -53,11 +66,11 @@ class TelegramBridge:
             path = info.get("result", {}).get("file_path")
             if not path:
                 return None
+            from afon.brain.tools.base import http_get
+
             url = f"https://api.telegram.org/file/bot{self._token}/{path}"
-            async with httpx.AsyncClient(timeout=60) as c:
-                r = await c.get(url)
-                r.raise_for_status()
-                return r.content
+            r = await http_get(url, timeout=_MEDIA_TIMEOUT_S)
+            return r.content
         except Exception as e:  # noqa: BLE001
             logger.warning(f"telegram bridge: file download failed ({type(e).__name__}: {e})")
             return None
@@ -77,10 +90,12 @@ class TelegramBridge:
         if not ogg:
             return False
         try:
+            from afon.brain.tools.base import http_post
+
             url = f"https://api.telegram.org/bot{self._token}/sendVoice"
             files = {"voice": ("afon.ogg", ogg, "audio/ogg")}
-            async with httpx.AsyncClient(timeout=60) as c:
-                await c.post(url, data={"chat_id": chat_id}, files=files)
+            await http_post(url, data={"chat_id": chat_id}, files=files,
+                            timeout=_MEDIA_TIMEOUT_S)
             return True
         except Exception as e:  # noqa: BLE001
             logger.warning(f"telegram bridge: sendVoice failed ({type(e).__name__}: {e})")

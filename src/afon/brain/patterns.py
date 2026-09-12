@@ -20,7 +20,6 @@ from pathlib import Path
 
 from loguru import logger
 
-from afon.config import settings
 from afon.shared.paths import state_dir
 
 

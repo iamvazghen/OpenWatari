@@ -39,6 +39,11 @@ class Utterance(BaseModel):
     # whole turn, so one id retrieves both sides' logs for a turn that went wrong. Optional so an
     # older edge (or the iPhone client) still talks to a newer brain.
     turn_id: str = ""
+    # 12.F3 — how well THIS edge heard the wake word (loudness, or a proximity estimate). Optional
+    # and defaulted so an older edge still talks to a newer brain: with every device reporting 0.0
+    # the arbitration falls back to arrival order, which is a reasonable proxy for "nearest"
+    # because the closer microphone usually finishes transcribing first.
+    wake_score: float = 0.0
 
 
 class ErrorReport(BaseModel):

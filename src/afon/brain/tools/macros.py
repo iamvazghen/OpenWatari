@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -126,6 +127,16 @@ async def list_macros(_args: dict) -> str:
             line += f" — {desc}"
         lines.append(line)
     return f"{len(store)} macro(s) saved:\n" + "\n".join(lines)
+
+
+async def list_automations(_args: dict) -> str:
+    """Everything Afon runs unprompted — loops, reminders and macros — with last run and outcome."""
+    try:
+        from afon.brain.automations import spoken
+
+        return spoken()
+    except Exception as e:  # noqa: BLE001
+        return tool_error("automation list", e)
 
 
 async def delete_macro(args: dict) -> str:
@@ -261,7 +272,33 @@ async def run_macro(args: dict) -> str:
     # authorized=True is safe here and ONLY here: run_macro is confirm-gated whenever this macro's
     # own steps contain a gated tool, so reaching this line means the owner already said yes.
     out = await run_steps(m.get("steps") or [], label, authorized=True)
+    # 29.F4 — a macro that recorded nothing could not be told apart from one that never ran, which
+    # is the whole failure: an automation that silently stopped looks exactly like a quiet one.
+    _note_run(name, out)
     return out + f"\nMacro '{name}' finished, sir."
+
+
+#: What counts as a step having gone wrong. The transcript is prose by design — it is read aloud —
+#: so this reads it the way the owner would, rather than demanding a status field the step handlers
+#: do not produce.
+_FAILURE_MARKS = ("hit an error", "couldn't", "could not", "failed", "isn't configured",
+                  "not configured", "didn't go through")
+
+
+def _note_run(name: str, transcript: str) -> None:
+    """Record when a macro last ran and how it went. Never raises into the run itself."""
+    try:
+        low = (transcript or "").lower()
+        bad = [m for m in _FAILURE_MARKS if m in low]
+        store = _load()
+        entry = store.get(name)
+        if entry is None:
+            return
+        entry["last_run"] = time.time()
+        entry["last_outcome"] = f"failed: {bad[0]}" if bad else "ok"
+        _save(store)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"macros: could not record run of {name!r} ({type(e).__name__}: {e})")
 
 
 # ---- Conditional flow (T2c) ---------------------------------------------------
@@ -420,6 +457,19 @@ SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "list_automations",
+            "description": (
+                "List EVERYTHING Afon runs on his own — background loops, scheduled reminders and "
+                "saved macros — with when each last ran, when it runs next, and how it went. Use "
+                "for 'what do you run for me', 'what's automated', 'is anything broken', 'what "
+                "runs in the background'."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "define_macro",
             "description": (
                 "Save (or update) a named macro — a reusable sequence of steps. Each step is a dict "
@@ -505,6 +555,7 @@ SCHEMAS = [
 ]
 
 HANDLERS = {
+    "list_automations": list_automations,
     "define_macro": define_macro,
     "list_macros": list_macros,
     "run_macro": run_macro,

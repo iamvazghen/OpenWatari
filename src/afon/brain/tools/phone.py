@@ -13,7 +13,7 @@ Plain REST via httpx — no twilio SDK dependency. 'to' accepts an E.164 number 
 from __future__ import annotations
 
 from afon.config import settings
-from afon.brain.tools.base import clip, not_configured, tool_error
+from afon.brain.tools.base import clip, http_post, not_configured, tool_error
 
 _NEEDS = ("a Twilio account SID + auth token + a Twilio phone number (AFON_TWILIO_ACCOUNT_SID, "
           "AFON_TWILIO_AUTH_TOKEN, AFON_TWILIO_FROM_NUMBER)")
@@ -33,14 +33,11 @@ def _resolve_to(raw: str) -> str | None:
 
 
 async def _post(resource: str, data: dict) -> dict:
-    import httpx
 
     auth = (settings.twilio_account_sid, settings.twilio_auth_token)
     url = _API.format(sid=settings.twilio_account_sid, res=resource)
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, auth=auth) as c:
-        r = await c.post(url, data=data)
-        r.raise_for_status()
-        return r.json()
+    r = await http_post(url, data=data, auth=auth)
+    return r.json()
 
 
 async def place_call(args: dict) -> str:

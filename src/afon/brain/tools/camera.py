@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from pathlib import Path
 
 from loguru import logger
 
@@ -605,7 +604,6 @@ def _recognise(jpeg: bytes, refs) -> tuple[int, bool]:
     ``refs`` stays the LBP refs so every existing caller keeps working; the embeddings are looked up
     here because only this function knows which backend it ended up using.
     """
-    import numpy as np
 
     embs = _owner_embeddings()
     if embs is not None:
