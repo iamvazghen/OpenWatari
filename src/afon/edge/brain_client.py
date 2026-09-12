@@ -12,7 +12,7 @@ It is transport-only: it doesn't do audio or TTS. Wire ``on_event`` to feed ``St
 into whatever speaks them (the Pipecat TTS stage, the phone, …), and call ``send_utterance`` with a
 finished transcript.
 
-    client = BrainClient(session_id="laptop-1", on_event=speak, on_state=show_state)
+    client = BrainClient(session_id=device_session_id("laptop"), on_event=speak, on_state=show_state)
     asyncio.create_task(client.run())          # supervised; returns when stop() is called
     await client.send_utterance("what time is it")
 """

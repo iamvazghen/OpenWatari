@@ -166,7 +166,7 @@ by saying so and giving a reason.
 | Declined | Reason |
 |---|---|
 | Kubernetes, multi-region, Consul/etcd, load balancers | One VPS, one laptop, one owner. Consensus systems coordinate many nodes; at two nodes the honest answer is a declared degraded mode (S32). |
-| Postgres + pgvector, Neo4j, InfluxDB/Timescale | Every store here is small and single-writer. sqlite is in-process, has no daemon, backs up as a file, and is already load-bearing. Revisit only when a latency budget actually fails. |
+| Neo4j, InfluxDB/TimescaleDB, Qdrant, MinIO | Four separate daemons for data one Postgres already holds: a graph is an edge table, a time series is a timestamped row, vectors are pgvector, blobs are a directory with a path in a row. Adding four servers to avoid four schemas is a bad trade at this size. |
 | LangChain / LangGraph / CrewAI / AutoGen as the agent core | The loop already carries the confirm tier, typed degradation, clause completion and streaming failover. A framework rewrite re-litigates all four for no capability Afon lacks. |
 | Celery / Temporal / Prefect / Airflow | Broker plus worker tier for a queue of a handful of items; durability already comes from sqlite and restart-expiry. |
 | Keycloak / Auth0 / Vault / OPA | Exactly one principal. The confirm tier *is* the policy engine; `pass` *is* the secret store. A second authority is a sync problem, not a security gain. |
@@ -177,6 +177,82 @@ by saying so and giving a reason.
 | Rust / Go rewrites | Nothing is measured CPU-bound. The latency budget is model inference and network. |
 
 ---
+
+# The data platform — Postgres, Redis-compatible cache, and what stays sqlite
+
+This section exists because the earlier decline of Postgres has **expired on its own terms**, and a
+decision that was right in August is wrong now for a reason worth recording.
+
+**Why it was declined.** S30 declined Postgres because "a migration would run straight through the
+laptop/VPS divergence this system is trying to end". That was correct. The two hosts held divergent
+learned state under identical names, because stores resolved from the location of the unpacked code
+rather than from a state root.
+
+**Why that objection is gone.** Task 30.F1 is done. There is one state root per host
+(`AFON_STATE_DIR`, default `~/.afon`, resolved in `shared/paths.py` and nowhere else), the union
+migration ran, and `test_memory_single_origin.py` holds the invariant at 46 checks with ten planted
+regressions. The divergence a migration would have run through no longer exists. The specific reason
+for the decline is spent, so the decline is revisited rather than repeated.
+
+**What Postgres buys that sqlite cannot.**
+
+| Want | sqlite today | Postgres |
+|---|---|---|
+| Several readers while the brain writes | one writer, readers block on the lock | MVCC; the fleet, a dashboard and the brain read the same rows concurrently |
+| Semantic recall without a remote API | Jina embeddings over HTTP on the answer path | `pgvector` locally; embeddings stop being a network dependency and a bill |
+| A real claim primitive for S16 and S48 | a file lock and hope | `SELECT … FOR UPDATE SKIP LOCKED`, which is the whole of what Ray was proposed for |
+| Replication for S32 | copying files and praying about torn pages | logical replication, or Litestream if it stays sqlite |
+| One store, not ten | ten `afon_*.sqlite` files, each with its own schema drift | one schema, one backup, one restore drill |
+
+**What it costs, stated plainly.** A daemon on the brain host. On a VPS that OOMed once this summer
+that is not free, so it is tuned down deliberately rather than run at defaults:
+`shared_buffers=128MB`, `work_mem=4MB`, `max_connections=20`, and no autovacuum tuning games. Budget
+250 MB RSS and hold it to that with a gate.
+
+**What stays sqlite, permanently.** The **edge** and **pc_agent** processes on the laptop. They must
+keep working with the VPS unreachable, which is the whole point of S23 and S32. They never speak to
+Postgres. **The brain is the only Postgres client.** This is the line that keeps offline operation
+real, and a task that crosses it is a bug, not a feature.
+
+**The cache is Valkey, not Redis.** Redis changed licence in 2024 and, although Redis 8 returned to
+AGPL-3.0 in 2025, **Valkey (BSD-3, Linux Foundation)** is the clean OSI answer and is protocol- and
+client-compatible — `redis-py` talks to it unchanged. Confirm both licence positions at adoption.
+Afon already declares Redis as an optional L4 hot cache that degrades to a no-op, so this finishes a
+half-built dependency rather than adding a new one. **It must stay a no-op when absent.** Four uses,
+and no others:
+
+1. The per-turn context digest and prompt cache, which is pure recomputable derived state.
+2. A distributed lock replacing the file lock, so the brain and a scheduled job cannot both act.
+3. The live presence key for S43, with keyspace notifications so a handoff does not wait for a poll.
+4. Provider rate-limit counters for S20.
+
+Nothing durable lives only in the cache. If the cache is cold, every one of those four recomputes.
+
+**The migration, per store, through a seam that already exists.** 30.F2 shipped one `recall()`
+facade over the seven stores, so callers do not touch stores directly any more. That facade is the
+migration seam and the reason this is a week rather than a rewrite:
+
+1. Create the schema; dual-write sqlite and Postgres behind the facade.
+2. Backfill, then run `compare_stores.py` until reads agree row for row.
+3. Flip reads per store, one at a time, behind `AFON_STORE_BACKEND`.
+4. Keep dual-write for two weeks, then drop sqlite writes for that store.
+
+**Rollback is per store and needs no revert:** flip `AFON_STORE_BACKEND` back to `sqlite`. The
+sqlite file is still being written during the overlap, which is what makes the rollback real rather
+than theoretical.
+
+**Gates.** `test_store_parity.py` — every query returns identical rows from both backends ·
+`test_offline_edge.py` — edge and pc_agent pass their suites with Postgres stopped ·
+`test_cache_optional.py` — the full suite passes with the cache stopped · recall p95 ≤300ms is
+unchanged or better · brain host RSS ceiling enforced in `test_speed.py`.
+
+**Open-source base.** PostgreSQL (PostgreSQL licence), pgvector (PostgreSQL licence), Valkey
+(BSD-3), `psycopg` 3 (LGPL-3.0, declared dependency, not vendored), `redis-py` (MIT).
+
+| Confidence | Settled by | Effort F/R/E | Owner | €/mo | Rollback |
+|---|---|---|---|---|---|
+| reasoned | store-parity green and recall p95 no worse on the real corpus | 6 / 4 / 2 d | 0 | 0 (same VPS) | `AFON_STORE_BACKEND=sqlite`, per store |
+
 
 # How coherence is tested — fifty capabilities, one organism
 
@@ -724,7 +800,7 @@ a recorded live run of ten real commands.
 SSH exec is exactly the unbounded shell surface the confirm tier exists to avoid. *Test:* hardware
 in the loop · a simulator fixture · both → **simulator for CI, one recorded live run per release** —
 link-down and half-open are the interesting states and hardware cannot be scheduled.
-**Open-source base.** none new (websockets, already a dependency).
+**Open-source base.** python-zeroconf (LGPL-2.1, declared dependency, not vendored) for discovery; Home Assistant (Apache-2.0) as the abstraction layer over its WebSocket API, shared with S28 — it is the reason no per-vendor integration is written here.
 **Speed & efficiency.** Batch multi-step ops into one round trip · keep-alive so the first command
 after idle is not a reconnect · verify-after-act only where the check is cheaper than being wrong.
 
@@ -884,8 +960,12 @@ logged.
 **Stack.** Today: in-process history with a trim heuristic, plus the sqlite stores. **Add:**
 `tiktoken` for exact budget accounting — the trim currently estimates, which is why the ceiling is a
 hope rather than a guarantee.
-**Declined:** Redis for session state. One brain process; an external cache adds an operational
-failure mode to something that fits in memory and must survive restart via sqlite anyway.
+**Declined:** Redis/Valkey as the *store* for session state. One brain process; an external cache
+adds an operational failure mode to something that fits in memory and must survive restart via the
+durable store anyway. This does not contradict **The data platform**: the cache there carries the
+per-turn digest and prompt cache, which are recomputable derived state. A session that exists only
+in the cache is gone the moment the cache restarts, and "the conversation survives a night's sleep"
+is this system's whole bar.
 
 **Verified by.** Long-conversation replay · a reference-resolution corpus ("it", "that one") ·
 concurrent-session isolation · the cross-device journey J-04.
@@ -904,12 +984,40 @@ close, not per turn · topic segmentation so recall does not drag unrelated turn
 | reasoned | context-assembly p95 and a 200-turn replay | 3 / 4 / 2 d | — | 0 | trim policy behind a setting |
 
 **Floor**
-- [ ] 07.F1 Session identity is explicit: one session id per conversation, carried across edge
-      reconnects and across devices. *gate:* new `test_session_identity.py`
-- [ ] 07.F2 Trim is lossy *on purpose* — what is dropped is summarised into the session record, not
-      discarded. *gate:* `test_session_identity.py` [trim retains gist]
-- [ ] 07.F3 Reference resolution ("it", "that", "the second one") is tested, not assumed.
-      *gate:* new `test_reference_resolution.py` — 20 cases, ≥90%.
+- [x] 07.F1 Session identity is explicit: one session id per conversation, carried across edge
+      reconnects and across devices.
+      `src/afon/shared/session.py`. A session id is now `<device>:<conversation>`: the device half
+      says which box is speaking, the conversation half is shared by every device and persists in
+      the state directory, so a reconnect rejoins the conversation it left. The three entry points
+      carried their own constants — `laptop-1`, `laptop-edge`, `android-1` — so one laptop appeared
+      to the brain as two sessions depending on which launcher ran; they now derive the id at
+      connect time. It rotates in `reset_session` and nowhere else, so the id and the cleared
+      working history cannot disagree about where the boundary was. A legacy or third-party id
+      yields `None` rather than being adopted into whatever conversation is current.
+      *gate:* `test_session_identity.py` — 33/33.
+- [x] 07.F2 Trim is lossy *on purpose* — what is dropped is summarised into the session record, not
+      discarded.
+      **It was discarded.** `_trim` kept the last N turns and dropped the rest on the floor; only
+      the *reset* path journalled, so a conversation long enough to trim lost its opening silently.
+      Dropped messages now buffer and are summarised into the L2 journal in the background — never
+      awaited, because this runs on the answer path — and a reset flushes whatever has not been
+      summarised yet, ordered ahead of what is still in the window. Verified that across ten turns
+      through a four-message window, every user turn is in the window, journalled, or buffered, and
+      none is journalled twice.
+      *gate:* `test_session_identity.py` [trim retains gist]
+- [x] 07.F3 Reference resolution ("it", "that", "the second one") is tested, not assumed.
+      `src/afon/brain/references.py` resolves the references that have a deterministic answer and
+      **declines the rest**: ordinals into a list Afon just produced, and a bare pronoun with
+      exactly one recent concrete candidate. Two candidates is ambiguous and declines; an
+      out-of-range ordinal declines rather than clamping, because clamping is how "the fourth one"
+      against three items acts on the third. The owner's message enters history verbatim and the
+      binding travels beside it as a system note phrased as an assumption — a rewrite that guessed
+      wrong would be unrecoverable from the transcript.
+      *gate:* `test_reference_resolution.py` — **20/20 with 0 wrong bindings.** The gate is two
+      numbers, and the second is the real one: a decline and a wrong binding are different
+      failures, so `WRONG` must be zero. Eight of the twenty cases are adversarial shapes where
+      declining is the correct answer. The corpus was written by the author of the resolver, so it
+      measures the rules, not the language.
 
 **Raise**
 - [ ] 07.R1 Session summaries written at close, retrievable by date and topic.
@@ -1240,7 +1348,7 @@ simulation with forced reconnects.
 WebSocket.** Three clients maximum, and the brain already multiplexes them; a broker is another
 always-on process for no extra reach. *Test:* two simulated edges · protocol round-trip · flaky-link
 injection → **all three**; double-wake is the failure that actually annoys.
-**Open-source base.** none new.
+**Open-source base.** python-zeroconf (LGPL-2.1) for discovery, shared with S43; **Syncthing (MPL-2.0)** as a separate service for hand-authored files carried between laptop and VPS. **Never for a live store** — a synced sqlite or Postgres data file is corruption waiting for a clock skew; stores replicate through S32.
 **Speed & efficiency.** Arbitration decided at the brain in ≤50ms from RMS plus last-interaction ·
 one answering device, others silent · capability registry so routing stops probing.
 
@@ -1355,7 +1463,7 @@ decisions · timing backtest · behavioural proactivity category.
 needs ≥200 logged outcomes before it beats a hand-set threshold. Explicitly noted as the upgrade
 path rather than left implicit. *Test:* per-kind reachability · acceptance replay · timing backtest
 → **all three**; a dormant signal kind is a bug, and only reachability catches it.
-**Open-source base.** none now; `river` (BSD-3) for online bandits when the data exists.
+**Open-source base.** `river` (BSD-3) for online bandits. The data no longer arrives "when it exists": decision logging is on by default from today (see the owner-defaults table), so the bandit has a corpus in weeks rather than never.
 **Speed & efficiency.** Tick ≤200ms · signals computed from the cached context object, never fresh
 IO · budget and quiet hours enforced before any scoring work.
 
@@ -1414,7 +1522,7 @@ ranker over a rule-generated candidate set** → **log first, then LLM ranking.*
 filtering needs other users and there is one. LLM ranking is strong at cold start and costs one call
 Afon is already making. *Test:* reason-cites-its-data · cold-start refusal · offline acceptance
 replay → **all three.**
-**Open-source base.** none required; `implicit` (MIT) only if a second user ever exists.
+**Open-source base.** `river` (BSD-3), shared with S14, for a contextual bandit over logged decisions; `implicit` (MIT) only if a second user ever exists.
 **Speed & efficiency.** One memory query plus one LLM call · candidates cached per day · no
 recommendation at all when the basis is thin (cheaper *and* more honest).
 
@@ -1472,7 +1580,7 @@ stale for weeks) · a multi-day task carried to completion.
 (durable multi-day workflows across process death) is answered here by the same mechanism at a
 fraction of the operational cost. *Test:* dependency ordering · restart/expiry · external-pointer
 health → **all three**; the Notion id going stale for weeks is the failure that actually happened.
-**Open-source base.** none new; `transitions` (MIT) if task state machines get real.
+**Open-source base.** `transitions` (MIT) when task state machines get real; `croniter` (MIT) for schedule arithmetic; `SELECT … FOR UPDATE SKIP LOCKED` replaces the single-writer assumption once the data platform lands.
 **Speed & efficiency.** Queue ops ≤50ms · the worker wakes on an event, not a poll · progress
 narrated at milestones rather than on a timer.
 
@@ -1524,7 +1632,7 @@ behaviour · adaptive-timing backtest against the wake log.
 template → **keep the hybrid.** The template owns structure so the brief is consistent and cheap;
 the model only compresses. Full generation drifts in length and format daily. *Test:* source-down
 degradation · empty-section behaviour · timing backtest → **all three.**
-**Open-source base.** none new.
+**Open-source base.** Jinja2 (BSD-3, shared with S06) for the brief template; `feedparser` (BSD-2) for any feed the brief pulls.
 **Speed & efficiency.** Sections fetched concurrently · ≤1 LLM call per section · news cached from
 the overnight fetch · a section with nothing to say is dropped, not padded.
 
@@ -1577,7 +1685,7 @@ Krisp SDK (paid) → **measure the free path before buying anything**; the echo 
 was a real bug, not a missing SDK. *Test:* a device-churn soak · an echo corpus · barge-in latency →
 **all three**, plus an inaudible output probe (a speaker that silently stops is the worst failure
 here).
-**Open-source base.** speexdsp (BSD-3), webrtc-audio-processing (BSD-3), Silero VAD (MIT).
+**Open-source base.** speexdsp (BSD-3), webrtc-audio-processing (BSD-3), Silero VAD (MIT); **RNNoise (BSD-3)** evaluated against webrtc's suppressor on Windows specifically, since that is the platform the edge actually runs on and the two differ most on non-stationary noise.
 **Speed & efficiency.** Fixed 20ms frames · never resample twice on one path · keep one stream open
 across turns · barge-in ≤300ms.
 
@@ -1913,7 +2021,7 @@ and add temporal validity.** A graph server for a few thousand edges buys query 
 asking for and costs a daemon, a backup path and a migration; the actual gap is that facts have no
 "true until". *Test:* an entity-resolution corpus · belief-revision cases · provenance assertions →
 **all three.**
-**Open-source base.** none new; rdflib (BSD-3) only if SPARQL is ever genuinely needed.
+**Open-source base.** `networkx` (BSD-3) for graph algorithms over the entity store; `rapidfuzz` (MIT) for entity resolution; `pgvector` for embedding-backed entity lookup once the data platform lands; rdflib (BSD-3) only if SPARQL is ever genuinely needed. **Graphiti (Apache-2.0) is read, not adopted** — its bi-temporal invalidation model is worth copying, its Neo4j dependency is not.
 **Speed & efficiency.** Consultation ≤50ms in-process, no LLM · indexed by entity · the model is
 consulted in the prompt path so answers are shaped by it rather than re-derived.
 
@@ -1982,7 +2090,7 @@ guardrails library → **keep the prompt.** Fine-tuning locks the persona to one
 retrain on every change, and drifts silently; guardrails would create a second policy source (see
 S44). *Test:* persona-parity between template and shipped file · register-per-channel · voice
 grading → **all three.**
-**Open-source base.** none.
+**Open-source base.** none, and deliberately. Persona is a prompt, a voice mode and a set of refusals in code. A library here would be a second authority over how he speaks, which is exactly the overlap the efficiency clause forbids.
 **Speed & efficiency.** Persona ≤900 tokens and **byte-stable**, which is what makes the provider
 cache hit · affect derived in-process, never a second model call.
 
@@ -2049,10 +2157,22 @@ audio classification runs on the frame already captured for VAD, not a second ca
 
 **Floor**
 - [x] 26.F1 Vision on demand with a VLM path. *gate:* `test_vision.py`, `test_screenshot_transport.py`
-- [ ] 26.F2 A single `perceive()` snapshot that returns presence + visual + activity together, so
-      callers stop assembling their own. *gate:* new `test_perception_snapshot.py`
-- [ ] 26.F3 Every perception carries a freshness stamp; stale perception is never presented as
-      current. *gate:* `test_perception_snapshot.py` [staleness]
+- [x] 26.F2 A single `perceive()` snapshot that returns presence + visual + activity together, so
+      callers stop assembling their own.
+      `src/afon/brain/perception.py`: presence, visual, activity and meeting as four `Fact`s.
+      **`perceive()` never captures** — it reads cached facts, because it runs on every turn inside
+      S27's 30ms budget and because opening the camera here is the path that has hard-segfaulted on
+      this laptop's device enumeration. The camera tool feeds `record_visual()` on its way past, and
+      only an `available` verdict is recorded: a busy webcam is not evidence about the room.
+      *gate:* `test_perception_snapshot.py` — 36/36, including the structural check that the
+      snapshot reaches for no camera, and 0.016ms measured.
+- [x] 26.F3 Every perception carries a freshness stamp; stale perception is never presented as
+      current.
+      Each fact carries its own max age — a room empties in seconds, a foreground app does not — and
+      `describe()` states a stale fact with its age rather than bare. Two distinctions are held by
+      test: never-sensed counts as stale (reading "I have not looked" as "nobody is there" is the
+      same bug), and sensed-and-empty stays distinguishable from never-sensed.
+      *gate:* `test_perception_snapshot.py` [staleness]
 
 **Raise**
 - [ ] 26.R1 Audio scene classification — speech, music, TV, silence — feeding the speaker gate.
@@ -2089,7 +2209,7 @@ assumption changes the answer · rapid-switch and false-positive rates.
 re-derives its own view. A learned context classifier without labelled context data would be
 guessing with extra steps. *Test:* assembly assertions · disclosure ("I assumed you were at the
 desk") · rapid-switch cases → **all three.**
-**Open-source base.** none.
+**Open-source base.** `astral` (Apache-2.0) for sun position and daylight, the cheapest real circadian signal there is; `holidays` (MIT) for calendar context; `geopy` (MIT) against **Nominatim / OpenStreetMap (ODbL)** for reverse geocoding. **This retires the Google Maps key as a blocker** — free, no credential, no quota, and it is the owner's own machine asking.
 **Speed & efficiency.** ≤30ms, in-process, **no LLM call ever** · assembled once per turn and passed
 down · cached for the tick so proactivity reads the same world the answer did.
 
@@ -2098,10 +2218,22 @@ down · cached for the tick so proactivity reads the same world the answer did.
 | reasoned | a week of interruption-appropriateness graded by him | 2 / 4 / 2 d | — | 0 | callers keep their existing accessors during migration |
 
 **Floor**
-- [ ] 27.F1 One context object — location, presence, activity, mode, time-of-day, calendar state —
+- [x] 27.F1 One context object — location, presence, activity, mode, time-of-day, calendar state —
       assembled once per turn and passed down, not re-derived per tool.
-      *gate:* new `test_context_object.py`
-- [ ] 27.F2 The assumed context is stated when it changes the answer.
+      `src/afon/brain/situation.py`: a frozen `Situation`, assembled once inside both turn entry
+      points and published on a contextvar, the same shape `turn_trace` already uses — so a helper
+      deep in the tool path reads the world the answer read without every signature growing a
+      parameter. Each source is guarded individually: a dead presence store degrades one field to
+      `unknown` with the source named, never the object. Commute beats a stale desk sample, because
+      the last sample *is* the desk he left.
+      *gate:* `test_context_object.py` — 35/35, including the structural check that every turn
+      entry point wraps (a third entry point is how this stops working) and that assembly imports
+      no model. Measured 0.006ms against a 30ms budget.
+- [x] 27.F2 The assumed context is stated when it changes the answer.
+      Disclosure is owed only when the assumption moved the answer, so it is not every field —
+      "it is Tuesday afternoon" explains nothing, "I assumed you had stepped away" explains a held
+      message. Ordered most-consequential-first, so lockdown is disclosed rather than focus time
+      when both hold.
       *gate:* `test_context_object.py` [disclosure]
 
 **Raise**
@@ -2198,7 +2330,7 @@ behaviour · a month of owner-authored automations with a monthly report.
 Temporal is a workflow server to operate for automations that run in seconds. *Test:* the full
 operator matrix in both directions · dry-run · failure-policy behaviour → **all three**; the operator
 bug (H2.12) is exactly what a partial matrix misses.
-**Open-source base.** none.
+**Open-source base.** `json-logic-py` (MIT) so a routine's conditions are declarative data the owner can read and Afon can validate, instead of Python branches nobody audits; `croniter` (MIT) shared with S16. n8n and Temporal stay declined — see the standing table.
 **Speed & efficiency.** Rule evaluation ≤20ms · scheduler drift ≤5s · dry-run costs nothing because
 it is the same evaluation without the effect.
 
@@ -2244,21 +2376,30 @@ host.
 **Budget.** Unified recall p95 ≤300ms. Auto-recall adds one store round-trip per turn, never N.
 
 **Stack.** Today: sqlite for every layer (facts, journal, vectors, graph, tasks) with Jina
-embeddings for L5. **Add:** a recall facade over the seven stores.
-**Declined:** Postgres + pgvector. A database server for one user's few hundred megabytes, on the
-brain host, with a migration that would run straight through the laptop/VPS divergence this system
-is trying to end. Revisit only if recall latency fails its budget on sqlite.
+embeddings for L5, behind one recall facade. **Add:** the data platform — Postgres with pgvector as
+the brain's single store, a Valkey hot layer, sqlite retained on the laptop.
+**Reversed 2026-09-11: Postgres is adopted.** The August decline rested on one specific objection —
+a migration running straight through the laptop/VPS divergence. Task 30.F1 closed that divergence
+(one state root per host, union migration executed, invariant held by
+`test_memory_single_origin.py`), so the objection is spent and the decline goes with it. What it
+buys: concurrent readers while the brain writes, local embeddings through pgvector instead of a
+remote API on the answer path, a real claim primitive for S16 and S48, and logical replication for
+S32. The migration runs through the 30.F2 facade, per store, dual-write then read-flip, rollback by
+environment variable. Full terms in **The data platform**.
+**Still declined:** Neo4j, Qdrant, MinIO, LlamaIndex, Mem0, Zep — a graph is an edge table, vectors
+are pgvector, blobs are a path in a row, and a memory framework over a store that works is a
+rewrite with no new capability.
 
 **Verified by.** Precision@3 over a query corpus · contradiction handling · retention/rotation ·
 `profile_memory_recall.py` against the budget · cross-host consistency.
 
 **Options weighed.** *Build:* sqlite + a recall facade · Postgres + pgvector · LlamaIndex →
-**facade over sqlite.** Postgres is a daemon and a migration that would run straight through the
-laptop/VPS divergence this system exists to end; LlamaIndex is a framework over a store that already
-works. *Vector path:* numpy scan (today) · **sqlite-vec** · faiss → **sqlite-vec if the scan becomes
+**both, in that order.** The facade shipped first and is what makes the second safe: callers stopped
+touching stores, so the backend became swappable. LlamaIndex remains declined as a framework over a
+store that already works. *Vector path:* numpy scan (today) · **sqlite-vec** · faiss → **sqlite-vec if the scan becomes
 the bottleneck**, because it keeps one file and one process. *Test:* precision@3 over a query corpus
 · contradiction cases · a latency profile → **all three.**
-**Open-source base.** sqlite-vec (MIT/Apache-2.0) held in reserve; Jina embeddings API in use today.
+**Open-source base.** PostgreSQL (PostgreSQL licence) + pgvector (PostgreSQL licence) as the brain's store; `psycopg` 3 (LGPL-3.0) as the client; Valkey (BSD-3) for the hot layer; sqlite-vec (MIT/Apache-2.0) retained for the laptop processes, which never speak to Postgres. A local embedding model replaces the Jina API once pgvector lands, which takes the answer path off the network.
 **Speed & efficiency.** One fan-out with **per-store timeouts** so a slow layer cannot own recall ·
 embed once per turn and reuse · cache the digest · target p95 ≤300ms.
 
@@ -2332,12 +2473,37 @@ embed once per turn and reuse · cache the digest · target p95 ≤300ms.
 - [ ] 30.R4 The 607 unverified inferred graph edges are verified, weighted down, or dropped (TODO
       J0). *gate:* `test_memory_graph_learn.py` extended — no unverified edge below the confidence
       floor participates in recall.
+- [ ] 30.R5 **Schema and dual-write.** Postgres schema for every brain store; the 30.F2 facade
+      writes both backends behind `AFON_STORE_BACKEND`. sqlite keeps being written throughout, which
+      is what makes the rollback real rather than theoretical.
+      *gate:* new `test_store_parity.py` — every facade query returns identical rows from both
+      backends, including the empty and contradiction cases.
+- [ ] 30.R6 **Backfill and read-flip, one store at a time.** Backfill, compare, then move reads
+      per store rather than all at once, so a bad flip costs one store and not the memory.
+      *gate:* `test_store_parity.py` [backfill] + recall p95 ≤300ms held on the real corpus.
+- [ ] 30.R7 **pgvector replaces the embeddings API on the answer path.** A local model and a vector
+      index in the same database as the rows, so semantic recall stops depending on a network hop
+      and a bill.
+      *gate:* new `test_pgvector_recall.py` — precision@3 no worse than the Jina baseline on the
+      query corpus, and recall works with the network down.
+- [ ] 30.R8 **The laptop stays on sqlite, proven, not assumed.** edge and pc_agent never open a
+      Postgres connection, and their suites pass with the brain host unreachable.
+      *gate:* new `test_offline_edge.py` — laptop processes green with Postgres stopped; a Postgres
+      import anywhere under `src/afon/edge/` fails the layering test.
+- [ ] 30.R9 **The cache is optional, proven, not assumed.** Valkey carries the turn digest, the
+      distributed lock, the presence key and the rate-limit counters — and nothing durable.
+      *gate:* new `test_cache_optional.py` — the full suite passes with the cache stopped, and no
+      value read back after a cold start was only ever written to the cache.
 
 **Elite**
 - [ ] 30.E1 Memory behavioural category ≥95 with recall latency inside budget on the VPS.
       *gate:* `test_memory_behavioral.py` + `profile_memory_recall.py`
+- [ ] 30.E2 The brain host holds its memory ceiling with Postgres and the cache resident.
+      *gate:* `test_speed.py` [rss-ceiling] — brain plus Postgres plus Valkey under the declared
+      budget, measured on the VPS, not the laptop.
 
-**Blocked** merge-direction decision (owner). **Cross-refs** TODO K3, I6, J3.3, J0.
+**Blocked** nothing. The merge-direction decision was made and executed in 30.F1.
+**Cross-refs** TODO K3, I6, J3.3, J0; **The data platform** for the migration terms and rollback.
 
 ---
 
@@ -2484,7 +2650,7 @@ of truth → **the dict.** The hierarchy is a handful of nodes: a graph library 
 a serialisation format to something a nested structure expresses more legibly, and Notion stays a
 mirror rather than the master. *Test:* stall detection · conflict cases · turn→objective attribution
 → **all three.**
-**Open-source base.** none.
+**Open-source base.** `graphlib` (stdlib) for milestone dependency ordering. A topological sort is not a reason to run a project-management server; Notion stays the owner-facing surface and Plane is declined.
 **Speed & efficiency.** Weekly review ≤1 LLM call · daily attribution in-process · stall detection is
 arithmetic on dates.
 
@@ -2537,7 +2703,7 @@ Garmin) · manual entry → **depends entirely on the device he actually wears**
 a guess today. *Store:* sqlite table · InfluxDB · TimescaleDB → **sqlite**: a few thousand rows a
 year does not justify a time-series daemon. *Test:* ingestion reliability · threshold accuracy · the
 stated boundary (observations, never diagnosis) → **all three.**
-**Open-source base.** none new.
+**Open-source base.** `fitdecode` (MIT) for FIT files and a plain XML reader for an Apple Health export. **This is what unblocks the system without naming a device:** both are open export formats every mainstream wearable can produce, so the ingest is written against the format, not the vendor, and naming the watch later changes nothing.
 **Speed & efficiency.** Daily aggregation, zero per-turn cost · trends computed from stored
 aggregates, not raw samples.
 
@@ -2596,7 +2762,7 @@ are unacceptable; he must be able to read exactly what will trigger a call to so
 Twilio · a phone-side shortcut · a push-only ladder → **Twilio for the call rung**, push for the
 rest. *Test:* a 50-prompt false-positive corpus · a ladder drill with a stop condition · offline
 contact resolution → **all three.**
-**Open-source base.** none (Twilio is commercial by nature).
+**Open-source base.** ntfy (Apache-2.0 / GPL-2.0, shared with S13) for the push ladder and `signal-cli` (GPL-3.0, invoked as a CLI, never linked) to reach a third party without a paid gateway. **This takes Twilio off the critical path**; it stays an optional upgrade for an actual voice call.
 **Speed & efficiency.** ≤3s to first outward action · **no LLM on the critical path** · contacts
 resolved from a local file so a network failure cannot silence the ladder.
 
@@ -2715,7 +2881,7 @@ document · differential privacy → **generated inventory.** A hand-written pol
 after it is written; DP protects individuals inside an aggregate release and there is one subject and
 no release. *Test:* inventory generation covering every store · forget-then-requery · an egress log →
 **all three**; "forget X" that leaves X in two stores is the failure.
-**Open-source base.** none.
+**Open-source base.** **Microsoft Presidio (MIT)** for PII detection in the scrubbing and egress paths. It does not replace 37.F1 — Presidio finds personal data inside text, the generated inventory answers where the stores are, and only the second one answers "what do you know about me".
 **Speed & efficiency.** Retention sweep daily, ≤30s, off the answer path · classification is a column,
 not a scan.
 
@@ -2771,7 +2937,7 @@ direct → **the unified view.** The missing piece is a model of "what is waitin
 protocol client; Graph and WhatsApp are consent and review surfaces, not just libraries, and only
 earn their place if he uses them. *Test:* a triage corpus graded against what he really answered ·
 thread awareness · approval-before-send → **all three.**
-**Open-source base.** none new.
+**Open-source base.** `signal-cli` (GPL-3.0, CLI) shared with S35; `imap-tools` (Apache-2.0) if a second mailbox ever matters. Self-hosted outbound SMTP stays declined — deliverability is the entire product a mail provider sells, and losing it is silent.
 **Speed & efficiency.** Inbox sweep ≤5s with channels fetched concurrently · thread metadata cached ·
 drafting ≤1 LLM call.
 
@@ -2827,7 +2993,7 @@ sub-agents → **the bridge.** The delegation target is an existing fleet with i
 own agents; a second multi-agent framework inside Afon would duplicate it and own nothing. *Test:*
 tracking assertions · timeout and takeback · verification before reporting → **all three**;
 anti-fabrication applies to other agents too.
-**Open-source base.** none.
+**Open-source base.** none, and deliberately. One delegation end to end is a call with a brief, a deadline and a verification step. CrewAI and AutoGen stay declined; the OpenClaw fleet already supplies real workers when more than one is needed.
 **Speed & efficiency.** Delegation overhead ≤1s · nothing runs unmonitored past its declared period ·
 results verified once, not re-asked.
 
@@ -3049,7 +3215,7 @@ without re-establishing context.
 **fusion of what already exists.** Beacons and geofences add hardware and a permission surface for a
 signal three existing sensors already imply. *Test:* fusion assertions · long-absence handling ·
 context migration → **all three.**
-**Open-source base.** none.
+**Open-source base.** python-zeroconf (LGPL-2.1) shared with S12 for LAN presence; the Valkey presence key with keyspace notifications carries the live handoff once the data platform lands, so a device switch does not wait for a poll.
 **Speed & efficiency.** State change detected ≤10s · fusion is arithmetic over cached signals · no
 new sensor polling.
 
@@ -3102,7 +3268,7 @@ third-party impact checks · safety and honesty at 100 across five consecutive r
 NeMo Guardrails · a safety classifier model → **rules.** A classifier makes refusals probabilistic
 and unexplainable; a guardrails library creates a second answer to "may I". *Test:* refusal grading ·
 precedence cases · a red-team corpus → **all three**, and the red-team corpus is shared with S36.
-**Open-source base.** none.
+**Open-source base.** none, and deliberately. Refusals are deterministic and in code. NeMo Guardrails and Llama Guard stay declined: two policy engines produce two answers to "may I", and the disagreement shows up as behaviour rather than as an error.
 **Speed & efficiency.** ≤10ms, in-process, model-independent — which is also why it cannot be talked
 around.
 
@@ -3155,7 +3321,7 @@ spoken answers · replay of any turn from the last 30 days.
 UI → **the audit trail.** A model asked to explain a decision it did not make will produce a
 plausible story, which is worse than no explanation; the trail is what actually happened. *Test:*
 why-last-turn · source attribution in speech · replay of an old turn → **all three.**
-**Open-source base.** none.
+**Open-source base.** `opentelemetry-sdk` (Apache-2.0) to promote today's per-turn correlation id into real spans, with **Jaeger (Apache-2.0)** as an optional local viewer. Arize Phoenix is declined on licence — Elastic Licence 2.0 is not OSI-approved and the owner's requirement is free and open source.
 **Speed & efficiency.** ≤300ms and **no LLM call for the factual part** — tools, sources and
 confidence come from the trail; the model only phrases it.
 
@@ -3312,7 +3478,7 @@ many agents; there are two participants and one owner-facing voice.
 Streams → **the shared record.** Coordination infrastructure is sized for many agents; there are two
 participants and one owner-facing voice. *Test:* double-claim prevention · merge determinism ·
 failure isolation → **all three**; disagreement must surface, never average.
-**Open-source base.** none.
+**Open-source base.** none while there is one worker. When a second concurrent worker exists, the claim table is one Postgres row lock (`FOR UPDATE SKIP LOCKED`) — which is the whole of what Ray was proposed to provide here.
 **Speed & efficiency.** Coordination overhead ≤10% of task time · claims are a single transaction ·
 progress aggregated, not polled.
 
@@ -3414,7 +3580,7 @@ IPFS → **the plain export.** The preservation property comes from the format b
 export being restorable, not from where the bytes sit; versioned object storage is a useful off-site
 copy and not the mechanism. *Test:* a cold-start rebuild on an empty machine · integrity verification
 · retrieval across versions → **all three**; the rebuild drill is the only one that proves it.
-**Open-source base.** restic (BSD-2, shared with S22) for the off-site copy; git for the vault.
+**Open-source base.** restic (BSD-2, shared with S22) for the off-site copy; git for the vault; **ArchiveBox (MIT)** for link rot — a knowledge base meant to outlive its sources cannot hold only URLs, and this is the one system where the failure is silent until the day it matters.
 **Speed & efficiency.** Monthly export ≤10 min · incremental where possible · hashing streams rather
 than loading whole files.
 
@@ -3459,7 +3625,7 @@ green, `E` = elite green.
 | S04 | Device Control | complete for now | 3/4 | 0/3 | 0/1 |
 | S05 | Browser Control | complete for now | 2/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
-| S07 | Session & Context | structured badly | 0/3 | 0/3 | 0/1 |
+| S07 | Session & Context | floor green | 3/3 | 0/3 | 0/1 |
 | S08 | Voice Enrollment | weak | 1/2 | 0/3 | 0/1 |
 | S09 | Face Enrollment | not enrolled | 1/2 | 0/3 | 0/1 |
 | S10 | Voice Recognition | structured badly | 3/3 | 0/3 | 0/1 |
@@ -3478,11 +3644,11 @@ green, `E` = elite green.
 | S23 | 24/7 Reachability | complete, parked | 4/4 | 0/3 | 0/1 |
 | S24 | Knowledge & World Model | structured badly | 2/2 | 0/3 | 0/1 |
 | S25 | Personality | complete for now | 2/3 | 0/3 | 0/1 |
-| S26 | Multi-Modal Perception | structured badly | 1/3 | 0/3 | 0/1 |
-| S27 | Context Awareness | structured badly | 0/2 | 0/3 | 0/1 |
+| S26 | Multi-Modal Perception | floor green | 3/3 | 0/3 | 0/1 |
+| S27 | Context Awareness | floor green | 2/2 | 0/3 | 0/1 |
 | S28 | IoT Orchestration | dark | 0/3 | 0/3 | 0/1 |
 | S29 | Automation & Workflow | structured badly | 3/4 | 0/3 | 0/1 |
-| S30 | Persistent Memory | structured badly | 3/3 | 0/4 | 0/1 |
+| S30 | Persistent Memory | structured badly | 3/3 | 0/9 | 0/2 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/4 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
@@ -3504,7 +3670,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 83 of 157 floor tasks green, 0 of 152 raise tasks, 0 of 51 elite tasks — 83 of 360.**
+**Totals: 90 of 157 floor tasks green, 0 of 157 raise tasks, 0 of 52 elite tasks — 90 of 366.**
 Wave 0's floors are complete as of 2026-08-16: the loop registry (31.F4), the scheduled restore
 drill (22.F4), one home per secret (36.F5) and the unpark checklist (23.F4).** The floors are the furthest along because the last three weeks of work were
 almost entirely floor work; that is the correct order and it should continue. These counts are
@@ -3549,17 +3715,29 @@ demonstrated by a recorded run, not asserted:
 - **Do not add systems.** Fifty is the scope. New capabilities attach to an existing system or get
   a decision record first.
 
-## Everything currently waiting on the owner
+## Everything waiting on the owner — and the default that ships without him
 
-| Blocker | Blocks |
-|---|---|
-| Home Assistant long-lived token | S28 entirely |
-| Twilio credentials | S35 calling ladder, S38 voice channel |
-| Google Maps key; Fitness API enablement | S27 location detail, S34 |
-| Voiceprint re-enrolment (read the script) | S08, and through it S10, S11 fusion |
-| Sit for the ArcFace face capture | S09, S11 |
-| `routines.json` real content | S21, S17 evening brief |
-| Merge direction for laptop ↔ VPS learned state | S30, and S32 replication behind it |
-| `.env` → password store; MiniMax + Vercel key rotation | S20.R3, S36.F5 |
-| Elevated `Disable-ScheduledTask` for the remaining edge tasks | keeps the park honest |
-| First inventory category; first fabrication decision | S47, S49 |
+Revised 2026-09-11. A plan that stalls on a decision nobody made is a plan that does not run, so
+**every blocker below now has a default that ships and is replaced later without rework.** Nothing
+in the wave plan waits on an answer any more. Three items genuinely need him and cannot be
+defaulted; they are marked **OWNER** and together cost under an hour.
+
+| Was blocking | Blocks | Default that ships now |
+|---|---|---|
+| Home Assistant long-lived token | S28 | **OWNER — 15 min.** Nothing substitutes: it is a credential on his own hardware. Until then S28 reports `is_not_configured` rather than failing, and the rest of Wave 4 proceeds. |
+| Twilio credentials | S35 ladder, S38 voice | **Retired as a blocker.** ntfy carries the push ladder, `signal-cli` reaches a third party. Twilio becomes an optional upgrade for an actual phone call, not a prerequisite. |
+| Google Maps key | S27 location detail | **Retired.** `geopy` against Nominatim/OpenStreetMap: free, no credential, no quota. |
+| Fitness API enablement; unknown wearable | S34 | **Retired.** Ingest is built against FIT and the Apple Health XML export — open formats every mainstream device produces. Naming the watch later changes no code. |
+| Voiceprint re-enrolment | S08, and S10/S11 fusion | **OWNER — 10 min** of reading the script aloud. No substitute exists: it is his voice. Enrolment quality scoring already refuses a bad capture, so one sitting is enough. |
+| Sit for the ArcFace face capture | S09, S11 | **OWNER — 5 min.** Same reason. The two biometric sittings are the only hard human dependencies in the whole plan. |
+| `routines.json` real content | S21, S17 evening brief | **Retired.** Afon drafts routines from observed calendar and activity, then asks him to approve or edit — a five-line correction beats a blank file, and reviewing a draft is not a blocker. |
+| Merge direction for laptop ↔ VPS state | S30, S32 | **Done.** 30.F1 executed: one state root per host, derived stores from the brain, learned facts unioned. |
+| `.env` → password store; key rotation | S20.R3, S36.F5 | **Retired as a blocker, kept as a task.** The migration is scripted and idempotent; rotation is a separate later step that does not gate the store move. |
+| Elevated `Disable-ScheduledTask` | keeps the park honest | **Retired.** The maintenance lock already refuses autostart and is gated by `test_maintenance_lock.py`; the scheduled task is belt to that braces. |
+| First inventory category | S47 | **Defaulted** to what Afon can populate without asking: its own consumables — subscriptions, credentials with expiry dates, disk and backup capacity. Real data on day one, and his first physical category slots into the same schema. |
+| First fabrication decision | S49 | **Deferred, not blocked.** S49 stays unstarted until a machine exists. An unstarted system with a stated reason is honest; a half-built driver for hardware nobody owns is not. |
+| No logged decisions | S15, and S14's bandit | **Defaulted to logging on**, with a kill switch. Logging is the thing that produces the corpus, so leaving it off was the blocker. |
+| No forecast baseline | S46 | **Defaulted** to what Afon already measures: per-turn latency and provider failure rate. A naive seasonal baseline exists the day the data does, and the personal variables arrive later against the same harness. |
+
+**The whole of the remaining owner time: one token, one voice sitting, one face sitting.** Under an
+hour, and nothing else in 424 engineering-days depends on him.

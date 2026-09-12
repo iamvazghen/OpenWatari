@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
+from contextlib import contextmanager
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -32,6 +33,32 @@ from afon.brain.tools import (
     tool_handlers,
 )
 from afon.brain.tools.base import bound_tool_result
+
+
+@contextmanager
+def _turn_situation():
+    """27.F1 — assemble the owner's situation ONCE per turn, so everything downstream reads the
+    same world. Imported here rather than at module scope because `presence` and `modes` are
+    singletons constructed at import time and the brain builds its agent early; the rest of the
+    codebase reaches for them the same lazy way.
+
+    Fail-open: if the context layer cannot be built, the turn runs without it. An assistant that
+    refuses to answer because it does not know what time of day it is would be a worse assistant.
+    """
+    try:
+        from afon.brain.modes import MODES
+        from afon.brain.perception import perceive
+        from afon.brain.presence import PRESENCE
+        from afon.brain.situation import situation
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"situation unavailable ({type(e).__name__}); turn runs without it")
+        yield None
+        return
+    # perceive() reads cached facts only — no camera, no blocking call — so this stays inside the
+    # 30ms context budget even though it runs on every turn.
+    with situation(perceive(PRESENCE), MODES) as s:
+        yield s
+
 
 # Short spoken filler per tool so a longer turn is never dead air. These are the BASE
 # acknowledgements; _ack_for() adds context from the arguments where it helps ("…for the rabbit
@@ -643,6 +670,16 @@ class AfonAgent:
         self._history: list[dict[str, Any]] = []
         self._max_history_turns = max_history_turns
         self._max_tool_iters = max_tool_iters
+        # 07.F2 — messages that fall out of the rolling window wait here until there are enough of
+        # them to be worth one summary. `_trim` runs several times per turn and a summary costs a
+        # model call, so flushing on every drop would put an LLM round-trip on the answer path.
+        self._dropped: list[dict[str, Any]] = []
+        self._dropped_task: asyncio.Task | None = None
+        #: User turns that must accumulate before the buffer is summarised. Low enough that a long
+        #: conversation does not hold much unsummarised, high enough not to summarise every turn.
+        self._dropped_flush_turns = 3
+        #: The reference bound for the turn in flight (07.F3), or None. Read by the trace.
+        self._reference = None
         # The fleet touches shared infra, so it stays off unless armed — either per-session via
         # set_fleet_authorized(True), or for a 24/7 deployment via AFON_FLEET_AUTHORIZED=true.
         from afon.config import settings as _s
@@ -704,8 +741,15 @@ class AfonAgent:
         that obscures more than it saves.
         """
         _prep_started = time.monotonic()
+        # 07.F3 — bind "the second one" / "it" to something concrete BEFORE the history is frozen
+        # into `messages`, and record which reading was taken. The resolver declines whenever the
+        # reference is ambiguous, so this adds a note or it adds nothing; it never rewrites what
+        # the owner said, because a rewrite that guesses wrong is unrecoverable from the transcript.
+        self._reference = self._resolve_reference(user_text)
         self._history.append({"role": "user", "content": user_text})
         messages = [self._system, *self._history]
+        if self._reference is not None:
+            messages.append({"role": "system", "content": self._reference.note()})
 
         # Research-and-write-up requests go to work_on_task (background); this takes precedence
         # over the generic multi-intent nudge so the model hands off instead of answering inline.
@@ -803,6 +847,24 @@ class AfonAgent:
         self._last_turn_at = now
         self._maybe_refresh_digest()                      # Fix #2: unfreeze the startup digest
 
+    def _resolve_reference(self, user_text: str):
+        """07.F3 — what "it" or "the second one" points at, or None when it is not determinable.
+
+        History is read BEFORE this turn's message is appended, which is what makes the antecedent
+        a previous turn rather than the sentence being resolved. Fail-quiet: a resolver that can
+        break a turn would be a bad trade for a clarification.
+        """
+        try:
+            from afon.brain.references import resolve
+
+            ref = resolve(user_text, self._history)
+            if ref is not None:
+                logger.debug(f"reference: {ref.phrase!r} -> {ref.antecedent!r} ({ref.source})")
+            return ref
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"reference resolution skipped: {type(e).__name__}: {e}")
+            return None
+
     def _maybe_refresh_digest(self) -> None:
         """Fix #2 — the system-prompt learned-digest is built once at startup, so on a 24/7 brain a
         fact learned mid-session (by the background reviewer or the remember tool) wouldn't surface
@@ -831,10 +893,22 @@ class AfonAgent:
         """Smart reset: journal the prior conversation (in the background) and clear WORKING memory.
         Durable memory (L1 learned, L2 journal, L3 vault) is untouched, so he forgets the *thread*,
         not the *person*. Safe to call from voice ("start a new conversation") or on idle."""
-        history = list(self._history)
+        # Anything the trim dropped but has not summarised yet belongs to this conversation, and
+        # this is its last chance to be written down — so it goes in front of what is still here.
+        history = self._dropped + list(self._history)
+        self._dropped = []
         self._history = []
         self._pending_confirm = None
         self._confirm_granted = False
+        # 07.F1 — the conversation id turns over HERE, at the one place the brain already decides a
+        # conversation has ended. Rotating anywhere else would let the id and the cleared working
+        # history disagree about where the boundary was, which is worse than having no id.
+        try:
+            from afon.shared.session import rotate as _rotate_conversation
+
+            _rotate_conversation(reason)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"conversation id not rotated: {type(e).__name__}: {e}")
         # Drop the on-disk snapshot too, so a restart doesn't resurrect the thread we just cleared.
         try:
             self._session_path().unlink(missing_ok=True)
@@ -1196,7 +1270,7 @@ class AfonAgent:
         path, a degrade, several normal returns — and wrapping it is the only way one row per turn
         is guaranteed for all of them, including the ones that raise.
         """
-        with turn_trace.turn(user_text, streamed=False):
+        with turn_trace.turn(user_text, streamed=False), _turn_situation():
             return await self._respond_impl(user_text, on_progress)
 
     async def _respond_impl(self, user_text: str, on_progress: Callable | None = None) -> str:
@@ -1626,7 +1700,7 @@ class AfonAgent:
         the next replay (AUDIT #7). The ``finally`` records a short placeholder so that never happens.
         """
         self._stream_done = False
-        with turn_trace.turn(user_text, streamed=True):   # 01.F3 — one row, cancelled or not
+        with turn_trace.turn(user_text, streamed=True), _turn_situation():  # 01.F3 / 27.F1
             try:
                 async for chunk in self._respond_stream_impl(user_text, on_progress):
                     yield chunk
@@ -1770,8 +1844,43 @@ class AfonAgent:
         # Keep the last N turns (user+assistant pairs) to bound context.
         max_msgs = self._max_history_turns * 2
         if len(self._history) > max_msgs:
+            dropped = self._history[:-max_msgs]
             self._history = self._history[-max_msgs:]
+            self._remember_dropped(dropped)
         self._persist_session()
+
+    def _remember_dropped(self, dropped: list[dict[str, Any]]) -> None:
+        """07.F2 — the trim is lossy on purpose, but what falls out is summarised into the journal
+        rather than discarded.
+
+        Before this, a conversation long enough to trim lost its opening silently: the model stopped
+        being able to see it and nothing else had ever written it down. Only the *reset* path
+        journalled, so anything trimmed mid-conversation was gone for good.
+
+        Buffered, because `_trim` is called several times per turn and a summary is a model call.
+        Never awaited: this runs on the answer path and a journal write must not make the owner
+        wait. If there is no event loop, the batch stays buffered for the next opportunity rather
+        than being dropped, which is the whole point.
+        """
+        if not dropped:
+            return
+        self._dropped.extend(dropped)
+        if sum(1 for m in self._dropped if m.get("role") == "user") < self._dropped_flush_turns:
+            return
+        if self._dropped_task is not None and not self._dropped_task.done():
+            return  # a flush is already in flight; let the buffer keep growing rather than race it
+        batch, self._dropped = list(self._dropped), []
+
+        async def _run() -> None:
+            try:
+                await self._journal_history(batch)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"trim journal skipped: {e}")
+
+        try:
+            self._dropped_task = asyncio.get_running_loop().create_task(_run())
+        except RuntimeError:
+            self._dropped = batch + self._dropped  # no loop — keep them, do not lose them
 
     # ---- restart-durable working memory --------------------------------------------------
     def _session_path(self) -> Path:

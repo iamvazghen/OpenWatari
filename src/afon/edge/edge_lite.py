@@ -36,6 +36,7 @@ from loguru import logger
 from afon.config import settings
 from afon.edge.brain_client import BrainClient
 from afon.shared.protocol import StreamEvent, StreamKind
+from afon.shared.session import device_session_id
 
 RecordFn = Callable[[float], Awaitable[Path | None]]      # seconds -> wav path (or None)
 TranscribeFn = Callable[[Path], Awaitable[str]]           # wav path -> text
@@ -112,7 +113,7 @@ class EdgeLite:
     def __init__(
         self,
         *,
-        session_id: str = "android-1",
+        session_id: str | None = None,
         record: RecordFn = _termux_record,
         transcribe: TranscribeFn = _groq_transcribe,
         speak: SpeakFn = _termux_speak,
@@ -127,8 +128,9 @@ class EdgeLite:
         self._reply_timeout = reply_timeout
         self._reply_buf: list[str] = []
         self._turn_done = asyncio.Event()
-        self._client = client or BrainClient(
-            session_id=session_id, device_id="android", on_event=self._on_event)
+        self._client = client or BrainClient(   # 07.F1 — one conversation across devices
+            session_id=session_id or device_session_id("android"),
+            device_id="android", on_event=self._on_event)
 
     def _on_event(self, ev: StreamEvent) -> None:
         """Accumulate spoken deltas; speak the whole reply when the turn ends (no barge-in on phone)."""

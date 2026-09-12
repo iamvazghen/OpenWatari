@@ -724,6 +724,19 @@ async def _empty_or_unsure(jpegs: list) -> str:
     return "No one's in view of the camera, sir."
 
 
+def _record_visual(value: str) -> None:
+    """Hand the verdict to the perception layer so it can be dated (26.F2).
+
+    Imported lazily and swallowed whole: the camera path must not acquire a new way to fail, and
+    a tool that broke because a bookkeeping module moved would be a bad trade for a timestamp.
+    """
+    try:
+        from afon.brain.perception import record_visual
+        record_visual(value, source="camera")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def verify_owner_present() -> dict:
     """I1 — a STRUCTURED owner verdict for use as a second authorisation factor.
 
@@ -752,6 +765,12 @@ async def verify_owner_present() -> dict:
     raw = await _dispatch("camera_verify", {}, _verify_owner_present_local)
     try:
         d = json.loads(raw)
+        # 26.F2 — the one place a real look happens is the one place the visual fact can be dated.
+        # Only an `available` verdict is recorded: "the webcam was busy" is not evidence about the
+        # room, and storing it as one would let a failed look read later as an empty desk.
+        if d.get("available"):
+            _record_visual("owner" if d.get("matched")
+                           else ("person" if (d.get("faces") or d.get("evidence")) else "empty"))
         return {"available": bool(d.get("available")), "matched": bool(d.get("matched")),
                 "faces": int(d.get("faces") or 0), "evidence": bool(d.get("evidence")),
                 # None = liveness was not consulted (he did not match, so it could change nothing).

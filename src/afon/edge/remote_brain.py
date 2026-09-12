@@ -19,6 +19,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from afon.edge.brain_client import BrainClient
 from afon.shared.protocol import StreamEvent, StreamKind
+from afon.shared.session import device_session_id
 
 
 class RemoteBrain(FrameProcessor):
@@ -35,13 +36,15 @@ class RemoteBrain(FrameProcessor):
 
     def __init__(
         self,
-        session_id: str = "laptop-edge",
+        session_id: str | None = None,
         device_id: str = "laptop",
         headphones_connected: bool = False,
     ) -> None:
         super().__init__()
+        # 07.F1 — resolved at construction, not at import: the id must be the one on disk when
+        # this edge actually connects, so a reconnect rejoins the conversation it left.
         self._client = BrainClient(
-            session_id=session_id,
+            session_id=session_id or device_session_id(device_id),
             device_id=device_id,
             headphones_connected=headphones_connected,
             on_event=self._on_event,
