@@ -63,6 +63,9 @@ than no prose, because it is the thing an auditor reads instead of the code.
 - Machine: `file_op` (deletes), `process_op` (kill/start), `run_powershell`, `browser`.
 - Calendar/home/Notion: `create_event`, `ha_call` (locks/alarms/covers especially),
   `notion_append`, `notion_comment`, `notion_create_page`.
+- Rewriting when Afon speaks up unprompted: `adopt_routines` (replaces `routines.json`, which
+  is the rule set for unprompted interjections; the draft it installs is written by Afon
+  from observed activity, so the owner has to hear it before it takes effect).
 - Self-improvement: `write_source`, `git_commit`, `git_push`, `git_revert`.
 - Outward-facing filing: `create_github_issue` (posts to a shared repo).
 - Protocols and stored sequences: `run_protocol`; `run_macro` and `invoke_skill` are gated

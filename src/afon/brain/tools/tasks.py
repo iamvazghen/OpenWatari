@@ -104,12 +104,26 @@ async def add_task(args: dict) -> str:
     deadline_epoch, err = _parse_deadline(args.get("deadline") or "")
     if err:
         return err
+    # 33.F3 — a task may name the objective it serves. An objective named but not resolvable is
+    # REFUSED rather than dropped: a silently discarded attribution is worse than none, because
+    # the review then reports the work as ad-hoc and the owner has no way to see it went missing.
+    meta: dict = {}
+    wants = (args.get("objective") or "").strip()
+    if wants:
+        from afon.brain.objectives import OBJECTIVES
+
+        obj = OBJECTIVES.find(wants)
+        if obj is None:
+            return (f"I couldn't match '{wants}' to one objective I'm driving, sir. "
+                    "Name it exactly, or leave it off and I'll file the task as ad-hoc.")
+        meta["objective"] = obj.id
     try:
         t = TASKS.add_todo(
             title,
             description=args.get("description") or "",
             priority=args.get("priority") or "normal",
             deadline=deadline_epoch,
+            meta=meta,
         )
         if deadline_epoch is not None:
             job_id = await _schedule_deadline_reminder(t.title, deadline_epoch)
@@ -255,6 +269,9 @@ SCHEMAS = [
                                  "description": "Optional priority (default normal)."},
                     "deadline": {"type": "string",
                                  "description": "Optional due date/time, ISO (YYYY-MM-DD or YYYY-MM-DDThh:mm)."},
+                    "objective": {"type": "string",
+                                  "description": "Optional: a word from the multi-day objective "
+                                                 "this task serves. Omit for one-off work."},
                 },
                 "required": ["title"],
             },

@@ -87,6 +87,57 @@ async def main() -> None:
     check("find by word resolves one", b2.find("crypto") is not None and b2.find("crypto").id == c.id)
     check("find ambiguous/none -> None", b2.find("the") is None and b2.find("nope") is None)
 
+    print("\n[2b] milestones make 'stalled' arithmetic instead of a feeling  [33.F2]")
+    from datetime import datetime, timedelta, timezone
+    b25 = tmp_book()
+    m = b25.assign("Get the NBA portfolio live")
+    today = datetime.now(timezone.utc)
+
+    check("a milestone needs a real date",
+          "YYYY-MM-DD" in b25.add_milestone(m.id, "beta", "the 30th"))
+    check("...and is not stored when refused", b25.get(m.id).milestones == [])
+    check("a milestone needs a description", b25.add_milestone(m.id, "  ", "2026-10-01") != "")
+    check("an unknown objective is refused", b25.add_milestone("nope", "x", "2026-10-01") != "")
+    check("a good milestone is accepted",
+          b25.add_milestone(m.id, "beta deployed", "2026-10-01") == "")
+    check("the same milestone twice is refused",
+          b25.add_milestone(m.id, "beta deployed", "2026-11-01") != "")
+    check("a second milestone is accepted",
+          b25.add_milestone(m.id, "first paying user", "2026-09-01") == "")
+    check("milestones sort by target, so 'next' is the nearest",
+          b25.next_milestone(b25.get(m.id))["text"] == "first paying user")
+
+    # The whole point of 33.F2: a date in the past makes the stall a fact, not an impression.
+    past = (today - timedelta(days=3)).date().isoformat()
+    b26 = tmp_book()
+    n = b26.assign("Ship the Rently migration")
+    b26.append_progress(n.id, "wrote the migration")
+    check("a freshly-advanced objective is not stalled", b26.stall_reason(b26.get(n.id)) == "")
+    b26.add_milestone(n.id, "migration merged", past)
+    why = b26.stall_reason(b26.get(n.id))
+    check("an overdue milestone is a stall", "overdue" in why, why)
+    check("...and the stall names the milestone and its date",
+          "migration merged" in why and past in why, why)
+    check("stalled() collects it", [o.id for o, _ in b26.stalled()] == [n.id])
+    b26.complete_milestone(n.id, "migration merged")
+    check("reaching the milestone clears the stall", b26.stalled() == [])
+    check("a milestone can only be reached once",
+          not b26.complete_milestone(n.id, "migration merged"))
+
+    b27 = tmp_book()
+    q = b27.assign("Learn enough German for the Ausbildung interview")
+    b27.get(q.id).progress = [{"ts": (today - timedelta(days=30)).isoformat(timespec="seconds"),
+                               "note": "did a lesson"}]
+    why2 = b27.stall_reason(b27.get(q.id))
+    check("silence alone is a stall, with no milestone needed", "30 days" in why2, why2)
+    check("the stall shows up in the rendered brief", "STALLED" in b27.render())
+    b27.add_milestone(q.id, "B1 mock exam", (today - timedelta(days=1)).date().isoformat())
+    check("an overdue milestone outranks mere silence",
+          "overdue" in b27.stall_reason(b27.get(q.id)))
+    check("the next milestone is spoken in the brief", "next milestone" in b27.render())
+    check("milestones survive a reload",
+          len(ObjectiveBook(b27._path).get(q.id).milestones) == 1)
+
     print("\n[3] _split_result")
     s, d = _split_result("Drafted copy and tested the build. Needs your approval: publish_page(id=x); send_email(to=y)")
     check("summary split from approvals", s == "Drafted copy and tested the build." and d == ["publish_page(id=x)", "send_email(to=y)"])

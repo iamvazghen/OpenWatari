@@ -27,6 +27,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+#: An objective with nothing logged for this long is stalled. The number is the point of the
+#: task: "stalled" stops being a feeling the owner has on a bad Sunday and becomes arithmetic on
+#: two dates, which is the only form in which it can be raised automatically.
+STALE_DAYS = 7
+
+
 def _slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
     return s[:48] or "objective"
@@ -42,6 +48,9 @@ class Objective:
     updated: str = field(default="")
     progress: list = field(default_factory=list)   # [{ts, note}] — dated log of daily advances
     deferred: list = field(default_factory=list)    # outstanding owner-approval steps (deduped)
+    # [{text, target: "YYYY-MM-DD", done: bool}] — optional, and the rollback for 33.F2 is to
+    # leave it empty: an objective with no milestones still stalls on silence.
+    milestones: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.created:
@@ -70,6 +79,7 @@ class ObjectiveBook:
                         updated=o.get("updated", ""),
                         progress=[p for p in o.get("progress", []) if isinstance(p, dict)],
                         deferred=[d for d in o.get("deferred", []) if isinstance(d, str)],
+                        milestones=[m for m in o.get("milestones", []) if isinstance(m, dict)],
                     )
                     self._items[obj.id] = obj
                 except (KeyError, TypeError):
@@ -143,6 +153,77 @@ class ObjectiveBook:
         o.updated = _now().isoformat(timespec="seconds")
         self._save()
 
+    # ---- milestones (33.F2) ------------------------------------------------------------------
+    def add_milestone(self, id: str, text: str, target: str) -> str:
+        """Add a dated milestone. Returns "" on success, or why it was refused.
+
+        A bad target date is refused rather than stored. A milestone whose date cannot be parsed
+        can never be overdue, so storing one would quietly remove the objective from stall
+        detection — the exact opposite of what the field exists for.
+        """
+        o = self._items.get(id)
+        if not o:
+            return f"I have no objective '{id}', sir."
+        text = (text or "").strip()
+        if not text:
+            return "A milestone needs a description, sir."
+        try:
+            when = datetime.strptime((target or "").strip(), "%Y-%m-%d").date()
+        except ValueError:
+            return f"'{target}' isn't a date I can hold a deadline against, sir - I need YYYY-MM-DD."
+        if any(m.get("text") == text for m in o.milestones):
+            return f"'{text}' is already a milestone on that objective, sir."
+        o.milestones.append({"text": text, "target": when.isoformat(), "done": False})
+        o.milestones.sort(key=lambda m: m.get("target", ""))
+        o.updated = _now().isoformat(timespec="seconds")
+        self._save()
+        return ""
+
+    def complete_milestone(self, id: str, text: str) -> bool:
+        o = self._items.get(id)
+        t = (text or "").strip().lower()
+        for m in (o.milestones if o else []):
+            if t and t in str(m.get("text", "")).lower() and not m.get("done"):
+                m["done"] = True
+                o.updated = _now().isoformat(timespec="seconds")
+                self._save()
+                return True
+        return False
+
+    def next_milestone(self, obj: Objective) -> dict | None:
+        """The earliest unfinished milestone, or None. Sorted on insert, so this is the first one."""
+        return next((m for m in obj.milestones if not m.get("done")), None)
+
+    def stall_reason(self, obj: Objective, now: datetime | None = None) -> str:
+        """Why this objective is stalled, or "" if it is moving.
+
+        An overdue milestone is reported ahead of silence: a missed commitment is a harder fact
+        than "nothing logged lately", which can just mean a quiet week on a long objective.
+        """
+        today = (now or _now()).date()
+        nxt = self.next_milestone(obj)
+        if nxt:
+            try:
+                due = datetime.strptime(str(nxt.get("target", "")), "%Y-%m-%d").date()
+            except ValueError:
+                due = None
+            if due and due < today:
+                over = (today - due).days
+                return f"'{nxt['text']}' was due {due.isoformat()} and is {over} day(s) overdue"
+        last = obj.progress[-1]["ts"] if obj.progress else obj.created
+        try:
+            since = (today - datetime.fromisoformat(last).date()).days
+        except ValueError:
+            return ""
+        if since >= STALE_DAYS:
+            return f"nothing logged for {since} days"
+        return ""
+
+    def stalled(self, now: datetime | None = None) -> list[tuple[Objective, str]]:
+        """Every active objective that is stalled, with the reason. Empty when all are moving."""
+        out = [(o, self.stall_reason(o, now)) for o in self.active()]
+        return [(o, why) for o, why in out if why]
+
     # ---- read --------------------------------------------------------------------------------
     def render(self, max_items: int = 8) -> str:
         """Compact status text (for a spoken 'what are you working on' or the prompt). '' when empty."""
@@ -154,6 +235,12 @@ class ObjectiveBook:
             last = o.progress[-1]["note"] if o.progress else "not started yet"
             proj = f"[{o.project}] " if o.project else ""
             lines.append(f"- {proj}{o.text} — latest: {last}")
+            nxt = self.next_milestone(o)
+            if nxt:
+                lines.append(f"  · next milestone: {nxt['text']} (target {nxt['target']})")
+            why = self.stall_reason(o)
+            if why:
+                lines.append(f"  · STALLED: {why}")
             if o.deferred:
                 lines.append(f"  · awaiting your approval: {'; '.join(o.deferred[:3])}")
         return "\n".join(lines)
@@ -161,6 +248,45 @@ class ObjectiveBook:
 
 # Process-wide singleton (mirrors WORLD / STORE / TASKS). Tests build their own with a temp path.
 OBJECTIVES = ObjectiveBook()
+
+
+# ---- attribution (33.F3) ---------------------------------------------------------------------
+#: What a task with no objective is called. Naming it matters: a task whose attribution is blank is
+#: indistinguishable from one nobody has got round to attributing, and "ad-hoc" is a real answer -
+#: not everything he does should serve a standing objective, and pretending otherwise produces a
+#: report where every line reads as a reproach.
+AD_HOC = "ad-hoc"
+
+
+def attribution(task: Any) -> str:
+    """The objective id a task serves, or AD_HOC. Never guessed from the title."""
+    return str((getattr(task, "meta", None) or {}).get("objective") or AD_HOC)
+
+
+def attribution_report(book: ObjectiveBook | None = None, todos: list | None = None) -> str:
+    """Open work grouped under the objective it serves, with the ad-hoc pile named last."""
+    from afon.brain.tasks import TASKS
+
+    book = book or OBJECTIVES
+    items = TASKS.todos() if todos is None else todos
+    if not items:
+        return "Nothing open on your list, sir."
+    groups: dict[str, list] = {}
+    for t in items:
+        groups.setdefault(attribution(t), []).append(t)
+    lines: list[str] = []
+    for oid in sorted(k for k in groups if k != AD_HOC):
+        obj = book.get(oid)
+        head = obj.text if obj else f"{oid} (an objective I no longer hold)"
+        lines.append(f"{head}: " + "; ".join(f"'{t.title}'" for t in groups[oid]))
+    loose = groups.get(AD_HOC, [])
+    if loose:
+        lines.append(f"{len(loose)} not tied to an objective: "
+                     + "; ".join(f"'{t.title}'" for t in loose))
+    unserved = [o for o in book.active() if o.id not in groups]
+    if unserved:
+        lines.append("Nothing on your list serves: " + "; ".join(o.text for o in unserved))
+    return "\n".join(lines)
 
 
 # ---- the daily driver ------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from afon.brain.tools import (
     coding,
     composio,
     contacts,
+    day_shape,
     diagnose,
     documents,
     fitness,
@@ -61,7 +62,7 @@ _MODULES = [vault, memory, web, telegram, voicechat, music, localplay, system, b
             coding, skills, notion, tasks, contacts, documents, composio, channels,
             macros, multimodal, undo, graphmem, activity, coaching, camera, objectives,
             approvals, relationship, phone, maps, wolfram, fitness, diagnose,
-            audioout]  # noqa: E501
+            audioout, day_shape]  # noqa: E501
 
 Handler = Callable[[dict], Awaitable[str]]
 
@@ -92,6 +93,7 @@ _LAZY_GROUPS: dict[str, list] = {
     "compute": [wolfram],                # exact math/facts via Wolfram Alpha
     "vitals": [fitness],                 # sleep/steps/heart from the wearable via Google Fit
     "audioout": [audioout],              # which speaker/headphones Afon talks through — H1.3
+    "dayshape": [day_shape],           # draft routines / check a day holds together — S21
 }
 # Substring triggers (lowercased) that activate a group for a turn. Broad on purpose — a miss just
 # means a one-turn delay (the follow-up usually contains the word, and groups stay warm one turn).
@@ -179,6 +181,11 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
     "audioout": ("headphone", "headphones", "airpod", "airpods", "speaker", "speakers", "earbuds",
                  "switch to my", "play through", "output device", "sound device", "audio output",
                  "talk through", "speak through", "which speakers"),
+    "dayshape": ("my routines", "my routine", "draft my", "propose my",
+                 "adopt the routine", "adopt my routine", "shape of my day",
+                 "does my day", "will my day", "double-booked", "double booked",
+                 "check my day", "my day work", "clash", "clashes",
+                 "back to back", "back-to-back"),
 }
 
 

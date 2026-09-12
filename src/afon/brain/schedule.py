@@ -23,7 +23,7 @@ thing more slowly to read.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 #: Minutes assumed necessary to get between two named places. Deliberately one number rather than a
 #: distance lookup: a maps API would turn a local arithmetic check into a network call on the

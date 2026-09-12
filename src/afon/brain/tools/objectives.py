@@ -82,7 +82,83 @@ async def drop_objective(args: dict) -> str:
     return f"Dropped \"{obj.text}\", sir — I'll no longer work on it."
 
 
+async def set_milestone(args: dict) -> str:
+    """Put a dated milestone on an objective, or mark one reached."""
+    topic = (args.get("topic") or "").strip()
+    text = (args.get("milestone") or "").strip()
+    try:
+        obj = OBJECTIVES.find(topic)
+        if obj is None:
+            return f"I couldn't find a single active objective matching '{topic}', sir."
+        if str(args.get("reached") or "").lower() in ("1", "true", "yes"):
+            if OBJECTIVES.complete_milestone(obj.id, text):
+                return f"Noted, sir — '{text}' is reached on \"{obj.text}\"."
+            return f"I have no open milestone matching '{text}' on that objective, sir."
+        problem = OBJECTIVES.add_milestone(obj.id, text, (args.get("target") or "").strip())
+        if problem:
+            return problem
+        return (f"Logged, sir — '{text}' by {args.get('target')} on \"{obj.text}\". "
+                "I'll tell you if it slips.")
+    except Exception as e:  # noqa: BLE001
+        return tool_error("set milestone", e)
+
+
+async def objective_review(_args: dict) -> str:
+    """What is moving, what has stalled and why, and what your open work is actually serving."""
+    try:
+        from afon.brain.objectives import attribution_report
+
+        active = OBJECTIVES.active()
+        if not active:
+            return "You haven't handed me any objectives to drive yet, sir."
+        stalled = OBJECTIVES.stalled()
+        moving = [o for o in active if o.id not in {s.id for s, _ in stalled}]
+        lines = []
+        if moving:
+            lines.append("Moving, sir: " + "; ".join(o.text for o in moving) + ".")
+        for obj, why in stalled:
+            lines.append(f"Stalled: \"{obj.text}\" — {why}.")
+        lines.append(attribution_report())
+        return "\n".join(lines)
+    except Exception as e:  # noqa: BLE001
+        return tool_error("objective review", e)
+
+
 SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "set_milestone",
+            "description": (
+                "Put a dated milestone on a multi-day objective, or mark one reached. Milestones "
+                "are how Afon can tell a stalled objective from a slow one. Use for 'milestone: "
+                "beta by the 30th', 'that milestone is done'. Target must be YYYY-MM-DD."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "A word from the objective."},
+                    "milestone": {"type": "string", "description": "What has to be true."},
+                    "target": {"type": "string", "description": "Due date, YYYY-MM-DD."},
+                    "reached": {"type": "boolean",
+                                "description": "True to mark an existing milestone reached."},
+                },
+                "required": ["topic", "milestone"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "objective_review",
+            "description": (
+                "Review every objective at once: what is moving, what has stalled and why, and "
+                "which of the owner's open tasks serve which objective. Use for 'how are my goals "
+                "going', 'what's stalled', 'what am I actually working towards'."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -165,6 +241,8 @@ SCHEMAS = [
 ]
 
 HANDLERS = {
+    "set_milestone": set_milestone,
+    "objective_review": objective_review,
     "assign_objective": assign_objective,
     "list_objectives": list_objectives,
     "objective_status": objective_status,

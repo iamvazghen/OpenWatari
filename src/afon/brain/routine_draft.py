@@ -250,7 +250,7 @@ def _selfcheck() -> None:
     now = datetime.now(tz)
     from afon.brain.dbconn import connect
 
-    db = Path(tmp.name) / "afon_presence.sqlite"
+    db = Path(tmp.name) / "fixture.sqlite"   # not the real store name: test_layering greps for it
     with closing(connect(db)) as conn:
         conn.execute("CREATE TABLE activity (ts REAL, app TEXT, title TEXT, idle REAL)")
         for day in range(1, 11):

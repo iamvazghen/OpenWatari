@@ -2825,10 +2825,29 @@ arithmetic on dates.
 
 **Floor**
 - [x] 33.F1 Objectives with progress notes and deferred items. *gate:* `test_objectives.py`
-- [ ] 33.F2 Milestones and target dates, so "stalled" is computable rather than felt.
+- [x] 33.F2 Milestones and target dates, so "stalled" is computable rather than felt.
       *gate:* `test_objectives.py` extended [milestones]
-- [ ] 33.F3 Every task can name the objective it serves, or is explicitly ad-hoc (pairs with 01.R3).
+      *done 2026-09-12:* an objective carries optional dated milestones, and `stall_reason` answers
+      in one sentence: an overdue milestone first, silence past a week second. An overdue
+      commitment is a harder fact than "nothing logged lately", which on a long objective can just
+      mean a quiet week. A bad target date is refused rather than stored — a milestone whose date
+      cannot be parsed can never be overdue, so accepting one would quietly remove the objective
+      from stall detection, which is the exact opposite of what the field is for. The rollback
+      holds: an objective with no milestones still stalls on silence.
+- [x] 33.F3 Every task can name the objective it serves, or is explicitly ad-hoc (pairs with 01.R3).
       *gate:* `test_goal_attribution.py`
+      *done 2026-09-12:* Afon held objectives and he held a to-do list, and nothing joined them, so
+      "am I working towards anything" had no answer — a week of tasks could serve none of his
+      objectives and no surface would have said so. A to-do now carries the objective it serves,
+      and the review groups open work under each one, counts the ad-hoc pile and names any
+      objective nothing is serving, which is the reading that changes what he does next.
+      Attribution is never inferred from the title: a task called "cancel my Party Map
+      subscription" is not evidence it serves the Party Map objective, and guessing would be
+      confidently wrong in exactly the cases he would not check. An objective named but not
+      resolvable is refused rather than dropped, because a discarded attribution reads afterwards
+      as ad-hoc work with nothing to show it went missing. "ad-hoc" is a named value, not a blank:
+      not everything he does should serve a standing objective, and pretending otherwise produces
+      a report where every line reads as a reproach.
 
 **Raise**
 - [ ] 33.R1 Stall detection and escalation into proactivity. *gate:* new `test_objective_stall.py`
@@ -3816,7 +3835,7 @@ green, `E` = elite green.
 | S30 | Persistent Memory | structured badly | 3/3 | 0/9 | 0/2 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/6 | 0/1 |
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
-| S33 | Goal & Project Mgmt | structured badly | 1/3 | 0/3 | 0/1 |
+| S33 | Goal & Project Mgmt | structured badly | 3/3 | 0/3 | 0/1 |
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
 | S35 | Crisis Response | half-built | 1/3 | 0/3 | 0/1 |
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
@@ -3835,7 +3854,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 97 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 97 of 370.**
+**Totals: 99 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 99 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

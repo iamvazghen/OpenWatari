@@ -195,6 +195,8 @@ TESTS = [
      "test_reference_resolution.py", "offline", ["checks passed ==="]),
     ("Delivery ledger (13.F3): delivered is not seen, and an urgent miss is re-raised once",
      "test_delivery_ledger.py", "offline", ["checks passed ==="]),
+    ("Goal attribution (33.F3): every task names the objective it serves, or is ad-hoc",
+     "test_goal_attribution.py", "offline", ["checks passed ==="]),
     ("Day shape (21.F1/21.F2): routines drafted from evidence, and a broken day named",
      "test_day_shape.py", "offline", ["checks passed ==="]),
     # 21.F3 — replays the clock-sensitive tests across 6 awkward dates and 4 timezones. It was
