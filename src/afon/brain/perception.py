@@ -37,7 +37,10 @@ from loguru import logger
 #: Per-fact staleness. These differ on purpose: a room empties in seconds, while "which app is in
 #: the foreground" stays true across a poll interval. One shared constant would make the visual
 #: fact too trusting or the activity fact too timid.
-MAX_AGE_S = {"presence": 300.0, "visual": 120.0, "activity": 300.0, "meeting": 300.0}
+#: `voice` is longer than `visual` on purpose: a camera says who is in frame right now, while
+#: having just spoken to Afon is evidence of being in the room for a good while afterwards.
+MAX_AGE_S = {"presence": 300.0, "visual": 120.0, "activity": 300.0, "meeting": 300.0,
+             "voice": 600.0}
 
 UNKNOWN = "unknown"
 
@@ -77,6 +80,7 @@ class Perception:
     visual: Fact
     activity: Fact
     meeting: Fact
+    voice: Fact = Fact()
     ts: float = 0.0
 
     def describe(self, now: float | None = None) -> str:
@@ -87,7 +91,7 @@ class Perception:
         two are ever confused for each other, which is why the age is in the text and not in a
         field somebody has to remember to read."""
         out = []
-        for name in ("presence", "visual", "activity", "meeting"):
+        for name in ("presence", "visual", "voice", "activity", "meeting"):
             f: Fact = getattr(self, name)
             if not f.known:
                 out.append(f"{name}: not sensed")
@@ -102,6 +106,20 @@ class Perception:
 #: accidentally hand in a stale timestamp: the clock is read here, at the moment of recording.
 _VISUAL: tuple[Any, float, str] = (None, 0.0, UNKNOWN)
 
+#: Last time a human spoke to Afon, same shape and same reasoning as `_VISUAL`. This is the third
+#: leg of 43.F3: a keyboard says nothing while he is on a phone call, and a camera says nothing
+#: while he reads on the sofa, but a voice turn says he is here and neither of the others can see it.
+_VOICE: tuple[Any, float, str] = (None, 0.0, UNKNOWN)
+
+
+def record_voice(value: Any = "spoke", source: str = "edge") -> None:
+    """Called when an utterance reaches the brain. Fail-quiet, like `record_visual`."""
+    global _VOICE
+    try:
+        _VOICE = (value, time.time(), source)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"perception: could not record voice ({type(e).__name__})")
+
 
 def record_visual(value: Any, source: str = "camera") -> None:
     """Called by the camera path after a real look. Fail-quiet: recording a fact must never be
@@ -114,9 +132,10 @@ def record_visual(value: Any, source: str = "camera") -> None:
 
 
 def reset_visual() -> None:
-    """Tests only — the module global would otherwise leak between cases."""
-    global _VISUAL
+    """Tests only — the module globals would otherwise leak between cases."""
+    global _VISUAL, _VOICE
     _VISUAL = (None, 0.0, UNKNOWN)
+    _VOICE = (None, 0.0, UNKNOWN)
 
 
 def perceive(presence: Any = None, now: float | None = None) -> Perception:
@@ -151,7 +170,10 @@ def perceive(presence: Any = None, now: float | None = None) -> Perception:
 
     value, at, source = _VISUAL
     visual = Fact(value=value, at=at, source=source, max_age_s=MAX_AGE_S["visual"])
-    return Perception(presence=pres, visual=visual, activity=act, meeting=meet, ts=now)
+    vvalue, vat, vsource = _VOICE
+    voice = Fact(value=vvalue, at=vat, source=vsource, max_age_s=MAX_AGE_S["voice"])
+    return Perception(presence=pres, visual=visual, activity=act, meeting=meet, voice=voice,
+                      ts=now)
 
 
 def _selfcheck() -> None:

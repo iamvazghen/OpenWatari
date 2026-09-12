@@ -93,6 +93,8 @@ class Presence:
         self._latest: Snapshot | None = None
         self._task: asyncio.Task | None = None
         self._was_away = False   # arrival() state: True once the owner has gone away, so a return fires once
+        self._away_since = 0.0   # when the departure was first seen, so a return knows how long it was
+        self.last_absence_s = 0.0  # how long the absence that just ended lasted (43.F2)
         self._init_db()
 
     # ---- persistence ------------------------------------------------------------------
@@ -280,11 +282,19 @@ class Presence:
         if not self._fresh(snap, now):
             return False
         if snap.idle >= settings.presence_away_seconds:
+            if not self._was_away:
+                # The departure began when he stopped touching the machine, not when the poll
+                # noticed — otherwise a slow poll makes every absence look shorter than it was.
+                self._away_since = now - snap.idle
             self._was_away = True
             return False
         # active now
         if self._was_away:
             self._was_away = False
+            # 43.F2 — a return is only symmetric with a departure if the length of the gap survives
+            # it. Without this, ten minutes and ten hours produced the identical "Welcome back, sir."
+            self.last_absence_s = max(0.0, now - self._away_since) if self._away_since else 0.0
+            self._away_since = 0.0
             return True
         return False
 
@@ -380,7 +390,49 @@ def _greeting(now: datetime | None = None) -> str:
     return "Welcome back, sir."
 
 
-def presence_signals() -> list:
+#: Below this, a return gets a greeting and nothing else. He went for coffee; reading him his
+#: unread mail on the way back to his own chair is the kind of helpfulness that gets switched off.
+CATCHUP_AFTER_S = 1800.0
+
+
+def _absence_phrase(seconds: float) -> str:
+    """"an hour" / "most of the day" — how long he was gone, as a person would say it."""
+    if seconds < 3600:
+        return f"{max(1, int(seconds // 60))} minutes"
+    if seconds < 72000:
+        hours = seconds / 3600
+        return "an hour" if hours < 1.5 else f"{int(round(hours))} hours"
+    return "a while"
+
+
+async def while_you_were_gone(seconds: float) -> str:
+    """What is worth saying about an absence that long, or "" when nothing is (43.F2).
+
+    The floor's rule, and the whole point of it: a return gets a catch-up ONLY when there is
+    something to catch up on. A "while you were gone" that reliably contains nothing is training
+    to ignore the one that contains something.
+    """
+    if seconds < CATCHUP_AFTER_S:
+        return ""
+    try:
+        from afon.brain.tools.inbox import waiting
+
+        rows, unknown = await waiting()
+    except Exception as e:  # noqa: BLE001 — a greeting must never be blocked by a mailbox
+        logger.debug(f"presence: catch-up unavailable ({type(e).__name__}: {e})")
+        return ""
+    if not rows:
+        # Nothing arrived. Saying "nothing happened while you were gone" is still a sentence he
+        # has to listen to, so it is not said at all.
+        return ""
+    total = sum(r.count for r in rows)
+    lead = rows[0]
+    gap = " I couldn't check everything." if unknown else ""
+    return (f" While you were gone — about {_absence_phrase(seconds)} — {total} thing"
+            f"{'s' if total != 1 else ''} arrived, the newest {lead.channel} from {lead.who}.{gap}")
+
+
+async def presence_signals() -> list:
     """Proactive source: greet the owner ONCE when they return to the desk after being away.
 
     Idle-transition based (works across the VPS-brain / laptop-camera split), gated by the privacy
@@ -392,6 +444,7 @@ def presence_signals() -> list:
     if not PRESENCE.enabled or not PRESENCE.arrival():
         return []
     key = f"arrival-{int(time.time() // 60)}"
+    message = _greeting() + await while_you_were_gone(PRESENCE.last_absence_s)
     # 0.62 clears the 0.60 relevance threshold so the welcome-back actually fires (it was 0.50 = dormant),
     # but stays below the 0.85 context-override and 0.95 quiet-override so night/quiet-hours still hold it.
-    return [Signal(key=key, message=_greeting(), urgency=0.62, kind="presence")]
+    return [Signal(key=key, message=message, urgency=0.62, kind="presence")]

@@ -180,6 +180,89 @@ def main() -> None:
     for op in ("audio_output_set", "audio_output_list"):
         check(f"pc_agent executes '{op}'", op in agent.LOCAL_HANDLERS)
 
+    print("\n[7] 42.F3 — volume and mute are ONE concept, on whichever path is playing")
+    import afon.brain.tools.audioout as ao
+    import afon.brain.tools.localplay as lp
+    import afon.brain.tools.voicechat as vc
+
+    level = {"now": 55}
+    calls: list[dict] = []
+
+    async def _fake_forward(op, args, local):
+        calls.append({"op": op, **args})
+        if "level" in args:
+            was, level["now"] = level["now"], int(args["level"])
+            return {"ok": True, "was": was, "now": level["now"]}
+        return {"ok": True, "now": level["now"], "was": level["now"], "muted": False}
+
+    real_fwd, real_desk, real_room = ao._forward, lp.desktop_now_playing, vc.room_is_playing
+
+    async def _local():
+        return "a local file"
+
+    async def _local_none():
+        return ""
+
+    async def _broken_forward(op, args, local):
+        return {"ok": False, "out": "I couldn't read the volume, sir."}
+
+    try:
+        ao._forward, lp.desktop_now_playing, vc.room_is_playing = _fake_forward, _local, lambda: None
+
+        said = asyncio.run(ao.set_volume({}))
+        check("with no arguments it reads the level back", "55%" in said, said)
+
+        said = asyncio.run(ao.set_volume({"change": 15}))
+        check("'louder' is relative to where it actually is", level["now"] == 70, said)
+        check("...and he says where it landed", "70%" in said, said)
+
+        said = asyncio.run(ao.set_volume({"level": 20}))
+        check("an absolute level is set", level["now"] == 20, said)
+
+        said = asyncio.run(ao.set_volume({"change": -50}))
+        check("a step past the bottom clamps rather than going negative", level["now"] == 0, said)
+        check("...and zero is reported as muted", "Muted" in said, said)
+
+        # Mute is the same number, not a second switch. Windows keeps an independent mute flag, and
+        # a device sitting at 70% AND silent is how "louder" does nothing three times in a row.
+        level["now"] = 45
+        asyncio.run(ao.set_volume({"mute": True}))
+        check("mute takes it to zero", level["now"] == 0)
+        asyncio.run(ao.set_volume({"mute": False}))
+        check("unmute restores what he had, not a guess", level["now"] == 45, level)
+        check("every change went through the one laptop op",
+              {c["op"] for c in calls} == {"audio_volume"}, sorted({c["op"] for c in calls}))
+
+        said = asyncio.run(ao.set_volume({"level": 45}))
+        check("setting the level it already has is said, not re-sent", "already" in said, said)
+
+        # The honest half: the music room plays on other people's phones, so its loudness is not
+        # his to set. Saying "done" there would be the media version of reporting a send that
+        # never left the building.
+        lp.desktop_now_playing, vc.room_is_playing = _local_none, lambda: "Coltrane — Naima"
+        said = asyncio.run(ao.set_volume({"change": 10}))
+        check("a music-room track is not silently 'turned up'", "%" not in said, said)
+        check("...he says whose setting it is", "listener" in said, said)
+        check("...and offers what he CAN do", "stop it" in said, said)
+
+        ao._forward = _broken_forward
+        lp.desktop_now_playing, vc.room_is_playing = _local, lambda: None
+        said = asyncio.run(ao.set_volume({"change": 10}))
+        check("an unreadable volume control is reported, not claimed as done",
+              "%" not in said and "couldn" in said.lower(), said)
+    finally:
+        ao._forward, lp.desktop_now_playing, vc.room_is_playing = real_fwd, real_desk, real_room
+
+    check("set_volume is registered", "set_volume" in ao.HANDLERS)
+    check("the laptop op is wired up", "audio_volume" in ao.LOCAL_HANDLERS)
+    import afon.edge.pc_agent as agent2
+    check("pc_agent executes 'audio_volume'", "audio_volume" in agent2.LOCAL_HANDLERS)
+    check("volume stays OUT of the per-turn surface — 'louder' is a distinctive enough word",
+          "set_volume" not in {s["function"]["name"] for s in core_tool_schemas()})
+    from afon.brain.tools import groups_for_text
+    for phrase in ("turn it down", "louder", "mute that", "how loud is it"):
+        check(f"'{phrase}' reaches the volume tool", "audioout" in groups_for_text(phrase))
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

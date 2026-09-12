@@ -1507,7 +1507,7 @@ class AfonAgent:
             ],
         })
         from afon.brain import audit
-        from afon.brain.proactive import confirm_required
+        from afon.brain.proactive import confirm_required, draft_preview
         # Pass 1 — classify each call: a confirm-gated/destructive call is BLOCKED until the owner has
         # affirmed it (we hand the model a sentinel so it reads the action back and asks). Everything
         # else is runnable and, since these are independent (separate tool calls in one model turn),
@@ -1527,6 +1527,13 @@ class AfonAgent:
                     "exactly what you're about to do (the action and its target or recipient) and "
                     "ask him to confirm. It will run only after he says yes."
                 )
+                # 38.F3 — for a send, the consequence IS the text, so he hears the draft itself and
+                # not a description of it. A paraphrase the model writes of its own message keeps
+                # the wrong tone, the wrong name and the wrong recipient intact.
+                draft = draft_preview(name, args)
+                if draft:
+                    blocked += ("\nRead this draft back to him WORD FOR WORD first, then ask. "
+                                f"Do not summarise or improve it:\n{draft}")
                 logger.info(f"confirm-gate: held {name}({args}) pending the owner's yes")
                 audit.record(name, args, "blocked: confirmation required", ok=False,
                              decision="deny", rule="confirm_gate:awaiting_owner_confirmation",

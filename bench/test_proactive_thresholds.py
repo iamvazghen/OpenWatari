@@ -45,7 +45,10 @@ import afon.brain.proactive_signals as ps  # noqa: E402
 
 
 class _FakePresence:
+    # Shaped like the real Presence, including the fields a caller reads — a stub that matches a
+    # broken caller instead of the class is how a defect survives its own test.
     enabled = True
+    last_absence_s = 0.0
 
     def continuous_active_minutes(self):
         return settings.wellbeing_session_minutes + 60
@@ -58,7 +61,8 @@ ps.PRESENCE = _FakePresence()               # wellbeing_signals imports PRESENCE
 presence_mod.PRESENCE = _FakePresence()     # presence_signals uses the module-level PRESENCE
 clears(ps.wellbeing_signals(datetime(2026, 7, 15, 14, tzinfo=timezone.utc)), "wellbeing (long session)")
 clears(ps.wellbeing_signals(datetime(2026, 7, 15, 2, tzinfo=timezone.utc)), "wellbeing (small hours)")
-clears(presence_mod.presence_signals(), "presence (welcome back)")
+import asyncio as _aio  # noqa: E402 — presence_signals is async since 43.F2
+clears(_aio.run(presence_mod.presence_signals()), "presence (welcome back)")
 
 # --- memory_resurface: force one salient, un-resurfaced note --------------------------------
 import afon.brain.memory as memory_mod  # noqa: E402

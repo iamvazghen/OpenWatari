@@ -59,6 +59,37 @@ async def _pc_audio_output_list(_args: dict) -> str:
     return json.dumps({"ok": True, "out": names, "current": current})
 
 
+async def _pc_audio_volume(args: dict) -> str:
+    """Read or set the laptop's master output volume. Runs ON THE LAPTOP.
+
+    Mute is not a separate switch here, and deliberately: Windows keeps an independent mute flag
+    that survives a volume change, so a device can sit at 70% and silent, and "louder" then does
+    nothing audible three times in a row. Muting stores the level and sets zero; unmuting restores
+    it. One number is the whole state, which is what makes it the same concept on both paths.
+    """
+    try:
+        from pycaw.pycaw import AudioUtilities  # type: ignore
+    except Exception as e:  # noqa: BLE001 — no audio stack (headless host, or pycaw not installed)
+        return json.dumps({"ok": False, "out": f"I can't reach the volume control ({type(e).__name__})"})
+    try:
+        # `.EndpointVolume` on the device, not the ctypes.cast(Activate(...)) dance every recipe
+        # online still shows — pycaw wrapped that years ago, and the old form now raises
+        # AttributeError on the installed version.
+        vol = AudioUtilities.GetSpeakers().EndpointVolume
+        was = round(vol.GetMasterVolumeLevelScalar() * 100)
+        muted = bool(vol.GetMute())
+        level = args.get("level")
+        if level is not None:
+            # Windows' own mute flag is cleared whenever we set a level, so the one number the
+            # caller reasons about stays the truth.
+            vol.SetMute(0, None)
+            vol.SetMasterVolumeLevelScalar(max(0, min(100, int(level))) / 100.0, None)
+            return json.dumps({"ok": True, "was": was, "now": max(0, min(100, int(level)))})
+        return json.dumps({"ok": True, "now": 0 if muted else was, "was": was, "muted": muted})
+    except Exception as e:  # noqa: BLE001 — COM can throw on a device that vanished mid-call
+        return json.dumps({"ok": False, "out": f"the volume control refused ({type(e).__name__})"})
+
+
 async def _forward(op: str, args: dict, local) -> dict:
     from afon.brain.tools.system import _dispatch
 
@@ -98,7 +129,81 @@ async def list_audio_outputs(_args: dict) -> str:
             + (f" Right now I'm using {current}." if current else ""))
 
 
+#: Where the level is remembered across a mute, so "unmute" restores what he had rather than a
+#: guess. Process-local on purpose: a mute that outlived a brain restart would be a silent laptop
+#: with no cause the owner could see.
+_BEFORE_MUTE: int | None = None
+
+
+async def set_volume(args: dict) -> str:
+    """Louder, quieter, mute, unmute — for whichever path is actually playing (42.F3).
+
+    Volume and mute used to be neither: there was no way to say "louder" at all, and the two
+    playback paths had nothing in common to say it about. They still cannot share an implementation
+    — the desktop plays through the laptop's own output, while the music room plays into a Telegram
+    call on other people's phones — but they share the concept, and the honest half of that is
+    saying so when the loudness is not Afon's to change.
+    """
+    global _BEFORE_MUTE
+    from afon.brain.playback import ROOM, current
+
+    playing = await current()
+    if playing.where == ROOM:
+        # Saying "done" here would be the media-control version of reporting a send that never left.
+        return (f"'{playing.label}' is going into the music room, sir — how loud it is there is "
+                "each listener's own setting, not mine. I can stop it, or move it to your desktop.")
+
+    want_mute = args.get("mute")
+    level = args.get("level")
+    change = args.get("change")
+
+    read = await _forward("audio_volume", {}, _pc_audio_volume)
+    if not read.get("ok"):
+        return str(read.get("out") or "I couldn't read the volume, sir.")
+    now = int(read.get("now") or 0)
+
+    if want_mute is True:
+        if now > 0:
+            _BEFORE_MUTE = now
+        target = 0
+    elif want_mute is False:
+        target = _BEFORE_MUTE or 30
+    elif level is not None:
+        try:
+            target = int(level)
+        except (TypeError, ValueError):
+            return "Give me a level between 0 and 100, sir."
+    elif change is not None:
+        try:
+            target = now + int(change)
+        except (TypeError, ValueError):
+            return "Tell me how much louder or quieter, sir."
+    else:
+        return (f"The volume is at {now}%, sir." if now else "It's muted, sir.")
+
+    target = max(0, min(100, target))
+    if target == now:
+        return f"It's already at {target}%, sir."
+    done = await _forward("audio_volume", {"level": target}, _pc_audio_volume)
+    if not done.get("ok"):
+        return str(done.get("out") or "I couldn't change the volume, sir.")
+    if target == 0:
+        return "Muted, sir."
+    what = f" for '{playing.label}'" if playing else ""
+    return f"Volume{what} is at {target}%, sir."
+
+
 SCHEMAS = [
+    {"type": "function", "function": {
+        "name": "set_volume",
+        "description": "Change how loud the laptop is, or mute it — for whatever is playing. Use "
+                       "for 'louder', 'turn it down', 'mute', 'unmute', 'set the volume to 40', "
+                       "'how loud is it?'. Give NO arguments to just read the level back.",
+        "parameters": {"type": "object", "properties": {
+            "level": {"type": "integer", "description": "Absolute level, 0-100."},
+            "change": {"type": "integer", "description": "Relative step, e.g. 10 or -10."},
+            "mute": {"type": "boolean", "description": "true to mute, false to unmute."}},
+            "required": []}}},
     {"type": "function", "function": {
         "name": "switch_audio_output",
         "description": "Switch which device Afon SPEAKS through on the laptop — headphones/AirPods "
@@ -115,10 +220,12 @@ SCHEMAS = [
         "parameters": {"type": "object", "properties": {}, "required": []}}},
 ]
 
-HANDLERS = {"switch_audio_output": switch_audio_output, "list_audio_outputs": list_audio_outputs}
+HANDLERS = {"switch_audio_output": switch_audio_output, "list_audio_outputs": list_audio_outputs,
+            "set_volume": set_volume}
 
 # The speakers are on the laptop, so device enumeration and the saved preference live there too.
 LOCAL_HANDLERS = {
     "audio_output_set": _pc_audio_output_set,
     "audio_output_list": _pc_audio_output_list,
+    "audio_volume": _pc_audio_volume,
 }

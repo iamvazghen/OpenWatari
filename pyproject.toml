@@ -27,6 +27,7 @@ edge = [
     "pipecat-ai[silero,webrtc]>=0.0.90",
     "pyaudio>=0.2.11",          # local mic/speaker transport (pipecat.transports.local.audio)
     "textual>=0.79",
+    "pycaw>=20240210; sys_platform == 'win32'",   # master volume / mute (42.F3) — the speakers are here
 ]
 # Cloud voice providers (default for quality per user decision): ElevenLabs TTS + Deepgram STT.
 cloud-voice = [

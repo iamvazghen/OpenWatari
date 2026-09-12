@@ -160,6 +160,92 @@ def main() -> None:
           "only an available verdict is recorded — a busy webcam is not evidence about the room")
     P.reset_visual()
 
+    print("\n[presence fusion] 43.F3 — he is here if ANY sensor says so, away only if all agree")
+    # The single-source bug: `place` was device idle and nothing else. The laptop sleeps, the edge
+    # drops, he unplugs for an hour — the sample goes stale and Afon concludes the room is empty
+    # while the man is sitting in it. Every sensor here is blind in a way the others are not: the
+    # keyboard cannot see him on a phone call, the camera cannot see him reading on the sofa, and
+    # neither of them hears him talking to Afon.
+    from afon.brain.situation import _fuse_place
+
+    now = 10_000.0
+
+    class _FSnap:
+        app, title = "Code.exe", "x"
+
+        def __init__(self, idle, ts):
+            self.idle, self.ts = idle, ts
+
+    class _FPres:
+        def __init__(self, snap):
+            self._s = snap
+
+        def current(self):
+            return self._s
+
+        def in_meeting(self, now=None):
+            return False
+
+    def snapshot(idle=None, age=0.0, visual=None, visual_age=0.0, voice=False, voice_age=0.0):
+        P.reset_visual()
+        if visual is not None:
+            P._VISUAL = (visual, now - visual_age, "camera")
+        if voice:
+            P._VOICE = ("spoke", now - voice_age, "voice:laptop")
+        pres = _FPres(_FSnap(idle, now - age)) if idle is not None else None
+        return P.perceive(pres, now=now)
+
+    place, why = _fuse_place(snapshot(idle=3.0), now)
+    check(place == "desk" and why == "presence", f"a fresh keyboard sample alone is enough ({why})")
+
+    # The regression. The keyboard has gone stale, and the camera saw him ten seconds ago.
+    place, why = _fuse_place(snapshot(idle=3.0, age=4000.0, visual="owner", visual_age=10.0), now)
+    check(place == "desk", "a stale keyboard does NOT mean away when the camera just saw him")
+    check(why == "visual", f"...and the source names which sensor vouched for him ({why})")
+
+    # The phone-call case: the laptop has been untouched for an hour, but he spoke to Afon.
+    place, why = _fuse_place(snapshot(idle=3.0, age=4000.0, voice=True, voice_age=60.0), now)
+    check(place == "desk", "a voice turn a minute ago outweighs an hour of not typing")
+    check(why == "voice", f"...credited to the voice ({why})")
+
+    place, why = _fuse_place(
+        snapshot(idle=3.0, age=90.0, visual="owner", visual_age=5.0, voice=True, voice_age=40.0), now)
+    check(place == "desk" and why.count("+") == 2, f"several agreeing sensors are all named ({why})")
+    check(why == "visual+voice+presence", f"...freshest first, so the best evidence leads ({why})")
+
+    # Away needs everyone. This is the other half: fusion must not become "never away".
+    place, why = _fuse_place(snapshot(idle=3.0, age=4000.0, visual="owner", visual_age=4000.0), now)
+    check(place == "away", "with every sensor stale, he really is away")
+    check(why.endswith("-stale"), f"...and it says which sensor went cold first ({why})")
+
+    place, why = _fuse_place(snapshot(idle=3.0, age=4000.0, visual="nobody", visual_age=5.0), now)
+    check(place == "away", "a camera that just looked and saw nobody is not a vote for 'here'")
+
+    place, why = _fuse_place(snapshot(), now)
+    check(place == P.UNKNOWN, "with nothing sensed at all, the answer is unknown, not away")
+    check(why in ("presence-empty", P.UNKNOWN), f"...and says why, rather than blaming a sensor ({why})")
+
+    # 'I have not looked' must never be readable as 'nobody is there' — the same rule 26.F2 sets
+    # for a single fact, now holding for the fusion of three.
+    fused_src = (Path(__file__).resolve().parents[1]
+                 / "src/afon/brain/situation.py").read_text(encoding="utf-8")
+    check("_fuse_place" in fused_src and "perception.presence" not in
+          fused_src.split("def assemble")[1].split("def ")[0],
+          "assemble() no longer reads the presence fact directly — it goes through the fusion")
+
+    snap = snapshot(idle=3.0, voice=True)
+    check("voice" in snap.describe(now), "the voice fact is in the snapshot people read")
+    check(snap.voice.max_age_s > snap.visual.max_age_s,
+          "a voice turn is trusted longer than a camera frame — it is evidence of a while, not an "
+          "instant")
+
+    import afon.brain.server as srv
+    check("record_voice" in (Path(__file__).resolve().parents[1]
+                             / "src/afon/brain/server.py").read_text(encoding="utf-8")
+          and srv is not None,
+          "an inbound utterance records the voice fact")
+    P.reset_visual()
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     sys.exit(1 if failed else 0)
 

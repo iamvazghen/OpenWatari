@@ -30,6 +30,7 @@ def _tmpfile(data: bytes, suffix: str = ".mp3") -> Path:
     p.write_bytes(data)
     return p
 
+ROOT_SRC = Path(__file__).resolve().parents[1] / "src" / "afon"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 passed = failed = 0
@@ -166,6 +167,77 @@ def main() -> None:
     check("now_playing registered", "now_playing" in tool_names())
     check("now_playing has a handler", "now_playing" in lp.HANDLERS)
     check("stop_music still registered", "stop_music" in tool_names())
+
+    print("\n[7] 42.F2 — ONE owner of playing state, asked by both tools")
+    # The drift this pins: stop_music cross-checked the music room before giving up and now_playing
+    # did not, so with a track streaming into the room "what's playing?" answered "Nothing is
+    # playing out loud right now, sir." A confident wrong answer about something the owner can
+    # hear, caused by two tools each holding half the state.
+    from afon.brain import playback
+    import afon.brain.tools.voicechat as vc
+
+    real_desk, real_room = lp.desktop_now_playing, vc.room_is_playing
+
+    async def _silent():
+        return ""
+
+    async def _local():
+        return "a local file"
+
+    try:
+        lp.desktop_now_playing = _silent
+        vc.room_is_playing = lambda: "Coltrane — Naima"
+        said = asyncio.run(lp.now_playing({}))
+        check("a track in the music room is NOT reported as silence",
+              "Nothing is playing" not in said, said)
+        check("...it is named", "Naima" in said, said)
+        check("...and so is where it is playing", "music room" in said, said)
+
+        state = asyncio.run(playback.current())
+        check("the owner says where, not just what", state.where == playback.ROOM, state)
+
+        lp.desktop_now_playing = _local
+        both = asyncio.run(playback.current())
+        check("with both busy, the desktop wins — it is the one he is standing next to",
+              both.where == playback.DESKTOP, both)
+
+        # A dead PC link is not silence. Reporting "nothing is playing" because the laptop did not
+        # answer is the same mistake in a different costume.
+        async def _dead():
+            raise ConnectionError("laptop asleep")
+
+        lp.desktop_now_playing = _dead
+        check("an unreachable laptop does not erase the music room",
+              asyncio.run(playback.current()).where == playback.ROOM)
+
+        vc.room_is_playing = lambda: None
+        lp.desktop_now_playing = _silent
+        check("with nothing playing anywhere, the owner is falsy",
+              not asyncio.run(playback.current()))
+        check("...and the tool says so plainly",
+              "Nothing is playing" in asyncio.run(lp.now_playing({})))
+
+        # Stop routes by the same answer, so the two can no longer disagree about what is playing.
+        stopped = []
+        vc.room_is_playing = lambda: "Coltrane — Naima"
+
+        async def _fake_stop_room(_a):
+            stopped.append("room")
+            return "Stopped the music room, sir."
+
+        real_stop = vc.stop_music_room
+        vc.stop_music_room = _fake_stop_room
+        try:
+            out = asyncio.run(lp.stop_music({}))
+            check("stop reaches the room when the room is what's playing", stopped == ["room"], out)
+        finally:
+            vc.stop_music_room = real_stop
+    finally:
+        lp.desktop_now_playing, vc.room_is_playing = real_desk, real_room
+
+    check("both tools read the same owner, rather than one route each",
+          "from afon.brain.playback import" in (ROOT_SRC / "brain/tools/localplay.py")
+          .read_text(encoding="utf-8"))
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

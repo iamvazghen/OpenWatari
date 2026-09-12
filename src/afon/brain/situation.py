@@ -99,6 +99,50 @@ def part_of_day(hour: int) -> str:
     return "night"
 
 
+def _fuse_place(perception: Any, now: float) -> tuple[str, str]:
+    """Where he is, from every sensor that has an opinion — never from one alone (43.F3).
+
+    The single-source bug this replaces: `place` was device idle and nothing else, so a stale
+    activity sample read as "away". The laptop sleeps, the edge drops, he unplugs for an hour — and
+    Afon concluded the room was empty while the man was sitting in it, held his messages, and
+    greeted him on his "return". Each sensor is blind in a way the others are not: the keyboard
+    cannot see him on a phone call, the camera cannot see him reading on the sofa, and neither
+    hears him talking to Afon.
+
+    So a FRESH positive from any source means he is here, and "away" needs every source that has an
+    opinion to agree. Absence of evidence stays `unknown`, which is a third answer the callers
+    already handle and is the honest one when nothing has sensed anything at all.
+    """
+    votes: list[tuple[str, float]] = []      # (source name, age) for sources saying he is HERE
+    stale: list[tuple[str, float]] = []      # sources that have sensed him, but not recently
+    known = False
+
+    for name, here in (("presence", lambda f: f.value in ("at-screen", "idle")),
+                       ("visual", lambda f: f.value in ("person", "owner")),
+                       ("voice", lambda f: bool(f.value))):
+        f = getattr(perception, name, None)
+        if f is None or not f.known:
+            continue
+        known = True
+        if not here(f):
+            continue                          # sensed, and says nobody: not a vote either way
+        (stale if f.is_stale(now) else votes).append((name, f.age_s(now)))
+
+    if votes:
+        votes.sort(key=lambda v: v[1])        # freshest first, so the source named is the best one
+        names = "+".join(n for n, _ in votes)
+        return "desk", names if len(votes) > 1 else votes[0][0]
+    if stale or known:
+        # Every source that can see him says it has not, recently. That is a real departure.
+        stale.sort(key=lambda v: v[1])
+        return "away", (f"{stale[0][0]}-stale" if stale else "sensors-negative")
+    # Nothing has sensed anything. Keep the reason the presence layer gave — "presence-error" and
+    # "nobody has looked yet" are both unknown, and the caller that has to explain itself needs to
+    # know which one it is holding.
+    why = getattr(getattr(perception, "presence", None), "source", "") or "presence-empty"
+    return UNKNOWN, why
+
+
 def assemble(perception: Any = None, modes: Any = None, now: float | None = None,
              local: datetime | None = None) -> Situation:
     """Interpret one sensing snapshot plus the declared modes. Reads no sensor itself.
@@ -114,15 +158,7 @@ def assemble(perception: Any = None, modes: Any = None, now: float | None = None
     place, source, app, meeting = UNKNOWN, UNKNOWN, UNKNOWN, False
     if perception is not None:
         try:
-            pres = perception.presence
-            if not pres.known:
-                source = pres.source or "presence-empty"
-            elif pres.is_stale(now):
-                place, source = "away", "presence-stale"
-            else:
-                # Sensed and fresh: at the screen is the desk, idle at the screen is still the desk
-                # — he has not gone anywhere, he has stopped typing. Only staleness means away.
-                place, source = "desk", pres.source
+            place, source = _fuse_place(perception, now)
             app = perception.activity.value if perception.activity.known else UNKNOWN
             # A stale meeting verdict is not a meeting. Believing one is how Afon stays silent for
             # twenty minutes after a call ended.

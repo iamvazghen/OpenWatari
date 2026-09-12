@@ -3206,10 +3206,32 @@ drafting ≤1 LLM call.
 **Floor**
 - [x] 38.F1 Email and Telegram send/read, with contact resolution.
       *gate:* `test_phase11_integrations.py`, `test_contacts.py`
-- [ ] 38.F2 **A unified "what's waiting" view** across channels, deduplicated by thread.
-      *gate:* new `test_unified_inbox.py`
-- [ ] 38.F3 Nothing is sent without approval; drafts are always shown first.
-      *gate:* `test_approvals.py`
+- [x] 38.F2 **A unified "what's waiting" view** across channels, deduplicated by thread.
+      *gate:* `test_unified_inbox.py`
+      *done 2026-09-12:* `brain/tools/inbox.py` — unread mail, unread Telegram chats and the actions
+      autonomous work deferred, in one shape, fetched concurrently under a per-source deadline so one
+      hung mailbox costs that channel and not the answer. Gmail and Telegram gained structured
+      readers (`unread_threads`, `unread_chats`) rather than having their prose parsed back into
+      fields. Three refusals are gated: it never merges across channels (an email thread and a
+      Telegram chat on the same subject are two things to answer, and folding them hides one); it
+      never reports a channel it could not read as empty, because "nothing waiting" and "I couldn't
+      look" are different facts; and a thread is one row however many messages it holds, with the
+      count and the newest subject. `whats_waiting` is a core tool, not a lazy one — "anything for
+      me?" carries no trigger word, and a unified inbox that appears only after you say "email" is
+      the three-turn ask it exists to remove. The per-turn ceiling moved 56 -> 57 for that reason,
+      recorded in `test_finetune.py` beside the two earlier moves.
+- [x] 38.F3 Nothing is sent without approval; drafts are always shown first.
+      *gate:* `test_approvals.py`, `test_unified_inbox.py` [38.F3]
+      *done 2026-09-12:* the four send tools were already confirm-gated, but the gate only told the
+      model to *describe* the action — so the owner approved a paraphrase the model had written of
+      the message it was about to send. A summary of a message is not the message: the wrong tone,
+      the wrong name and the wrong recipient all survive a faithful one-line description.
+      `proactive.DRAFTED` now names, per send tool, which argument carries the words, and
+      `draft_preview` renders recipient, subject and body verbatim and unclipped. The confirm gate
+      hands that to the model with an instruction to read it back word for word and not improve it,
+      and the approval queue's listing carries the same block, so a send deferred by autonomous work
+      is approved on its words too. An empty body shows as "(no message text)" rather than being
+      hidden — a send with nothing in it is exactly what the readback is for.
 
 **Raise**
 - [ ] 38.R1 Triage: urgent / needs reply / FYI / ignore, learned from what the owner actually
@@ -3434,10 +3456,30 @@ music room.
 **Floor**
 - [x] 42.F1 **Stop routes to whichever path is playing** — desktop or music room; the two now ask
       each other (fixed 2026-08-13). *gate:* `test_localplay_routing.py`
-- [ ] 42.F2 One playback-state owner, so "what's playing" has a single answer.
-      *gate:* `test_localplay_routing.py` extended [single source of playing state]
-- [ ] 42.F3 Volume and mute are the same concepts across paths.
-      *gate:* `test_audio_output_switch.py` extended.
+- [x] 42.F2 One playback-state owner, so "what's playing" has a single answer.
+      *gate:* `test_localplay_routing.py` [7]
+      *done 2026-09-12:* `brain/playback.py` — `current()` returns what is playing and WHERE, asking
+      both routes. The two tools had drifted: `stop_music` cross-checked the music room before
+      giving up and `now_playing` did not, so with a track streaming into the room "what's playing?"
+      answered "Nothing is playing out loud right now, sir." That is exactly the elite bar's failure
+      — a confident wrong answer about something the owner can hear — and it survived because
+      neither tool was wrong on its own, only incomplete. Both now read the owner. Two rules are
+      gated: the desktop wins when both are busy, because that is the one he is standing next to;
+      and an unreachable laptop is never reported as silence, since a dead link and an idle player
+      are different facts.
+- [x] 42.F3 Volume and mute are the same concepts across paths.
+      *gate:* `test_audio_output_switch.py` [7]
+      *done 2026-09-12:* there was no volume control at all, so unifying the two paths meant
+      building the concept first. `set_volume` takes an absolute level, a relative step, or a mute
+      flag, and routes by the playback owner from 42.F2. Mute is not a second switch: Windows keeps
+      an independent mute flag that survives a level change, so a device can sit at 70% and silent
+      while "louder" does nothing three times running. Muting stores the level and sets zero,
+      unmuting restores it, and one number is the whole state. The music-room path cannot be turned
+      up at all — it plays into a Telegram call on other people's phones — so it says whose setting
+      that is and offers what it can do instead, rather than answering "done" to a change that never
+      happened. Lives in the `audioout` lazy group: "louder", "mute" and "turn it down" are
+      distinctive enough to trigger, so the per-turn surface pays nothing. `pycaw` is now a declared
+      Windows dependency of the edge extra; it was already in the venv but in nobody's lock file.
 
 **Raise**
 - [ ] 42.R1 Queue and history — "play that again", "skip", "what was the last one".
@@ -3484,10 +3526,31 @@ new sensor polling.
 **Floor**
 - [x] 43.F1 Presence tracking and arrival detection. *gate:* `test_presence.py`,
       `test_presence_arrival.py`
-- [ ] 43.F2 Departure and return are symmetric — a return gets a "while you were gone" only when
-      there is something worth saying. *gate:* `test_presence_arrival.py` extended.
-- [ ] 43.F3 Presence is a fused signal (voice + face + device activity), not any single source.
+- [x] 43.F2 Departure and return are symmetric — a return gets a "while you were gone" only when
+      there is something worth saying. *gate:* `test_presence_arrival.py` [7]
+      *done 2026-09-12:* a departure left no trace at all, so ten minutes and ten hours produced the
+      identical "Welcome back, sir." The absence now has a length, measured from when he stopped
+      touching the machine rather than when the poll noticed, so a slow tick cannot shrink it.
+      `while_you_were_gone` reads the unified inbox from 38.F2 and returns a catch-up only when two
+      things hold: the absence was long enough to matter (30 minutes — below that he was at the
+      coffee machine) AND something actually arrived. Both refusals are gated, and the second is the
+      one that matters: a "while you were gone" that reliably contains nothing is training to ignore
+      the one that contains something. A catch-up that fails entirely falls back to the plain
+      greeting rather than voicing an error.
+- [x] 43.F3 Presence is a fused signal (voice + face + device activity), not any single source.
       *gate:* `test_perception_snapshot.py` [presence fusion]
+      *done 2026-09-12:* `place` was device idle and nothing else, so a stale activity sample read
+      as "away" — the laptop sleeps, the edge drops, he unplugs for an hour, and Afon concluded the
+      room was empty while the man was sitting in it, held his messages and greeted him on his
+      "return". Perception gained a third fact: an inbound utterance records `voice`, the one signal
+      neither the keyboard nor the camera can see, trusted for ten minutes against the camera's two
+      because having just spoken is evidence of a while rather than an instant. `situation._fuse_place`
+      now decides from all three. A FRESH positive from any source means he is here; "away" needs
+      every source that has an opinion to agree; nothing sensed at all stays unknown, which is a
+      third answer the callers already handle and the honest one. The fusion lives in the
+      interpretation layer, not in perception, because S26 never decides what a state means. Both
+      halves are gated: a stale keyboard no longer outvotes a camera that just saw him, and fusion
+      does not quietly become "never away".
 
 **Raise**
 - [ ] 43.R1 Context migration across devices — the thread, not just the session id (with S07, S12).
@@ -3914,12 +3977,12 @@ green, `E` = elite green.
 | S35 | Crisis Response | half-built | 1/3 | 0/3 | 0/1 |
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
 | S37 | Privacy & Governance | half-built | 0/3 | 0/3 | 0/1 |
-| S38 | Communication Hub | structured badly | 1/3 | 0/3 | 0/1 |
+| S38 | Communication Hub | structured badly | 3/3 | 0/3 | 0/1 |
 | S39 | Multi-Agent Delegation | thin | 1/3 | 0/3 | 0/1 |
 | S40 | Financial & Asset Mgmt | missing | 0/3 | 0/3 | 0/1 |
 | S41 | Research & Synthesis | half-built | 1/3 | 0/3 | 0/1 |
-| S42 | Media Control | structured badly | 1/3 | 0/3 | 0/1 |
-| S43 | Presence & Continuity | half-built | 1/3 | 0/3 | 0/1 |
+| S42 | Media Control | structured badly | 3/3 | 0/3 | 0/1 |
+| S43 | Presence & Continuity | half-built | 3/3 | 0/3 | 0/1 |
 | S44 | Ethics & Safety | complete for now | 3/4 | 0/3 | 0/1 |
 | S45 | Explainability | complete for now | 2/3 | 0/3 | 0/1 |
 | S46 | Predictive Analytics | missing | 0/3 | 0/3 | 0/1 |
@@ -3928,7 +3991,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 107 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 107 of 370.**
+**Totals: 113 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 113 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

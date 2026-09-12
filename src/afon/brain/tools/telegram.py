@@ -55,6 +55,43 @@ async def check_telegram(args: dict) -> str:
         return tool_error("Telegram check", e)
 
 
+async def unread_chats(limit: int = 10) -> list[dict]:
+    """Unread Telegram DMs as rows, one per chat (38.F2). ``[]`` when there is no session.
+
+    A dialog IS the thread here — Telegram has no separate thread id for a DM — so the chat's
+    peer id is the thread key. Raises on a real failure so the caller reports the channel as
+    unknown rather than as empty; "no unread messages" and "I could not look" are different facts.
+    """
+    if not (settings.telegram_api_id and settings.telegram_api_hash):
+        return []
+    try:
+        from telethon import TelegramClient  # type: ignore
+    except ImportError:
+        return []
+    client = TelegramClient(settings.telegram_session, settings.telegram_api_id,
+                            settings.telegram_api_hash)
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            return []
+        rows: list[dict] = []
+        async for d in client.iter_dialogs(limit=40):
+            if d.unread_count and d.is_user:
+                msg = d.message
+                rows.append({
+                    "thread": str(getattr(d, "id", d.name)),
+                    "who": d.name or "someone",
+                    "subject": clip(getattr(msg, "message", "") or "", 120),
+                    "count": int(d.unread_count),
+                    "at": float(getattr(getattr(msg, "date", None), "timestamp", lambda: 0.0)()),
+                })
+            if len(rows) >= limit:
+                break
+        return rows
+    finally:
+        await client.disconnect()
+
+
 # Giphy public beta key — works without signup (rate-limited). Override with AFON_GIPHY_API_KEY.
 _GIPHY_PUBLIC = "GlVGYHkr3WSBnllca54iNt0yFbjz7L65"
 

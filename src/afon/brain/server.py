@@ -369,6 +369,14 @@ class BrainServer:
         from afon.shared import errors as _err
 
         _err.new_turn(utt.turn_id or None)
+        # 43.F3 — an utterance is the one presence signal neither the keyboard nor the camera can
+        # see. Recorded before the reply so a turn that fails still counts as him being here.
+        try:
+            from afon.brain.perception import record_voice
+
+            record_voice("spoke", source=f"voice:{utt.device_id or 'laptop'}")
+        except Exception as e:  # noqa: BLE001 — presence bookkeeping never costs a turn
+            logger.debug(f"presence: could not record the voice fact ({type(e).__name__})")
         # On the owner's FIRST live-edge turn of the day, build the daily catch-up CONCURRENTLY with
         # the reply (so it adds no latency) and append it once the reply is done. `due` is a cheap
         # file read; the network build only starts when it's actually the first turn today.

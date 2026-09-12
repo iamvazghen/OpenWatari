@@ -76,8 +76,11 @@ def main() -> None:
     # added real capability — so the guard is expressed relatively: core is well under 60% of the
     # full set, with an absolute ceiling to catch runaway growth. (Was 48 when core was ~46; 56 since
     # now_playing, which can't be lazy: lazy groups are per-MODULE, and demoting localplay would take
-    # stop_music with it — "stop the music" must never wait a turn for a trigger word to match.)
-    check(f"per-turn surface <= 56 (got {core})", core <= 56, f"{core}")
+    # stop_music with it — "stop the music" must never wait a turn for a trigger word to match.
+    # 57 since whats_waiting (38.F2), for the same structural reason: "anything for me?" contains no
+    # trigger word, and a unified inbox that only appears once you say "email" is three turns of
+    # asking, which is the failure it was built to remove.)
+    check(f"per-turn surface <= 57 (got {core})", core <= 57, f"{core}")
     check(f"per-turn surface stays a subset (<60% of full): {core}/{full}", core < 0.6 * full, f"{core}/{full}")
     check(f"full registry intact (>= 63, got {full})", full >= 63, f"{full}")
     # No capability removed: every lazy tool is still resolvable to a handler.

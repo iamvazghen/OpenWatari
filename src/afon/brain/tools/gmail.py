@@ -59,6 +59,33 @@ async def read_email(args: dict) -> str:
         return tool_error("email read", e)
 
 
+async def unread_threads(max_n: int = 10) -> list[dict]:
+    """Unread mail as rows, one per THREAD (38.F2). ``[]`` when Gmail isn't configured.
+
+    ``read_email`` answers in prose because a model speaks it. A unified inbox has to merge and
+    count, and parsing that prose back into fields would be the worst of both. Raises on a real
+    failure so the caller can say the channel is unknown rather than quietly reporting nothing.
+    """
+    if not configured():
+        return []
+    listing = await api_get(f"{_GMAIL}/messages",
+                            params={"q": "is:unread", "maxResults": max_n})
+    rows: list[dict] = []
+    for m in (listing.get("messages") or [])[:max_n]:
+        msg = await api_get(
+            f"{_GMAIL}/messages/{m['id']}",
+            params={"format": "metadata", "metadataHeaders": ["From", "Subject", "Date"]},
+        )
+        h = {x["name"].lower(): x["value"] for x in (msg.get("payload", {}).get("headers") or [])}
+        rows.append({
+            "thread": str(msg.get("threadId") or m["id"]),
+            "who": h.get("from", "someone").split("<")[0].strip().strip('"') or "someone",
+            "subject": h.get("subject", "(no subject)"),
+            "at": float(msg.get("internalDate") or 0) / 1000.0,
+        })
+    return rows
+
+
 async def important_email_phrase() -> str:
     """A one-line phrase about important unread mail ('3 important emails unread, the latest from
     Jane') for the daily digest, or '' if none / not configured. Fail-quiet."""

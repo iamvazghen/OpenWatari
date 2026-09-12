@@ -95,6 +95,40 @@ def in_quiet_hours(now: datetime, spec: str | None = None) -> bool:
 
 # ---- clarify / confirm policy (the "ask for context" + "re-ask/confirm" verbs) -----------
 
+#: Tools whose consequence IS their text, and the arg that carries it (38.F3). Everything here is
+#: already confirm-gated, but the gate only told the model to describe the action — so the owner
+#: approved a paraphrase the model wrote of the message it was about to send. A summary of a message
+#: is not the message: the wrong tone, the wrong name, the wrong number all survive a faithful
+#: one-line description. He approves the words that actually go out, verbatim, or he approves nothing.
+DRAFTED = {
+    "send_email": ("to", "subject", "body"),
+    "send_telegram": ("to", None, "message"),
+    "send_push": (None, "title", "message"),
+    "place_call": ("to", None, "message"),
+}
+
+
+def draft_preview(name: str, args: dict | None = None) -> str:
+    """The exact recipient and words a send would put out, or '' when the tool isn't a send."""
+    fields = DRAFTED.get(name)
+    if not fields:
+        return ""
+    args = args or {}
+    to_key, subj_key, body_key = fields
+    to = str(args.get(to_key) or "").strip() if to_key else ""
+    subj = str(args.get(subj_key) or "").strip() if subj_key else ""
+    body = str(args.get(body_key) or "").strip()
+    lines = []
+    if to:
+        lines.append(f"To: {to}")
+    if subj:
+        lines.append(f"Subject: {subj}")
+    # An empty body is shown as empty rather than hidden — a send with nothing in it is exactly the
+    # mistake this readback exists to catch, and a blank preview is what makes it visible.
+    lines.append(body if body else "(no message text)")
+    return "\n".join(lines)
+
+
 # Tools whose effects are outward-facing, costly, or hard to undo — Afon confirms before these.
 CONFIRM_TIER = {
     "send_telegram", "send_email", "send_push",

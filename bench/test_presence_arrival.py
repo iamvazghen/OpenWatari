@@ -8,6 +8,7 @@ samples) and the greeting signal source (privacy gate, kind, per-return key). No
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import tempfile
 import time
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from afon.brain import presence as pmod  # noqa: E402
 from afon.brain.presence import Presence, _greeting  # noqa: E402
+from afon.config import settings  # noqa: E402
 
 passed = failed = 0
 
@@ -71,11 +73,14 @@ def main() -> None:
     saved = pmod.PRESENCE
     try:
         class Fake:
+            # Shaped like Presence, deliberately: a stub that agrees with a broken caller instead
+            # of with the class is how a defect survives its own test.
             enabled = True
+            last_absence_s = 0.0
             def arrival(self, now=None):
                 return True
         pmod.PRESENCE = Fake()
-        sigs = pmod.presence_signals()
+        sigs = asyncio.run(pmod.presence_signals())
         check("emits one signal on arrival", len(sigs) == 1)
         check("kind is 'presence'", sigs and sigs[0].kind == "presence")
         check("key is per-return unique", sigs and sigs[0].key.startswith("arrival-"))
@@ -83,17 +88,84 @@ def main() -> None:
         check("urgency is modest (respects quiet hours)", sigs and 0.0 < sigs[0].urgency < 0.7)
 
         Fake.enabled = False
-        check("privacy off-switch mutes the greeting", pmod.presence_signals() == [])
+        check("privacy off-switch mutes the greeting", asyncio.run(pmod.presence_signals()) == [])
 
         Fake.enabled = True
         Fake.arrival = lambda self, now=None: False
-        check("no arrival -> no signal", pmod.presence_signals() == [])
+        check("no arrival -> no signal", asyncio.run(pmod.presence_signals()) == [])
     finally:
         pmod.PRESENCE = saved
 
     print("\n[6] greeting is time-aware")
     check("night line differs", "midnight" in _greeting(datetime(2026, 7, 20, 2, 0)))
     check("day line is a welcome", "Welcome back" in _greeting(datetime(2026, 7, 20, 9, 0)))
+
+    print("\n[7] 43.F2 — departure and return are symmetric")
+    # Before this, a departure left no trace: ten minutes and ten hours both produced the identical
+    # "Welcome back, sir." A return that cannot tell them apart cannot say anything useful about
+    # either, which is why the catch-up half of this floor had nothing to stand on.
+    p2 = pmod.Presence(db_path=Path(tempfile.mkdtemp()) / "presence.sqlite")
+    base = 100_000.0
+    p2.record("Code.exe", "x", idle=1.0, ts=base)
+    p2.arrival(base)
+    gone = settings.presence_away_seconds + 60
+    p2.record("Code.exe", "x", idle=gone, ts=base + gone)
+    p2.arrival(base + gone)
+    p2.record("Code.exe", "x", idle=1.0, ts=base + gone + 10)
+    check("the return still fires once", p2.arrival(base + gone + 10) is True)
+    check("...and the absence has a LENGTH now", p2.last_absence_s > gone - 5, p2.last_absence_s)
+    check("...measured from when he stopped touching it, not when the poll noticed",
+          abs(p2.last_absence_s - (gone + 10)) < 120, p2.last_absence_s)
+
+    check("a short absence reads in minutes", "minutes" in pmod._absence_phrase(600))
+    check("an hour is said as an hour", pmod._absence_phrase(3600) == "an hour")
+    check("several hours are counted", "hours" in pmod._absence_phrase(5 * 3600))
+    check("a whole day is not counted in hours", pmod._absence_phrase(20 * 3600) == "a while")
+
+    # The rule the floor actually states: a catch-up only when there is something to catch up on.
+    import afon.brain.tools.inbox as ib
+
+    real_sources = dict(ib.SOURCES)
+
+    async def _empty():
+        return []
+
+    async def _one():
+        return [ib.Waiting("email", "t1", "Jane", "the invoice", 2, base)]
+
+    try:
+        ib.SOURCES.clear()
+        ib.SOURCES["email"] = _empty
+        check("a coffee break gets no catch-up at all",
+              asyncio.run(pmod.while_you_were_gone(300)) == "")
+        check("a long absence with nothing waiting ALSO gets none — an empty catch-up trains him "
+              "to ignore the full one",
+              asyncio.run(pmod.while_you_were_gone(4 * 3600)) == "")
+
+        ib.SOURCES["email"] = _one
+        check("a short absence with mail waiting still gets none — he was at the coffee machine",
+              asyncio.run(pmod.while_you_were_gone(300)) == "")
+        said = asyncio.run(pmod.while_you_were_gone(4 * 3600))
+        check("a long absence with something waiting gets a catch-up", said != "", said)
+        check("...saying how long he was gone", "hours" in said, said)
+        check("...how much arrived", "2 things" in said, said)
+        check("...and where the newest came from", "Jane" in said and "email" in said, said)
+
+        async def _boom():
+            raise RuntimeError("mailbox on fire")
+
+        ib.SOURCES["telegram"] = _boom
+        said = asyncio.run(pmod.while_you_were_gone(4 * 3600))
+        check("a channel it couldn't read is admitted, not papered over",
+              "couldn't check everything" in said, said)
+
+        ib.SOURCES.clear()
+        ib.SOURCES["email"] = _boom
+        check("a catch-up that fails entirely falls back to the plain greeting, never an error",
+              asyncio.run(pmod.while_you_were_gone(4 * 3600)) == "")
+    finally:
+        ib.SOURCES.clear()
+        ib.SOURCES.update(real_sources)
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

@@ -199,6 +199,8 @@ TESTS = [
      "test_smarthome_verify.py", "offline", ["checks passed ==="]),
     ("API policy (20.F3): one declared table of timeouts and retries, and nothing bypasses it",
      "test_api_policy.py", "offline", ["checks passed ==="]),
+    ("Unified inbox (38.F2/38.F3): one 'what's waiting' across channels, and drafts read back",
+     "test_unified_inbox.py", "offline", ["checks passed ==="]),
     ("Goal attribution (33.F3): every task names the objective it serves, or is ad-hoc",
      "test_goal_attribution.py", "offline", ["checks passed ==="]),
     ("Day shape (21.F1/21.F2): routines drafted from evidence, and a broken day named",

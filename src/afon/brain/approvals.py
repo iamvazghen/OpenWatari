@@ -191,10 +191,18 @@ class ApprovalQueue:
         pend = self.pending()[:max_items]
         if not pend:
             return ""
+        from afon.brain.proactive import draft_preview
+
         lines = []
         for i, a in enumerate(pend, 1):
             where = f" (from {a.origin})" if a.origin else ""
             lines.append(f"{i}. [{a.id}] {a.summary}{where}")
+            # 38.F3 — a queued send is approved on its words, not on a summary of them. `summary`
+            # truncates the args to three and clips nothing, which is exactly where a wrong
+            # recipient or a half-written message hides.
+            draft = draft_preview(a.tool, a.args)
+            if draft:
+                lines.extend(f"     {line}" for line in draft.splitlines())
         return "\n".join(lines)
 
 

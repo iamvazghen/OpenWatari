@@ -30,6 +30,7 @@ from afon.brain.tools import (
     fitness,
     gmail,
     graphmem,
+    inbox,
     localplay,
     macros,
     maps,
@@ -62,7 +63,7 @@ _MODULES = [vault, memory, web, telegram, voicechat, music, localplay, system, b
             coding, skills, notion, tasks, contacts, documents, composio, channels,
             macros, multimodal, undo, graphmem, activity, coaching, camera, objectives,
             approvals, relationship, phone, maps, wolfram, fitness, diagnose,
-            audioout, day_shape]  # noqa: E501
+            audioout, day_shape, inbox]  # noqa: E501
 
 Handler = Callable[[dict], Awaitable[str]]
 
@@ -180,7 +181,11 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
     # slot in the per-turn surface. "out loud" is deliberately absent — it belongs to playback.
     "audioout": ("headphone", "headphones", "airpod", "airpods", "speaker", "speakers", "earbuds",
                  "switch to my", "play through", "output device", "sound device", "audio output",
-                 "talk through", "speak through", "which speakers"),
+                 "talk through", "speak through", "which speakers",
+                 # 42.F3 — volume lives here because it is a property of the output, and these
+                 # words are distinctive enough to trigger without taxing the per-turn surface.
+                 "louder", "quieter", "volume", "mute", "unmute", "turn it up", "turn it down",
+                 "too loud", "too quiet", "how loud", "turn the sound"),
     "dayshape": ("my routines", "my routine", "draft my", "propose my",
                  "adopt the routine", "adopt my routine", "shape of my day",
                  "does my day", "will my day", "double-booked", "double booked",

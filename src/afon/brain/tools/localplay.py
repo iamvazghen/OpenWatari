@@ -168,30 +168,43 @@ async def stop_desktop_playback() -> str:
     return str(d.get("out") or "")
 
 
+async def desktop_now_playing() -> str:
+    """The label the desktop player is playing, or "". Raises if the laptop can't be asked.
+
+    Split out of ``now_playing`` so ``brain.playback`` can own the question (42.F2). The tool used
+    to ask only this route, which is why "what's playing?" answered "nothing" while a track was
+    streaming into the music room.
+    """
+    d = await _forward("audio_now", {}, _pc_audio_now)
+    return str(d.get("out") or "")
+
+
 async def stop_music(_args: dict) -> str:
-    was = await stop_desktop_playback()
-    if was:
-        return f"Stopped '{was}', sir."
     # J3.5: "stop the music" is ONE instruction, and music has two homes — the desktop player here
     # and the Telegram music-room stream in voicechat.py. Whichever tool the model picked, the
     # owner meant "stop it". Answering "nothing was playing" while a track streams into the voice
     # chat is a confident wrong answer AND leaves it playing, which is the worse half.
-    try:
+    from afon.brain.playback import DESKTOP, ROOM, current
+
+    playing = await current()
+    if playing.where == DESKTOP:
+        was = await stop_desktop_playback()
+        return f"Stopped '{was or playing.label}', sir."
+    if playing.where == ROOM:
         from afon.brain.tools import voicechat
 
-        if voicechat.room_is_playing():
-            return await voicechat.stop_music_room({})
-    except Exception as e:  # noqa: BLE001 — no telethon/pytgcalls installed is the normal case
-        logger.debug(f"music-room cross-check skipped: {type(e).__name__}: {e}")
+        return await voicechat.stop_music_room({})
     return "Nothing was playing out loud, sir. (If it's a YouTube tab, I can close the browser.)"
 
 
 async def now_playing(_args: dict) -> str:
-    d = await _forward("audio_now", {}, _pc_audio_now)
-    was = str(d.get("out") or "")
-    if was:
-        return f"'{was}' is playing out loud, sir."
-    return "Nothing is playing out loud right now, sir."
+    from afon.brain.playback import ROOM, current
+
+    playing = await current()
+    if not playing:
+        return "Nothing is playing out loud right now, sir."
+    where = " in the music room" if playing.where == ROOM else " out loud"
+    return f"'{playing.label}' is playing{where}, sir."
 
 
 SCHEMAS = [
