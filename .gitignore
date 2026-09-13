@@ -75,6 +75,7 @@ bench/_behavioral_scorecard.json
 bench/_artifacts/
 # Personal contact book (Phase 4.3) — private, never tracked
 contacts.md
+emergency.md
 
 # Personal VPS deploy target — keeps the host out of the public repo
 scripts/deploy_vps.env

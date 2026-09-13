@@ -107,7 +107,85 @@ async def close_document(_args: dict) -> str:
         return tool_error("document close", e)
 
 
+async def create_document(args: dict) -> str:
+    """06.F1/06.F2 — the one creation path, and it reads the document back before saying done."""
+    try:
+        from afon.brain.documents import create
+
+        written = await create(
+            (args.get("title") or ""), (args.get("body") or ""),
+            kind=(args.get("kind") or "note"),
+            destination=(args.get("destination") or "vault"),
+            parent_id=(args.get("parent_id") or ""),
+        )
+        return written.spoken()
+    except Exception as e:  # noqa: BLE001
+        return tool_error("document create", e)
+
+
+async def find_document(args: dict) -> str:
+    """06.F3 — "the note you wrote yesterday about X" resolves to a document he can open."""
+    try:
+        from afon.brain.documents import find
+
+        rows = find(args.get("query") or "", kind=(args.get("kind") or ""),
+                    destination=(args.get("destination") or ""))
+        if not rows:
+            return ("I haven't written anything matching that, sir. Note that this is what I have "
+                    "written myself — search_vault covers the whole vault.")
+        lines = []
+        for r in rows:
+            when = _ago(r.get("at", 0.0))
+            flag = "" if r.get("verified") else " (written, but I couldn't confirm it)"
+            lines.append(f"{r.get('kind', 'note')} '{r.get('title')}' — {r.get('where')}, "
+                         f"{when}{flag}  [{r.get('ref')}]")
+        return "Documents I've written, sir:\n" + "\n".join(lines)
+    except Exception as e:  # noqa: BLE001
+        return tool_error("document lookup", e)
+
+
+def _ago(at: float) -> str:
+    import time
+
+    s = max(0.0, time.time() - float(at or 0))
+    if s < 3600:
+        return "just now" if s < 300 else f"{int(s // 60)} minutes ago"
+    if s < 86400:
+        return f"{int(s // 3600)} hours ago"
+    days = int(s // 86400)
+    return "yesterday" if days == 1 else f"{days} days ago"
+
+
 SCHEMAS = [
+    {"type": "function", "function": {
+        "name": "create_document",
+        "description": "Write a real document and put it where it belongs — the ONLY way to create "
+                       "one. Destinations: 'vault' (an Obsidian note, the default), 'local' (a "
+                       "markdown file on this host), 'notion' (a sub-page; needs parent_id). Use "
+                       "for 'write that up', 'make a note of this', 'draft a decision record', "
+                       "'put that in my vault'. The document is read back before success is "
+                       "reported, so a reply that says 'written and checked' means it is there.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "What the document is called."},
+            "body": {"type": "string", "description": "The full text, in Markdown."},
+            "kind": {"type": "string", "enum": ["note", "meeting", "decision", "brief", "review"],
+                     "description": "What kind of document it is. Default 'note'."},
+            "destination": {"type": "string", "enum": ["vault", "local", "notion"],
+                            "description": "Where it goes. Default 'vault'."},
+            "parent_id": {"type": "string",
+                          "description": "Notion parent page id; only for destination 'notion'."}},
+            "required": ["title", "body"]}}},
+    {"type": "function", "function": {
+        "name": "find_document",
+        "description": "Find a document YOU wrote earlier — 'the note you wrote yesterday about the "
+                       "farm', 'that decision record', 'what have you written lately'. Returns each "
+                       "one's title, where it went, when, and the reference needed to open it. For "
+                       "notes the owner wrote himself, use search_vault instead.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Words from the title. Omit for the newest."},
+            "kind": {"type": "string", "description": "Optional: only this kind."},
+            "destination": {"type": "string", "description": "Optional: only this destination."}},
+            "required": []}}},
     {"type": "function", "function": {
         "name": "read_document",
         "description": "Open a LOCAL document (text, Markdown, code, CSV, JSON; PDF if a reader is "
@@ -132,6 +210,8 @@ SCHEMAS = [
 ]
 
 HANDLERS = {
+    "create_document": create_document,
+    "find_document": find_document,
     "read_document": read_document,
     "ask_document": ask_document,
     "close_document": close_document,

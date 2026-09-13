@@ -41,7 +41,12 @@ async def push(message: str, title: str = "Afon", at: float | None = None) -> bo
         return False
     try:
         url = f"{settings.ntfy_server.rstrip('/')}/{settings.ntfy_topic}"
-        headers = {"Title": title}
+        # The title travels as an HTTP HEADER, which cannot carry non-ASCII: an em dash, a
+        # curly quote or an accented name raises UnicodeEncodeError and the push never
+        # leaves — a whole notification lost to punctuation. Found by the emergency ladder
+        # (35.F2), whose title was "EMERGENCY — medical". The body is unaffected; it is
+        # sent as UTF-8 bytes.
+        headers = {"Title": title.encode("ascii", "replace").decode("ascii")}
         if at is not None and ntfy_can_schedule(at):
             headers["At"] = str(int(at))  # ntfy accepts a Unix timestamp for delayed delivery
         await http_post(url, content=message.encode("utf-8"), headers=headers)

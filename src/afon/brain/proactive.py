@@ -226,6 +226,9 @@ CONFIRM_TIER = {
     "create_github_issue",
     # Notion writes modify the owner's shared docs.
     "notion_append", "notion_comment", "notion_create_page",
+    # Creating a document puts a file in the vault, on disk or in Notion (06.F1) — same weight as
+    # the three writers it replaced, all of which were gated.
+    "create_document",
     # Deleting a task is destructive (archives the row) — confirm. Creating/updating/completing a
     # task is frictionless by design (capture-by-voice), so those are intentionally NOT gated.
     "notion_delete_task",

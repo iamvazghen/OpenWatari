@@ -164,25 +164,38 @@ check(THRESH <= 0.66, f"threshold {THRESH} is not above the companion sources' c
 # A dormant kind is a bug, not a preference. The declared set is read out of the source rather
 # than written down here, so adding a new kind and forgetting to exercise it fails this file
 # instead of going quietly dormant — which is exactly how five capabilities were lost for weeks.
-import re  # noqa: E402
+# Read from the SIGNAL CONSTRUCTIONS themselves, via the parser, not by grepping for `kind="..."`.
+# `kind` is a word several unrelated things in this brain use — a background task has one, and so
+# does a created document — and the text scan counted all of them. That is not a tidiness point:
+# `fleet`, `work` and `todo` are TaskQueue kinds that were never proactive signals at all, and the
+# way the false positives got silenced was by adding them to the hand-off list below, where they
+# then read as real capabilities covered by another file. A gate that can be quietened by writing
+# a sentence in the gate is the failure this file exists to prevent, one level up.
+import ast  # noqa: E402
 
 _BRAIN = Path(__file__).resolve().parents[1] / "src" / "afon" / "brain"
 DECLARED = set()
 for _py in list(_BRAIN.glob("*.py")) + list((_BRAIN / "tools").glob("*.py")):
-    DECLARED |= set(re.findall(r'kind\s*=\s*"([a-z][a-z_-]*)"', _py.read_text(encoding="utf-8")))
+    try:
+        _tree = ast.parse(_py.read_text(encoding="utf-8"))
+    except SyntaxError:                      # a file mid-edit is not this test's business
+        continue
+    for _node in ast.walk(_tree):
+        if not (isinstance(_node, ast.Call) and getattr(_node.func, "id", "") == "Signal"):
+            continue
+        for _kw in _node.keywords:
+            if _kw.arg == "kind" and isinstance(_kw.value, ast.Constant):
+                DECLARED.add(_kw.value.value)
 
 #: Kinds this file cannot drive, each with the reason and the file that does cover it. An entry
 #: here is a deliberate hand-off, not an excuse — the check below still fails if a kind is in
 #: neither set, so a new capability cannot be added silently.
 COVERED_ELSEWHERE = {
     "health": "needs a failing component — test_health_agreement.py / test_phase11_notion.py",
-    "fleet": "needs an authorised fleet link — test_phase3_tools.py",
     "news": "needs the feed reader — test_mynews.py",
     "weekly-digest": "weekly cadence — test_daily_digest.py",
     "calendar-prep": "needs a real calendar event — test_calendar_dates.py",
     "conflict": "needs a booked conflict — test_interventions.py",
-    "todo": "task-queue sourced — test_phase10_proactive.py",
-    "work": "task-queue sourced — test_phase10_proactive.py",
     "coaching": "needs a skill review due — test_coaching.py",
     "reraise": "needs an unacknowledged urgent delivery — test_delivery_ledger.py",
     "routine-plan": "planning prompt, asserted above by message rather than kind",

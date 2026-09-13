@@ -1012,13 +1012,40 @@ structure · PDF only when asked · never re-render an unchanged document.
 | reasoned | one real document written, revised by voice, and retrieved | 3 / 4 / 2 d | 15 min (template preferences) | 0 | `create_document` is additive; the three existing writers stay |
 
 **Floor** *(this system has no spine today — the floor is one narrow real capability, gated)*
-- [ ] 06.F1 A single `create_document(kind, title, body, destination)` tool that owns creation for
+- [x] 06.F1 A single `create_document(kind, title, body, destination)` tool that owns creation for
       vault notes, Notion pages and local markdown, replacing the three separate paths.
-      *gate:* new `test_document_create.py` — three destinations, each written and read back.
-- [ ] 06.F2 Every created document is verified by reading it back before Afon reports success.
+      *gate:* `test_document_create.py` — three destinations, each written and read back.
+      *done 2026-09-13:* `brain/documents.py`. `write_vault` and `notion_create_page` keep their
+      handlers and their confirm gates but no longer have schemas — the model is offered one
+      creation tool, because two advertised ways to write a note is how one of them stays the
+      unverified one. Local markdown had no writer at all before this. `create_document` lives in
+      the `docs` lazy group with the phrases someone actually uses ("write that up", "make a note
+      of this", "draft a decision record"), so the core per-turn surface went DOWN by one rather
+      than up: 57 to 56. The Notion path needed a real change to be possible at all — the old
+      handler discarded the API response including the page id, so the page it had just created
+      could never be read, revised or linked to again.
+- [x] 06.F2 Every created document is verified by reading it back before Afon reports success.
       *gate:* `test_document_create.py` [read-back]
-- [ ] 06.F3 Documents are addressable afterwards: "the note you wrote yesterday about X" resolves.
-      *gate:* `test_documents_routing.py` extended.
+      *done 2026-09-13:* all three writers reported success on the strength of not having raised,
+      which is a different claim from "it is there". A write that returns without an exception has
+      been ACCEPTED; whether it landed is a question only a read answers, and the failures that
+      live in that gap are ordinary ones — a Notion parent id pointing at an archived page, a vault
+      path on a mount that went read-only since startup, a destination that keeps the opening
+      sentence and silently drops the rest. Now it writes, fetches, and compares the first 120
+      characters; the fingerprint is that long precisely so silent truncation fails it. Three
+      outcomes, not two: written and checked, written but unconfirmed (with the reference, because
+      that is the document he most needs to go and look at), and not written at all. "I couldn't
+      confirm it" and "it failed" send the owner to different places.
+- [x] 06.F3 Documents are addressable afterwards: "the note you wrote yesterday about X" resolves.
+      *gate:* `test_documents_routing.py` [7]
+      *done 2026-09-13:* every created document is recorded — title, kind, where it went, when, and
+      the reference a later read needs — and `find_document` resolves a spoken description against
+      it. `search_vault` cannot answer this question: it covers what the OWNER wrote too, and has
+      no idea which notes were Afon's or when he made them. Only the title is kept, never the body.
+      A second copy of the text in the state root would be one more thing to keep in step and one
+      more place to sweep on "forget that" — and the document already exists where it was written.
+      A document written but unconfirmed stays findable and is named as unconfirmed, since that is
+      the one worth opening.
 
 **Raise**
 - [ ] 06.R1 Templates — meeting note, decision record, project brief, weekly review — chosen by kind.
@@ -3040,11 +3067,38 @@ resolved from a local file so a network failure cannot silence the ladder.
 | **guess** | his contact list and the thresholds he actually wants | 3 / 4 / 2 d | **30 min (contacts + Twilio)** | 1–5 | classifier behind a flag; the manual phrase always works |
 
 **Floor**
-- [ ] 35.F1 An explicit emergency classifier with a **conservative** threshold and a manual trigger
+- [x] 35.F1 An explicit emergency classifier with a **conservative** threshold and a manual trigger
       phrase, on a path that does not depend on the LLM chain.
-      *gate:* new `test_emergency_path.py` — false-positive rate 0 on 50 ordinary prompts.
-- [ ] 35.F2 An emergency contact list and a defined action per category, stored locally.
+      *gate:* `test_emergency_path.py` — false-positive rate 0 on 50 ordinary prompts.
+      *done 2026-09-13:* `brain/emergency.py`, sitting beside `_catastrophic` in the turn path and
+      running before `_prepare_turn` in both the blocking and the streaming body. Everything that
+      existed was system-level — `ragnarok` and `phoenix` recover **Afon**; nothing recovered the
+      owner. "Call an ambulance" reached the same machinery as "what's the weather": a model
+      round-trip, a tool choice, a provider call, each of which can be slow, wrong or down at the
+      moment it matters. Rules, not a classifier, exactly as the plan decided — and every alarm
+      carries the phrase that tripped it, so it can be argued with. **Conservative means biased to
+      silence**: a pattern fires only on a present-tense clause, and figures of speech, procedure
+      questions and narration are guarded out ("this bug is killing me", "what do I do if there's a
+      fire", "in the film they call an ambulance" all do nothing). That bias has a real cost — an
+      emergency phrased unusually will not trip it — and the manual phrase is how the cost is paid:
+      **"Afon, emergency"** bypasses every guard, because a manual trigger that can be reasoned out
+      of firing is not one. The 50-prompt corpus is half near-misses on purpose; a keyword matcher
+      fails most of it.
+- [x] 35.F2 An emergency contact list and a defined action per category, stored locally.
       *gate:* `test_emergency_path.py` [contacts resolved offline]
+      *done 2026-09-13:* `emergency.md` beside `contacts.md`, gitignored the same way, with
+      `emergency.example.md` shipped because a gitignored file with no worked example is a feature
+      nobody turns on. One line per category, rungs tried in the order written, read from disk at
+      the moment it is needed — a list cached in a process that has been up three weeks is exactly
+      the staleness this system cannot have. Every rung is reported by name as reached or not
+      reached, with the reason, and a ladder that reached nobody says so in its first sentence.
+      Rungs are guarded twice over, in `_do` and again in the loop: `_do` catches what a transport
+      throws and the loop catches a bug in `_do`, because here the rung below the broken one is the
+      one that gets help. **Two defects found while building it.** An ntfy title travels as an HTTP
+      header, which cannot carry non-ASCII, so "EMERGENCY — medical" raised `UnicodeEncodeError` and
+      the push never left — an entire notification lost to a dash, on the path where it matters
+      most. And the contact parser accepted any line containing a colon, so every explanatory line
+      in the file became a category and one of them could shadow `default:`.
 - [x] 35.F3 System-level protocols (ragnarok/phoenix) remain drill-tested.
       *gate:* `test_protocol_drills.py`
 
@@ -4068,7 +4122,7 @@ green, `E` = elite green.
 | S03 | Tool Utilization | complete for now | 4/4 | 0/6 | 0/1 |
 | S04 | Device Control | floor green | 4/4 | 0/3 | 0/1 |
 | S05 | Browser Control | floor green | 3/3 | 0/3 | 0/1 |
-| S06 | Document Creation | half-built | 0/3 | 0/3 | 0/1 |
+| S06 | Document Creation | half-built | 3/3 | 0/3 | 0/1 |
 | S07 | Session & Context | floor green | 3/3 | 0/3 | 0/1 |
 | S08 | Voice Enrollment | weak | 1/2 | 0/3 | 0/1 |
 | S09 | Face Enrollment | not enrolled | 1/2 | 0/3 | 0/1 |
@@ -4097,7 +4151,7 @@ green, `E` = elite green.
 | S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | floor green | 3/3 | 0/3 | 0/1 |
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
-| S35 | Crisis Response | half-built | 1/3 | 0/3 | 0/1 |
+| S35 | Crisis Response | half-built | 3/3 | 0/3 | 0/1 |
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
 | S37 | Privacy & Governance | half-built | 3/3 | 0/3 | 0/1 |
 | S38 | Communication Hub | structured badly | 3/3 | 0/3 | 0/1 |
@@ -4114,7 +4168,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 126 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 126 of 370.**
+**Totals: 131 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 131 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

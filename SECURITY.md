@@ -63,6 +63,10 @@ than no prose, because it is the thing an auditor reads instead of the code.
 - Machine: `file_op` (deletes), `process_op` (kill/start), `run_powershell`, `browser`.
 - Calendar/home/Notion: `create_event`, `ha_call` (locks/alarms/covers especially),
   `notion_append`, `notion_comment`, `notion_create_page`.
+- Creating a document: `create_document`, the one creation path since 06.F1 — it puts a file in
+  the vault, on disk or in Notion, and reads it back before reporting success. `write_vault` and
+  `notion_create_page` keep their gates and their handlers; they are simply no longer offered to
+  the model, because two advertised ways to write a note is how one of them stays unverified.
 - Rewriting when Afon speaks up unprompted: `adopt_routines` (replaces `routines.json`, which
   is the rule set for unprompted interjections; the draft it installs is written by Afon
   from observed activity, so the owner has to hear it before it takes effect).

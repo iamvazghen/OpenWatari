@@ -1,10 +1,10 @@
 """Obsidian vault tools — READ/SEARCH the canonical knowledge base.
 
 Reads the LOCAL mirror at ``settings.vault_path`` (the VPS-authoritative one-way sync target,
-e.g. ``C:\\Users\\iamva\\Documents\\Obsidian Vault``). Writes are deliberately NOT offered:
-the vault is a one-way VPS->local sync that nukes-and-replaces each local dir, so any local
-write would be clobbered. When Afon needs to change the vault he delegates that to the
-fleet (ispir), which writes on the VPS.
+e.g. ``C:\\Users\\iamva\\Documents\\Obsidian Vault``). Writing is gated on ``AFON_VAULT_WRITABLE``,
+set only on the host that OWNS the vault: the sync nukes-and-replaces each local dir, so a write on
+the replica is lost at the next pull. ``write_note`` does the writing; ``create_document`` (06.F1)
+is what the model is offered, because it reads the note back before reporting success.
 
 Pure local filesystem — no credentials, works fully offline. Search is a lightweight
 filename+content scorer (good enough for "find the rabbit-farm charter" voice queries).
@@ -180,6 +180,36 @@ async def read_vault_note(args: dict) -> str:
         return tool_error("vault read", e)
 
 
+def write_note(note: str, content: str, folder: str = "Afon", mode: str = "create") -> tuple[str, str]:
+    """Put a note in the vault and return (absolute path, a phrase naming where it went).
+
+    Split out of `write_vault` so `brain/documents.py` can read the file back afterwards — the
+    handler below returns a spoken sentence, which is not something a verifier can check. Raises on
+    anything that stops the write; the caller decides what to say about it.
+    """
+    if not settings.vault_writable:
+        raise PermissionError("vault writing is off on this host (AFON_VAULT_WRITABLE)")
+    root = _vault_root()
+    if root is None:
+        raise FileNotFoundError("no vault configured (AFON_VAULT_PATH)")
+    folder = _SAFE_NAME.sub("", (folder or "Afon").replace("/", " ")).strip() or "Afon"
+    stem = _SAFE_NAME.sub("", note or "").strip() or datetime.now().strftime("%Y-%m-%d note")
+    if not stem.lower().endswith(".md"):
+        stem += ".md"
+    rootr = root.resolve()
+    target = (rootr / folder / stem).resolve()
+    if rootr != target and rootr not in target.parents:
+        raise ValueError("that path is outside the vault")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if mode == "create" or not target.exists():
+        target.write_text(f"# {note or stem[:-3]}\n\n{content}\n", encoding="utf-8")
+    else:
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with target.open("a", encoding="utf-8") as f:
+            f.write(f"\n\n## {stamp}\n{content}\n")
+    return str(target), f"the vault at {target.relative_to(rootr).as_posix()}"
+
+
 async def write_vault(args: dict) -> str:
     """Save a note INTO the vault (append by default, or create). Only on the authoritative host.
 
@@ -190,34 +220,18 @@ async def write_vault(args: dict) -> str:
     if not settings.vault_writable:
         return ("Vault writing is off here, sir — it's only enabled on the host that owns the "
                 "vault. Set AFON_VAULT_WRITABLE=true there and I can save notes into it.")
-    root = _vault_root()
-    if root is None:
+    if _vault_root() is None:
         return not_configured("the Obsidian vault", "AFON_VAULT_PATH set to the vault folder")
     content = (args.get("content") or "").strip()
     if not content:
         return "There's nothing to write, sir — give me the note content."
     note = (args.get("note") or args.get("title") or "").strip()
-    folder = _SAFE_NAME.sub("", (args.get("folder") or "Afon").replace("/", " ")).strip() or "Afon"
-    mode = (args.get("mode") or "append").strip().lower()
-    stem = _SAFE_NAME.sub("", note).strip() or datetime.now().strftime("%Y-%m-%d note")
-    if not stem.lower().endswith(".md"):
-        stem += ".md"
     try:
-        rootr = root.resolve()
-        target = (rootr / folder / stem).resolve()
-        # Stay inside the vault — no path traversal out of it.
-        if rootr != target and rootr not in target.parents:
-            return "That path is outside the vault, sir — I won't write it."
-        target.parent.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        if mode == "create" or not target.exists():
-            target.write_text(f"# {note or stem[:-3]}\n\n{content}\n", encoding="utf-8")
-            action = "created"
-        else:
-            with target.open("a", encoding="utf-8") as f:
-                f.write(f"\n\n## {stamp}\n{content}\n")
-            action = "added to"
-        return f"Done, sir — {action} the vault note {target.relative_to(rootr).as_posix()}."
+        _, where = write_note(note, content, folder=args.get("folder") or "Afon",
+                              mode=(args.get("mode") or "append").strip().lower())
+        return f"Done, sir — wrote {where}."
+    except ValueError:
+        return "That path is outside the vault, sir — I won't write it."
     except Exception as e:  # noqa: BLE001
         return tool_error("vault write", e)
 
@@ -259,31 +273,10 @@ SCHEMAS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_vault",
-            "description": (
-                "Save a note INTO the owner's Obsidian vault — append to (default) or create a note. "
-                "Use to record a decision, a durable fact, or a session summary worth keeping in "
-                "the knowledge base. Only works on the host that owns the vault."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "note": {"type": "string",
-                             "description": "Note title / filename (without .md)."},
-                    "content": {"type": "string", "description": "The text to write."},
-                    "mode": {"type": "string", "enum": ["append", "create"],
-                             "description": "append (default) or create a fresh note."},
-                    "folder": {"type": "string",
-                               "description": "Vault subfolder (default 'Afon')."},
-                },
-                "required": ["content"],
-            },
-        },
-    },
 ]
 
+# `write_vault` keeps its handler but no longer its schema: 06.F1 makes `create_document` the one
+# creation path the model is offered, and it calls `write_note` above. Two advertised ways to write
+# a note is how one of them ends up being the unverified one.
 HANDLERS = {"search_vault": search_vault, "read_vault_note": read_vault_note,
             "write_vault": write_vault}

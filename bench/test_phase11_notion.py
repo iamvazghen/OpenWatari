@@ -64,11 +64,17 @@ def main() -> None:
     check("short text passes through as one element", notion._rt_chunks("short") == ["short"])
     check("runaway text bounded to 10 chunks", len(notion._rt_chunks("x" * 100000)) == 10)
 
-    print("\n[3] all five tools registered")
+    print("\n[3] the Notion tools the model is offered")
     names = set(tool_names())
-    expected = {"notion_search", "notion_read_page", "notion_append", "notion_comment",
-                "notion_create_page"}
+    expected = {"notion_search", "notion_read_page", "notion_append", "notion_comment"}
     check("every Notion tool is registered", expected <= names, str(sorted(expected - names)))
+    # `notion_create_page` lost its schema at 06.F1: creation goes through `create_document`, which
+    # reads the page back before reporting success. The handler stays, and so does its gate.
+    from afon.brain.tools import tool_handlers
+    check("creating a page is no longer a second, unverified path",
+          "notion_create_page" not in names)
+    check("...but its handler is still there for create_document to call",
+          "notion_create_page" in tool_handlers())
 
     print("\n[4] writes/comments confirm-gated; reads are not")
     check("notion_append confirm-gated", confirm_required("notion_append"))

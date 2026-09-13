@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 
 from afon.shared import language as lang
-from afon.brain import delegation, turn_trace
+from afon.brain import delegation, emergency, turn_trace
 from afon.brain.context import build_system_prompt
 from afon.brain.fleet import FLEET_TOOL_SCHEMA, FleetUnavailable, delegate_to_fleet
 from afon.config import settings
@@ -1307,6 +1307,22 @@ class AfonAgent:
             tr.set_intent("refused")   # this turn never reaches _prepare_turn, so it names itself
         return _CATASTROPHIC_REFUSAL
 
+    async def _raise_emergency(self, alarm, user_text: str) -> str:
+        """35.F1 — work the ladder and answer, without the model ever seeing the turn.
+
+        Deliberately the same shape as `_refuse_catastrophic`: no tools, no model, the turn
+        recorded in history so the next one has context. The critical path is a file read and one
+        outward call, which is the only way the three-second budget is a promise rather than a hope.
+        """
+        said = await emergency.raise_alarm(alarm, user_text)
+        self._history.append({"role": "user", "content": user_text})
+        self._history.append({"role": "assistant", "content": said})
+        self._trim()
+        tr = turn_trace.current()
+        if tr is not None:
+            tr.set_intent("emergency")
+        return said
+
     # ---- main loop --------------------------------------------------------------------
     async def respond(self, user_text: str, on_progress: Callable | None = None) -> str:
         """Run one full turn (with tool calls) and return Afon's spoken reply text.
@@ -1326,6 +1342,9 @@ class AfonAgent:
         self._begin_turn(user_text)
         if _catastrophic(user_text):
             return self._refuse_catastrophic(user_text)
+        alarm = emergency.classify(user_text)
+        if alarm is not None:
+            return await self._raise_emergency(alarm, user_text)   # 35.F1 — ahead of the model
         self._immediate_ack(user_text, on_progress)
         plan = await self._prepare_turn(user_text)
         messages, turn_tools = plan.messages, plan.turn_tools
@@ -1796,6 +1815,12 @@ class AfonAgent:
             self._refuse_catastrophic(user_text)   # records user + a hard refusal
             self._stream_done = True
             yield _CATASTROPHIC_REFUSAL
+            return
+        alarm = emergency.classify(user_text)
+        if alarm is not None:
+            said = await self._raise_emergency(alarm, user_text)   # 35.F1 — ahead of the model
+            self._stream_done = True
+            yield said
             return
         self._immediate_ack(user_text, on_progress)
         plan = await self._prepare_turn(user_text)

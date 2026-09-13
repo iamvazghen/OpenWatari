@@ -175,26 +175,56 @@ async def notion_comment(args: dict) -> str:
         return tool_error("Notion comment", e)
 
 
+async def create_page(parent_id: str, title: str, content: str = "") -> str:
+    """Create a sub-page and return its ID — the thing the old handler threw away.
+
+    Without the id the page Afon had just made could never be read, revised or linked to again, so
+    "verified by reading it back" was not merely undone, it was impossible. Raises on failure.
+    """
+    if not _configured():
+        raise RuntimeError("Notion is not configured")
+    parent_id = (parent_id or "").strip()
+    title = (title or "").strip()
+    if not (parent_id and title):
+        raise ValueError("a parent page id and a title are both needed")
+    body: dict = {
+        "parent": {"page_id": parent_id},
+        "properties": {"title": {"title": [{"type": "text", "text": {"content": title}}]}},
+    }
+    if content:
+        body["children"] = [{
+            "object": "block", "type": "paragraph",
+            "paragraph": {"rich_text": [_rt(c)]},
+        } for c in _rt_chunks(content)]
+    made = await _post("/pages", body)
+    page_id = str((made or {}).get("id") or "").strip()
+    if not page_id:
+        raise RuntimeError("Notion accepted the page but returned no id")
+    return page_id
+
+
+async def page_text(page_id: str) -> str:
+    """The page's blocks as plain text — how a write to Notion is verified."""
+    data = await _get(f"/blocks/{page_id}/children?page_size=100")
+    out: list[str] = []
+    for b in data.get("results") or []:
+        payload = b.get(b.get("type", ""), {})
+        txt = _rich_text(payload.get("rich_text"))
+        if txt:
+            out.append(txt)
+    return "\n".join(out)
+
+
 async def notion_create_page(args: dict) -> str:
     if not _configured():
         return not_configured("Notion", _NEEDS)
-    parent_id = (args.get("parent_id") or "").strip()
     title = (args.get("title") or "").strip()
-    content = (args.get("content") or "").strip()
-    if not (parent_id and title):
-        return "I need a parent page id and a title, sir."
     try:
-        body: dict = {
-            "parent": {"page_id": parent_id},
-            "properties": {"title": {"title": [{"type": "text", "text": {"content": title}}]}},
-        }
-        if content:
-            body["children"] = [{
-                "object": "block", "type": "paragraph",
-                "paragraph": {"rich_text": [_rt(c)]},
-            } for c in _rt_chunks(content)]
-        await _post("/pages", body)
-        return f"Created the Notion page '{title}', sir."
+        page_id = await create_page(args.get("parent_id") or "", title,
+                                    (args.get("content") or "").strip())
+        return f"Created the Notion page '{title}' ({page_id}), sir."
+    except ValueError:
+        return "I need a parent page id and a title, sir."
     except Exception as e:  # noqa: BLE001
         return tool_error("Notion create", e)
 
@@ -878,18 +908,10 @@ SCHEMAS = [
             "page_id": {"type": "string", "description": "Notion page id."},
             "text": {"type": "string", "description": "The comment text."}},
             "required": ["page_id", "text"]}}},
-    {"type": "function", "function": {
-        "name": "notion_create_page",
-        "description": "Create a NEW sub-page under an existing Notion parent page, optionally with "
-                       "body text. Confirm with the owner first. Use for 'make a Notion page for "
-                       "X'. To add to a page that already exists, use notion_append.",
-        "parameters": {"type": "object", "properties": {
-            "parent_id": {"type": "string", "description": "Parent page id (must be shared with the integration)."},
-            "title": {"type": "string", "description": "New page title."},
-            "content": {"type": "string", "description": "Optional first paragraph."}},
-            "required": ["parent_id", "title"]}}},
 ]
 
+# `notion_create_page` keeps its handler but no longer its schema — 06.F1 routes creation through
+# `create_document(destination="notion")`, which reads the page back before reporting success.
 HANDLERS = {
     "notion_create_task": notion_create_task,
     "notion_update_task": notion_update_task,

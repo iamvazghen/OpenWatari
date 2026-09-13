@@ -368,6 +368,10 @@ class Settings(BaseSettings):
     # Local contact book (Phase 4.3) — resolve a NAME to an email/Telegram/phone before a send/draft.
     # Plain-text, one contact per line; blank = <repo>/contacts.md. Optional + gitignored.
     contacts_path: str | None = None
+    # Emergency ladder (35.F2) — who to reach per category, in order. Plain text, read from disk
+    # at the moment it is needed so a long-running process cannot hold a stale list. Blank =
+    # <repo>/emergency.md. Optional + gitignored, like contacts.md.
+    emergency_contacts_path: str | None = None
 
     # --- Phase 3: knowledge & channel tools ---------------------------------------------
     # Every Phase 3 tool degrades gracefully: when its credentials are absent it returns a

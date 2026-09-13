@@ -115,7 +115,13 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
              "unlock", "music room", "voice chat", "stream music", "play in the room"),
     "docs": ("document", "this file", "read this", "the pdf", "a pdf", "the doc", "this doc",
              "in the file", "ask the document", "close the document", "read the file",
-             "this report", "the attachment"),
+             "this report", "the attachment",
+             # creation (06.F1) — `create_document` is the one path to a new note, so the words
+             # someone actually uses to ask for one have to reach this group.
+             "write it up", "write that up", "write up", "write a note", "make a note",
+             "note that down", "jot", "draft a", "draft me", "write me a", "save that to",
+             "put that in", "vault note", "in my vault", "to my vault", "decision record",
+             "meeting note", "project brief", "you wrote", "note you wrote", "wrote yesterday"),
     "apps": ("github", "gitlab", "slack", "discord", "google drive", "gdrive", "google doc",
              "google sheet", "spreadsheet", "stripe", "linear", "jira", "trello", "asana",
              "airtable", "reddit", "youtube", "linkedin", "instagram", "coinbase", "supabase",

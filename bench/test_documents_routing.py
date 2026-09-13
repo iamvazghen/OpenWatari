@@ -147,6 +147,64 @@ def main() -> None:
     check("executor is not the tool entry point (no brain->laptop->brain loop)",
           docs.LOCAL_HANDLERS["doc_read"] is not docs.HANDLERS["read_document"])
 
+    print("\n[7] 06.F3 — a document Afon wrote is addressable afterwards")
+    # "The note you wrote yesterday about the farm" is not a vault search: search_vault covers
+    # everything the OWNER wrote too, and it has no idea which notes were Afon's or when. Before
+    # this, nothing recorded what he had created, so a document he had just written became
+    # anonymous the moment the turn ended — and for Notion it was worse than anonymous, because
+    # the create call threw the page id away and there was no way back to the page at all.
+    from afon.brain import documents as D
+    from afon.brain.tools.documents import find_document
+    from afon.config import settings
+
+    real_state = settings.state_dir
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+        try:
+            settings.state_dir = root
+            check("nothing written yet resolves to nothing", D.find("farm") == [])
+            body = "Forty sacks of feed, delivered Thursday to the lower barn."
+            asyncio.run(D.create("Rabbit farm feed order", body, kind="note", destination="local"))
+            asyncio.run(D.create("German lesson plan", body, kind="brief", destination="local"))
+
+            hit = D.find("the note you wrote yesterday about the farm")
+            check("a spoken description resolves to the right document",
+                  [r["title"] for r in hit] == ["Rabbit farm feed order"], hit)
+            check("...carrying the reference needed to open it",
+                  Path(hit[0]["ref"]).is_file(), hit[0]["ref"])
+            check("...and when it was written", hit[0]["at"] > 0)
+            check("an unrelated document is not dragged in", len(hit) == 1, hit)
+            check("asking by kind narrows it",
+                  [r["title"] for r in D.find("", kind="brief")] == ["German lesson plan"],
+                  D.find("", kind="brief"))
+            check("asking for nothing in particular gives the newest first",
+                  [r["title"] for r in D.find("")][0] == "German lesson plan", D.find(""))
+            check("a query matching nothing says nothing, rather than guessing",
+                  D.find("submarine") == [])
+
+            said = asyncio.run(find_document({"query": "farm"}))
+            check("the tool answers in prose with the location", "Rabbit farm feed order" in said
+                  and "documents folder" in said, said)
+            check("...and points at search_vault for notes the owner wrote himself",
+                  "search_vault" in asyncio.run(find_document({"query": "submarine"})),
+                  asyncio.run(find_document({"query": "submarine"})))
+
+            # A write that could not be confirmed must still be findable — that is precisely the
+            # document the owner needs to go and look at.
+            D.record(D.Written("notion", "Unconfirmed brief", where="Notion", ref="p-9",
+                               why="couldn't read it back"))
+            rows = D.find("unconfirmed")
+            check("a document written but unverified is still addressable", len(rows) == 1, rows)
+            check("...and is flagged as unconfirmed when named",
+                  "couldn't confirm" in asyncio.run(find_document({"query": "unconfirmed"})),
+                  asyncio.run(find_document({"query": "unconfirmed"})))
+
+            # A half-written last line (a crash mid-append) must not lose the whole index.
+            with (Path(root) / "documents" / "index.jsonl").open("a", encoding="utf-8") as fh:
+                fh.write('{"title": "torn')
+            check("a torn index line does not lose the rest", len(D.created()) == 3, D.created())
+        finally:
+            settings.state_dir = real_state
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)
