@@ -114,6 +114,7 @@ STORES: tuple[Store, ...] = (
     # --- what he is meant to do ------------------------------------------------------------------
     Store("afon_tasks.sqlite", "the to-do list and its deadlines", KEEP_FOREVER),
     Store("afon_jobs.sqlite", "background work queued and finished", 30),
+    Store("afon_work.sqlite", "work handed to the fleet or a worker, and what came back", 90),
     Store("afon_coaching.sqlite", "progress on the skills he is being coached in", KEEP_FOREVER),
     Store("objectives.json", "multi-day objectives Afon is driving", KEEP_FOREVER),
     Store("approvals.json", "outward actions waiting for the owner's yes", WHILE_CURRENT),

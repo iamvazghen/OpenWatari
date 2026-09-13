@@ -3328,10 +3328,30 @@ results verified once, not re-asked.
 **Floor**
 - [x] 39.F1 Reachable delegation to the external fleet router. *gate:* fleet live check in
       `run_all_tests.py` (gated on authorisation).
-- [ ] 39.F2 Every delegation is tracked as a task with a deadline and a result check — nothing is
-      fire-and-forget. *gate:* new `test_delegation_tracking.py`
-- [ ] 39.F3 A delegated result is **verified** before being reported as fact (anti-fabrication
+- [x] 39.F2 Every delegation is tracked as a task with a deadline and a result check — nothing is
+      fire-and-forget. *gate:* `test_delegation_tracking.py`
+      *done 2026-09-13:* `brain/delegation.py` on top of the new shared work record. Delegation was
+      a string in and a string out, and the background path's `TaskQueue` row is DELETED by
+      `TaskQueue.drop` the moment the work finishes — so a delegation that SUCCEEDED left no trace
+      at all. The evidence was erased precisely when there was something to record, which is why
+      39.E1's "ten real delegations tracked over a month" was not a thing this system could have
+      reported on. Every delegation now opens a unit with an owner and a deadline and closes it on
+      both paths, answered or failed. The deadline is the transport's own ceiling plus a minute, so
+      a unit still open past it does not mean the fleet is thinking — it means a runner went away
+      without ever writing back, which is the fire-and-forget detector the floor is asking for.
+- [x] 39.F3 A delegated result is **verified** before being reported as fact (anti-fabrication
       applies to other agents too). *gate:* `test_delegation_tracking.py` [verification]
+      *done 2026-09-13:* whatever the team lead returned went straight on — into the model's
+      context, or into `server._announce_task`, which reads the result out **loud, verbatim**. So
+      "I don't have access to that" reached the owner as Afon's own finished answer, and a figure
+      the fleet invented reached him in Afon's voice with nothing marking it as somebody else's
+      claim. Three grades now: **rejected** (empty, a refusal, or an answer with nothing in common
+      with the brief) is never reported as a finding; **attributed** (it carries figures, dates or
+      links Afon never saw) is relayed in the team lead's name; **verified** may be said in Afon's
+      own words. **Declined:** re-running the work to see whether it agrees. That costs what the
+      delegation cost and answers a different question. **Also deliberately not done:** feeding the
+      answer's URLs into the citation ledger — recording them would mark them as pages this turn
+      retrieved, and 41.F2's whole job is to notice a reply citing a host nothing opened.
 
 **Raise**
 - [ ] 39.R1 A routing policy: which kinds of work go to which agent, declared and testable.
@@ -3894,12 +3914,29 @@ progress aggregated, not polled.
 | reasoned | one genuinely multi-worker job producing a single coherent report | 3 / 4 / 2 d | — | 0 | claim/lock is additive; delegation still works without it |
 
 **Floor** *(depends on S39's tracking floor)*
-- [ ] 48.F1 A shared work record: every delegated unit has an id, an owner, a state, and a result
-      slot that both sides write to. *gate:* new `test_coordination.py`
-- [ ] 48.F2 No two workers hold the same unit — claim-and-lock, asserted.
+- [x] 48.F1 A shared work record: every delegated unit has an id, an owner, a state, and a result
+      slot that both sides write to. *gate:* `test_coordination.py`
+      *done 2026-09-13:* `brain/coordination.py` — one sqlite table, and S39 writes to the same one.
+      They are the same question at two sizes: one delegation posts a one-unit job and reads the
+      answer back, a multi-worker job posts several, hands them out and merges. A second table for
+      the second case would have been these columns under a different name.
+- [x] 48.F2 No two workers hold the same unit — claim-and-lock, asserted.
       *gate:* `test_coordination.py` [no double claim]
-- [ ] 48.F3 Results merge deterministically, and disagreement is surfaced rather than averaged.
+      *done 2026-09-13:* a claim is a conditional `UPDATE ... WHERE state='open'`; the row either
+      moves to you or it does not and `rowcount` says which, so a loser retries the next candidate
+      rather than sharing a unit. sqlite's own write lock is the mutex — no lock server. The gate
+      races it with eight threads over twenty units rather than reading the SQL and agreeing it
+      looks atomic, because "it looks atomic" is exactly the reasoning a claim bug survives.
+- [x] 48.F3 Results merge deterministically, and disagreement is surfaced rather than averaged.
       *gate:* `test_coordination.py` [merge]
+      *done 2026-09-13:* units group by their brief, because two units carrying the same brief were
+      asked the same question and are comparable, while two different briefs are simply two parts of
+      one job that follow each other in posting order. Where one brief has two different answers
+      BOTH are kept and the brief is reported as a conflict; it is never resolved here. Picking the
+      longer one, the newer one, or the mean of two numbers each produce an answer no worker
+      actually gave, and the owner would have no way to tell which had happened. A failed unit and
+      a unit nobody started are also kept apart — "no answer because it broke" and "no answer yet"
+      are different things to be told.
 
 **Raise**
 - [ ] 48.R1 Capability-based assignment rather than fixed routing.
@@ -4064,7 +4101,7 @@ green, `E` = elite green.
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
 | S37 | Privacy & Governance | half-built | 3/3 | 0/3 | 0/1 |
 | S38 | Communication Hub | structured badly | 3/3 | 0/3 | 0/1 |
-| S39 | Multi-Agent Delegation | thin | 1/3 | 0/3 | 0/1 |
+| S39 | Multi-Agent Delegation | thin | 3/3 | 0/3 | 0/1 |
 | S40 | Financial & Asset Mgmt | missing | 0/3 | 0/3 | 0/1 |
 | S41 | Research & Synthesis | half-built | 3/3 | 0/3 | 0/1 |
 | S42 | Media Control | structured badly | 3/3 | 0/3 | 0/1 |
@@ -4073,11 +4110,11 @@ green, `E` = elite green.
 | S45 | Explainability | complete for now | 3/3 | 0/3 | 0/1 |
 | S46 | Predictive Analytics | missing | 0/3 | 0/3 | 0/1 |
 | S47 | Inventory & Resources | missing | 0/3 | 0/3 | 0/1 |
-| S48 | Multi-Agent Coordination | thin | 0/3 | 0/3 | 0/1 |
+| S48 | Multi-Agent Coordination | thin | 3/3 | 0/3 | 0/1 |
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 121 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 121 of 370.**
+**Totals: 126 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 126 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

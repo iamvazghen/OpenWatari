@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 
 from afon.shared import language as lang
-from afon.brain import turn_trace
+from afon.brain import delegation, turn_trace
 from afon.brain.context import build_system_prompt
 from afon.brain.fleet import FLEET_TOOL_SCHEMA, FleetUnavailable, delegate_to_fleet
 from afon.config import settings
@@ -1086,7 +1086,15 @@ class AfonAgent:
 
             t = TASKS.run(
                 title=task,
-                coro_factory=lambda on_progress: delegate_to_fleet(task, on_progress=on_progress),
+                # 39.F2/F3 — tracked on the work record with a deadline, and the answer GRADED
+                # before it reaches _announce_task, which reads the result out loud verbatim. An
+                # ungraded background delegation is how "I don't have access to that" came back to
+                # the owner sounding like Afon's own finished answer.
+                coro_factory=lambda on_progress: delegation.tracked(
+                    task,
+                    lambda: delegate_to_fleet(task, on_progress=on_progress),
+                    spoken=True,
+                ),
                 kind="fleet",
             )
             return (
@@ -1094,7 +1102,10 @@ class AfonAgent:
                 "and you'll let him know the moment it's done — he can ask 'how's that going?' anytime."
             )
         try:
-            return await delegate_to_fleet(task, on_progress=lambda n: logger.info(f"[fleet] {n}"))
+            return await delegation.tracked(
+                task,
+                lambda: delegate_to_fleet(task, on_progress=lambda n: logger.info(f"[fleet] {n}")),
+            )
         except FleetUnavailable as e:
             return f"FLEET_UNAVAILABLE: {e}"
 
@@ -1230,7 +1241,11 @@ class AfonAgent:
 
         async def _run_and_link(on_progress):
             if use_fleet:
-                result = await delegate_to_fleet(objective, on_progress=on_progress)
+                result = await delegation.tracked(
+                    objective,
+                    lambda: delegate_to_fleet(objective, on_progress=on_progress),
+                    spoken=True,
+                )
             else:
                 worker = TaskWorker(self._llm, self._registry, self._worker_tools(),
                                     max_steps=settings.copilot_max_steps)
