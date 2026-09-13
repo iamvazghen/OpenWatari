@@ -2290,8 +2290,19 @@ cache hit · affect derived in-process, never a second model call.
 - [x] 25.F1 Persona, operating rules and affect→TTS wired and at template parity.
       *gate:* `test_affect_voice.py`, `test_affect_tts_edge.py`, `test_skill_docs_resolve.py`
 - [x] 25.F2 Relationship memory informs address and familiarity. *gate:* `test_relational.py`
-- [ ] 25.F3 Persona is one file, not several — no second definition can drift (the fleet's
-      IDENTITY.md/SOUL.md lesson). *gate:* `test_skill_docs_resolve.py` extended [single source]
+- [x] 25.F3 Persona is one file, not several — no second definition can drift (the fleet's
+      IDENTITY.md/SOUL.md lesson). *gate:* `test_skill_docs_resolve.py` [single source]
+      *done 2026-09-12:* the fleet's failure had already appeared here in miniature. `context.py`
+      carried a hardcoded copy of the operating rules as a fallback, and it had DRIFTED — the file
+      names the destructive verbs, the copy did not — so a brain that fell back was governed by a
+      rulebook the owner had never seen and could not edit. That copy is gone; the fallback now says
+      the rules could not be read, which is a status message rather than a second rulebook. The
+      spoken-output rule had three homes (persona, operating rules, the voice skill); it keeps one.
+      The persona owns how he sounds, the rules own what he does, and the voice skill keeps only the
+      technique neither has room for — reading a URL aloud, rounding numbers for speech. The gate
+      pins all of it, including that the assembled prompt carries exactly one persona header.
+      `persona.example.md` stays a copy on purpose, since it is the fork-me template and is never
+      loaded; that is asserted rather than merely tolerated.
 
 **Raise**
 - [ ] 25.R1 Register adapts to channel: a push is not a monologue, a voice answer is not a document.
@@ -3148,13 +3159,46 @@ not a scan.
 | reasoned | a forget-then-requery test passing across every store | 4 / 4 / 2 d | 20 min (retention preferences) | 0 | retention defaults to today's behaviour (keep everything) |
 
 **Floor**
-- [ ] 37.F1 **A data inventory**: every store, what personal data it holds, where it lives, who can
+- [x] 37.F1 **A data inventory**: every store, what personal data it holds, where it lives, who can
       read it. Generated from the code, not written by hand.
-      *gate:* new `test_data_inventory.py` — every memory/audit store appears.
-- [ ] 37.F2 A retention policy per store, enforced by the hygiene job, not by intention.
-      *gate:* `test_memory_hygiene.py` extended [per-store TTL]
-- [ ] 37.F3 `forget X` actually removes X from every store, verified by re-querying.
-      *gate:* new `test_right_to_forget.py`
+      *gate:* `test_data_inventory.py` — every memory/audit store appears.
+      *done 2026-09-13:* `brain/inventory.py` declares 42 stores with three columns each: what it
+      holds in the owner's terms, how long it is kept, and who can read it. The anti-staleness
+      mechanism is the gate, not the discipline: it walks the state root and FAILS on anything
+      present that nothing declares. That earned its place on the first run by finding three
+      undeclared things, one of which is the error journal — it holds the tail of whatever a failing
+      tool was handed, so it is personal data whether or not anyone meant it to be, and it now
+      expires rather than being kept. Asked via `what_you_know` in a new `privacy` lazy group, since
+      "what do you know about me" is unmistakable and asked rarely, and the per-turn surface is paid
+      on every turn.
+- [x] 37.F2 A retention policy per store, enforced by the hygiene job, not by intention.
+      *gate:* `test_memory_hygiene.py` [per-store TTL]
+      *done 2026-09-13:* `maintenance.sweep_retention` runs inside the daily hygiene job. Before it,
+      every store had a retention in somebody's head and exactly one — presence — had it in a setting
+      something actually read; the rest grew forever while the docs said otherwise, which is the
+      worse of the two failures because a stated policy nobody executes is a promise to the owner
+      that is quietly not kept. **The first dry run rejected its own design**, and that is recorded
+      in the code: it proposed deleting the pending-approvals file and two live pid files because
+      nothing had written to them in a while. File mtime is not age for a document that IS the
+      current state. So retention has a third value, `WHILE_CURRENT`, and the sweep only touches
+      stores that accumulate. A sqlite store is left to its own module, because deleting rows by age
+      needs a schema and guessing one would be a sweep that corrupts a store to satisfy a policy.
+- [x] 37.F3 `forget X` actually removes X from every store, verified by re-querying.
+      *gate:* `test_right_to_forget.py`
+      *done 2026-09-13:* `brain/forget.py` — `forget` deleted the single best-matching learned note.
+      Told to forget a subject Afon knew four facts about, it dropped ONE and said "Forgotten, sir",
+      while the embedding stayed in the vector store, the entities stayed in the relationship graph
+      where they still shaped answers, and the journal still described the day in prose. Four stores,
+      one deletion, a confident report of success. It now sweeps all four and then RE-QUERIES,
+      because the only evidence a thing is forgotten is asking again and getting nothing back; when
+      something survives it is named rather than reported as a clean sweep, and a re-check that
+      cannot run is reported as unverified rather than as clean. Two refusals: the owner's own vault
+      notes are left alone and said to be left alone, since deleting them by voice would be editing
+      his documents rather than clearing Afon's memory; and the audit log is not rewritten, because
+      the record of what Afon DID is a different and much worse thing to erase. **Declined:**
+      counting how many vault notes mention the subject — it meant a full-text scan of 6,551 notes
+      on a path that ends in Afon speaking, and hung the first self-check. `search_vault` answers it
+      whenever he asks.
 
 **Raise**
 - [ ] 37.R1 Sensitivity classification — biometric, financial, medical, ordinary — with rules per
@@ -3402,10 +3446,29 @@ parallel fetch with per-source timeouts · dedupe by domain before reading.
 
 **Floor**
 - [x] 41.F1 Search/scrape with a typed fallback chain. *gate:* `test_web_fallback.py`
-- [ ] 41.F2 **Citations are mandatory** for factual claims sourced from the web, and are checked to
-      resolve. *gate:* new `test_citations.py`
-- [ ] 41.F3 A research task states its budget and reports when it stopped early.
-      *gate:* `test_citations.py` [budget]
+- [x] 41.F2 **Citations are mandatory** for factual claims sourced from the web, and are checked to
+      resolve. *gate:* `test_citations.py`
+      *done 2026-09-12:* `brain/citations.py` — a per-turn ledger of what Afon actually retrieved.
+      `web_search` and `scrape_url` record what came back; every reply is checked against it, and a
+      URL whose host he never retrieved is owned in one clause as his own reference rather than
+      dressed as a source. A model handed a page of text will attribute a claim to a plausible URL
+      it never fetched, and the answer looks BETTER for carrying it — the owner cannot tell a real
+      link from a well-formed one, which is why this is worth a spoken sentence and not a log line.
+      The reply itself is never edited: rewriting what the model said to hide the problem is the
+      same dishonesty one layer down. **Declined:** re-fetching each cited URL to prove it is live.
+      That is a network call per answer, and a 200 from a page Afon never read is not evidence he
+      read it — provenance is the question, reachability is not. An obstructed page is never
+      recorded, so nothing behind a paywall is ever citable. The ledger is a ContextVar opened
+      beside the turn's situation, so one session's reading can never vouch for another's claim.
+- [x] 41.F3 A research task states its budget and reports when it stopped early.
+      *gate:* `test_citations.py` [7]
+      *done 2026-09-12:* the worker had a step budget, never said what it was, and — the real
+      defect — handed back a truncated answer that read exactly like a finished one. When the steps
+      ran out it told the model to write its summary, the model wrote one, and nothing anywhere said
+      it was as far as the task got. The budget is now announced before the work rather than in the
+      postmortem, a wall clock bounds it alongside the step count (six steps of slow scraping is
+      minutes of silence), and a task that stops early says so and offers to continue. `stopped_early`
+      is a value as well as prose, so a caller can decide rather than grep English.
 
 **Raise**
 - [ ] 41.R1 Source reliability weighting — not every page counts the same.
@@ -3603,8 +3666,20 @@ around.
 - [x] 44.F2 Anti-fabrication protocol with a verification path.
       *gate:* `test_tool_failure_guard.py`, `test_no_result_sentinels.py`
 - [x] 44.F3 Autonomous work defers every outward action. *gate:* `test_safety_autonomy.py`
-- [ ] 44.F4 Refusals are graded: refuse · confirm · proceed-with-note, and the grade is tested.
-      *gate:* new `test_refusal_grades.py`
+- [x] 44.F4 Refusals are graded: refuse · confirm · proceed-with-note, and the grade is tested.
+      *gate:* `test_refusal_grades.py`
+      *done 2026-09-13:* there were two answers and no name for either — a deterministic refusal in
+      the agent, a confirm tier in the policy layer, and nothing in between. The gap showed as
+      silence. Guest mode is on because someone else is in the room and lockdown is on because he
+      wants quiet; both changed what Afon did and neither said so, since the only way to tell him
+      something was to refuse. `proactive.grade` returns one of refuse / confirm / note / allow with
+      a reason, `PRECEDENCE` states the order strongest-first, and the gate pins that a permissive
+      rule can never soften a stronger one by matching later. Two decisions worth recording: the
+      strongest grade is decided by what the owner ASKED, not by which tool the model reached for,
+      because a model can carry out a catastrophic instruction with a harmless-looking call; and a
+      grader that cannot do its job returns CONFIRM, never ALLOW — an unavailable hard-refusal check
+      must mean "ask", since the alternative is an import error quietly permitting a wiped disk. The
+      confirm grade IS `confirm_required` rather than a second copy of it.
 
 **Raise**
 - [ ] 44.R1 Value conflicts (helpfulness vs privacy vs safety) resolved by a stated precedence order,
@@ -3653,8 +3728,19 @@ confidence come from the trail; the model only phrases it.
 **Floor**
 - [x] 45.F1 Autonomous actions produce reports with reasoning. *gate:* `test_proactive_report.py`
 - [x] 45.F2 A full audit trail with scrubbed values. *gate:* `test_phasex_audit_health_modes.py`
-- [ ] 45.F3 `why` as a first-class question about the *last turn*: tools used, sources, confidence.
-      *gate:* new `test_why_last_turn.py`
+- [x] 45.F3 `why` as a first-class question about the *last turn*: tools used, sources, confidence.
+      *gate:* `test_why_last_turn.py`
+      *done 2026-09-13:* asked of the model, "why did you say that" is answered by a model
+      reconstructing its own reasoning after the fact — the one source on the subject with no access
+      to the facts. It will name a tool it did not call, fluently, because the question invites a
+      story and nothing contradicts it. The turn row already knew which tools fired; it now also
+      carries the hosts actually retrieved (from 41.F2's ledger) and a confidence label READ off the
+      reply rather than invented, because a number Afon made up about his own certainty is the least
+      trustworthy field in the row. `turn_trace.last()` exposes the closed row and the answer says
+      plainly when NO tool was used — the most useful sentence in the feature, since an answer from
+      the model's own weights looks identical to a looked-up one and the owner has no other way to
+      tell. It costs no per-turn tool surface: it rides `diagnose` under `about='last_turn'`, which
+      is already the "explain yourself" tool and is already core.
 
 **Raise**
 - [ ] 45.R1 Confidence is reported alongside answers where it varies (pairs with 01.F2).
@@ -3964,7 +4050,7 @@ green, `E` = elite green.
 | S22 | Recoverability | complete for now | 4/4 | 0/3 | 0/1 |
 | S23 | 24/7 Reachability | complete, parked | 4/4 | 0/3 | 0/1 |
 | S24 | Knowledge & World Model | structured badly | 2/2 | 0/3 | 0/1 |
-| S25 | Personality | complete for now | 2/3 | 0/3 | 0/1 |
+| S25 | Personality | complete for now | 3/3 | 0/3 | 0/1 |
 | S26 | Multi-Modal Perception | floor green | 3/3 | 0/3 | 0/1 |
 | S27 | Context Awareness | floor green | 2/2 | 0/3 | 0/1 |
 | S28 | IoT Orchestration | token blocked | 2/3 | 0/3 | 0/1 |
@@ -3976,22 +4062,22 @@ green, `E` = elite green.
 | S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
 | S35 | Crisis Response | half-built | 1/3 | 0/3 | 0/1 |
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
-| S37 | Privacy & Governance | half-built | 0/3 | 0/3 | 0/1 |
+| S37 | Privacy & Governance | half-built | 3/3 | 0/3 | 0/1 |
 | S38 | Communication Hub | structured badly | 3/3 | 0/3 | 0/1 |
 | S39 | Multi-Agent Delegation | thin | 1/3 | 0/3 | 0/1 |
 | S40 | Financial & Asset Mgmt | missing | 0/3 | 0/3 | 0/1 |
-| S41 | Research & Synthesis | half-built | 1/3 | 0/3 | 0/1 |
+| S41 | Research & Synthesis | half-built | 3/3 | 0/3 | 0/1 |
 | S42 | Media Control | structured badly | 3/3 | 0/3 | 0/1 |
 | S43 | Presence & Continuity | half-built | 3/3 | 0/3 | 0/1 |
-| S44 | Ethics & Safety | complete for now | 3/4 | 0/3 | 0/1 |
-| S45 | Explainability | complete for now | 2/3 | 0/3 | 0/1 |
+| S44 | Ethics & Safety | complete for now | 4/4 | 0/3 | 0/1 |
+| S45 | Explainability | complete for now | 3/3 | 0/3 | 0/1 |
 | S46 | Predictive Analytics | missing | 0/3 | 0/3 | 0/1 |
 | S47 | Inventory & Resources | missing | 0/3 | 0/3 | 0/1 |
 | S48 | Multi-Agent Coordination | thin | 0/3 | 0/3 | 0/1 |
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
 
-**Totals: 113 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 113 of 370.**
+**Totals: 121 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 121 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

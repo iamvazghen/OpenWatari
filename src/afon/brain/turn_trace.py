@@ -155,6 +155,13 @@ class TurnTrace:
     reached: list[str] = field(default_factory=list)
     ok: bool = True
     error: str | None = None
+    #: 45.F3 — what the answer RESTED on, and how firmly it was put. The trace already knew which
+    #: tools fired and how long each stage took, which answers "what did you do" and answers
+    #: nothing about "should I believe it". Sources come from the turn's citation ledger; the
+    #: confidence label is read off the reply itself rather than invented, because a number Afon
+    #: made up about his own certainty is the least trustworthy thing in the row.
+    sources: list[str] = field(default_factory=list)
+    confidence: str = "unstated"
     seq: int = 0
     _t0: float = field(default_factory=time.perf_counter)
 
@@ -170,6 +177,21 @@ class TurnTrace:
     def fired(self, name: str) -> None:
         if name:
             self.tools_fired.append(name)
+
+    def note_answer(self, reply: str) -> None:
+        """Close the row's account of WHY: what was read, and how firmly the answer was put."""
+        try:
+            from afon.shared.uncertainty import hedged
+
+            self.confidence = "hedged" if hedged(reply or "") else "flat"
+        except Exception as e:  # noqa: BLE001 — an unlabelled turn is better than a lost one
+            logger.debug(f"turn trace: confidence unavailable ({type(e).__name__})")
+        try:
+            from afon.brain import citations
+
+            self.sources = sorted(citations.hosts())
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"turn trace: sources unavailable ({type(e).__name__})")
 
     def add_ms(self, stage: str, ms: float) -> None:
         """Accumulate, don't overwrite — the model stage runs once per tool-resolution pass, and a
@@ -197,6 +219,8 @@ class TurnTrace:
             "catalogue_tokens": self.catalogue_tokens,
             "prefill_tokens": self.prefill_tokens,
             "tools_fired": list(self.tools_fired),
+            "sources": list(self.sources),
+            "confidence": self.confidence,
             "stages_ms": dict(self.stages_ms),
             "reached": list(self.reached),
             "total_ms": round((time.perf_counter() - self._t0) * 1000.0, 1),
@@ -272,6 +296,19 @@ def turn(user_text: str = "", streamed: bool = False) -> Iterator[TurnTrace]:
             # to be written — a barge-in is exactly the turn worth seeing.
             _CURRENT.set(None)
         _emit(t.row())
+
+
+def last() -> dict | None:
+    """The most recently CLOSED turn, or None. 45.F3 — "why" is a question about the one before."""
+    with _LOCK:
+        return dict(_RING[-1]) if _RING else None
+
+
+def note_answer(reply: str) -> None:
+    """Record what the turn in flight actually answered. No-op outside a turn."""
+    t = _CURRENT.get()
+    if t is not None:
+        t.note_answer(reply)
 
 
 def _emit(row: dict) -> None:

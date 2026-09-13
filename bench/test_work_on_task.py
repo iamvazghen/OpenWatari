@@ -118,7 +118,10 @@ async def test_worker_respects_step_budget() -> None:
     worker = TaskWorker(llm, {"loop_tool": loop_tool}, tools=[], max_steps=2)
     out = await worker.run("keep going")
     check("tool calls capped at the step budget", calls["n"] == 2, str(calls))
-    check("a written result is still produced", out == "Here is what I gathered, sir.", out)
+    check("a written result is still produced", out.startswith("Here is what I gathered, sir."), out)
+    # 41.F3 — and it no longer reads like a COMPLETE result. A truncated answer and a finished one
+    # look identical to the owner unless the difference is said out loud.
+    check("...and it says the budget ran out", "all 2 steps" in out, out)
 
 
 async def test_agent_backgrounds_the_work() -> None:

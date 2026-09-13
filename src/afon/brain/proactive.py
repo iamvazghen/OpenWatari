@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -91,6 +91,87 @@ def in_quiet_hours(now: datetime, spec: str | None = None) -> bool:
     if start < end:
         return start <= minute < end
     return minute >= start or minute < end   # window wraps past midnight
+
+
+# ---- graded refusals (44.F4) ---------------------------------------------------------------
+
+#: The four answers to "may I do this", strongest first. The ORDER is the whole design: a request
+#: that matches several rules gets the strongest one, so no permissive rule can ever soften a
+#: refusal by matching later. Before this there were two answers and no name for either — a
+#: deterministic refusal in the agent, a confirm tier here, and nothing in between. The gap showed
+#: as silence: an action Afon was right to take but that the owner would have wanted a word about
+#: (someone else in the room, lockdown on, an outcome he can undo) was taken without one, because
+#: the only way to say something was to refuse.
+REFUSE = "refuse"      # never, whatever he says next
+CONFIRM = "confirm"    # not until he says yes to THIS action
+NOTE = "note"          # do it, and tell him the thing he would have wanted to know
+ALLOW = "allow"        # just do it
+
+#: Strongest first. `grade` returns the first that matches, and the tests pin that it is this order
+#: rather than whichever rule happened to be written first.
+PRECEDENCE = (REFUSE, CONFIRM, NOTE, ALLOW)
+
+
+@dataclass(frozen=True)
+class Verdict:
+    grade: str
+    why: str = ""
+
+    def __bool__(self) -> bool:
+        """True when the action may proceed at all — NOTE proceeds, CONFIRM and REFUSE do not."""
+        return self.grade in (NOTE, ALLOW)
+
+
+#: Tools that put something of the owner's into the room out loud. Under guest mode — which he turns
+#: on precisely because someone else is there — these still run, and he is told they were not private.
+_SPEAKS_PRIVATE = {"recall", "read_vault_note", "search_vault", "read_email", "check_telegram",
+                   "read_chat", "list_tasks", "whats_waiting", "objective_status", "diagnose"}
+
+#: Tools that reach outside the house. In lockdown he asked for quiet, not for paralysis: they run
+#: when he asks directly, and he hears that lockdown did not stop them.
+_REACHES_OUT = {"send_telegram", "send_email", "send_push", "place_call", "notion_append",
+                "notion_comment", "notion_create_page", "create_github_issue", "delegate_to_fleet"}
+
+
+def grade(tool_name: str, args: dict | None = None, *, user_text: str = "",
+          modes: Any = None) -> Verdict:
+    """How to answer "may I run this": refuse, confirm, proceed-with-note, or just do it.
+
+    `user_text` is taken because the strongest grade is decided by what he ASKED, not by which tool
+    the model chose — a catastrophic instruction is refused even if the model picked something
+    harmless to carry it out.
+    """
+    args = args or {}
+    if user_text:
+        try:
+            from afon.brain.agent import _catastrophic
+
+            if _catastrophic(user_text):
+                return Verdict(REFUSE, "that would destroy the system and cannot be undone")
+        except Exception as e:  # noqa: BLE001 — a missing classifier must not downgrade to allow
+            logger.warning(f"grade: catastrophic check unavailable ({type(e).__name__}); "
+                           "treating the request as needing confirmation")
+            return Verdict(CONFIRM, "I couldn't check that against my hard refusals")
+
+    if confirm_required(tool_name, args):
+        return Verdict(CONFIRM, "that one isn't undoable, or isn't only yours")
+
+    if modes is None:
+        try:
+            from afon.brain.modes import MODES
+
+            modes = MODES
+        except Exception:  # noqa: BLE001
+            modes = None
+    if modes is not None:
+        try:
+            if getattr(modes, "guest", False) and tool_name in _SPEAKS_PRIVATE:
+                return Verdict(NOTE, "you have guest mode on, so I'll say that out loud to the room")
+            if getattr(modes, "lockdown", False) and tool_name in _REACHES_OUT:
+                return Verdict(NOTE, "you're in lockdown — I'll do it, but it leaves the house")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"grade: modes unreadable ({type(e).__name__})")
+    return Verdict(ALLOW)
 
 
 # ---- clarify / confirm policy (the "ask for context" + "re-ask/confirm" verbs) -----------

@@ -72,7 +72,11 @@ than no prose, because it is the thing an auditor reads instead of the code.
   **dynamically** — only when their own steps contain a confirm-tier tool.
 - Destroying owner state (no undo): `delete_task`, `notion_delete_task`, `delete_macro`, `forget`,
   `drop_objective`, `complete_objective`, `write_vault` (a wrong note in the durable knowledge base
-  is worse than no note, because it gets trusted later).
+  is worse than no note, because it gets trusted later). `forget` reaches further than it used to:
+  since 37.F3 it sweeps every matching learned fact, its embeddings, its graph relations and the
+  journal lines about it, then re-queries to verify — which is exactly why it stays gated. It does
+  NOT touch the owner's own vault notes or the audit log; erasing the record of what Afon did is a
+  different thing from forgetting a fact about him.
 - Gated **dynamically**, so the frictionless case stays frictionless:
   - `update_task` / `notion_update_task` — adding a note or nudging a deadline is free; overwriting
     a title or blanking a field is not.

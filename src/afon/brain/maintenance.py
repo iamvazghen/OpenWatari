@@ -17,6 +17,7 @@ Three jobs, all idempotent:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -119,10 +120,69 @@ async def run_maintenance() -> str:
     c = compact_learned()
     cap = cap_learned()
     r = rotate_journals()
+    # 37.F2 — retention is enforced HERE, in the job that already runs daily, rather than being a
+    # number in a document. A policy nobody executes is a promise to the owner that is not kept.
+    swept = sweep_retention()
     msg = (f"memory hygiene: deduped {c['removed']} fact(s) ({c['kept']} active), "
            f"archived {cap['archived']} over-cap fact(s) + {r['archived']} journal day(s)")
+    if swept:
+        total = sum(v["removed"] for v in swept.values())
+        freed = sum(v["freed_bytes"] for v in swept.values()) // 1000
+        msg += (f"; retention dropped {total} expired file(s) across {len(swept)} store(s) "
+                f"({freed} kB)")
     logger.info(msg)
     return msg
+
+
+def sweep_retention(dry_run: bool = False) -> dict:
+    """Delete what is past its declared retention (37.F2). Returns what went, per store.
+
+    The plan's phrasing is the design: "enforced by the hygiene job, not by intention". Before this,
+    every store had a retention in somebody's head and one — presence — had it in a setting that
+    something actually read. Everything else grew forever while the docs said otherwise, which is
+    the worse failure of the two: a stated policy nobody enforces is a promise to the owner that
+    quietly is not kept.
+
+    Only whole FILES are considered, and only in directories the inventory declares as expiring.
+    A sqlite store is left to its own module: deleting rows by age needs a schema, and guessing one
+    here would be a sweep that corrupts a store to satisfy a policy.
+    """
+    from afon.brain.inventory import retention_days, rolling_stores
+
+    now = time.time()
+    out: dict[str, dict] = {}
+    # Only the stores that ACCUMULATE. A document replaced in place is declared WHILE_CURRENT and is
+    # never swept: its file mtime means "not written lately", not "old", and the first dry run of
+    # this function proposed deleting the pending-approvals file and two live pid files on that
+    # reasoning. See inventory.WHILE_CURRENT.
+    for store in rolling_stores():
+        days = retention_days(store)
+        path = store.path()
+        if not path.exists():
+            continue
+        cutoff = now - days * 86400
+        removed, freed = [], 0
+        try:
+            if path.is_dir():
+                targets = [f for f in path.rglob("*") if f.is_file() and f.stat().st_mtime < cutoff]
+            elif path.suffix == ".sqlite":
+                continue          # see the docstring: a schema is not this function's to assume
+            else:
+                targets = [path] if path.stat().st_mtime < cutoff else []
+            for f in targets:
+                freed += f.stat().st_size
+                if not dry_run:
+                    f.unlink()
+                removed.append(f.name)
+        except OSError as e:
+            logger.warning(f"retention sweep: {store.name} ({type(e).__name__}: {e})")
+            continue
+        if removed:
+            out[store.name] = {"removed": len(removed), "freed_bytes": freed,
+                               "names": removed[:5], "days": days}
+            logger.info(f"retention: {store.name} — dropped {len(removed)} file(s) older "
+                        f"than {days}d ({freed // 1000} kB)")
+    return out
 
 
 def schedule_maintenance(scheduler, daily_hhmm: str = "04:00") -> None:

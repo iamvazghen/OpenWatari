@@ -506,6 +506,56 @@ class MemoryStore:
         except OSError:
             return None
 
+    def forget_all(self, query: str) -> list[str]:
+        """Delete EVERY learned fact matching `query`, not just the best one (37.F3).
+
+        `forget` deletes one note, which is right for "forget that" about a single thing said a
+        moment ago and wrong for everything else. Told to forget a subject he knows four facts
+        about, Afon dropped one and reported it forgotten — and the owner had no way to see the
+        other three until they came back in an answer weeks later.
+        """
+        terms = _terms(query)
+        if not terms:
+            return []
+        gone: list[str] = []
+        for note in list(self._iter_notes()):
+            low = note.text.lower()
+            if not any(t in low for t in terms):
+                continue
+            try:
+                note.path.unlink()
+                gone.append(note.text)
+            except OSError as e:
+                logger.warning(f"memory: could not delete {note.path.name} ({type(e).__name__})")
+        if gone:
+            logger.info(f"memory: forgot {len(gone)} fact(s) matching {query!r}")
+        return gone
+
+    def redact_journal(self, query: str) -> int:
+        """Drop journal LINES mentioning `query`. Returns how many went.
+
+        The journal is prose, so this is line-level rather than note-level. A day whose every line
+        mentioned the subject is left as an empty file rather than deleted: the day happened, and
+        removing the file would make the gap itself invisible.
+        """
+        terms = _terms(query)
+        if not terms or not self.journal_dir.is_dir():
+            return 0
+        dropped = 0
+        for day in sorted(self.journal_dir.glob("*.md")):
+            try:
+                lines = day.read_text(encoding="utf-8").splitlines(True)
+            except OSError:
+                continue
+            keep = [ln for ln in lines if not any(t in ln.lower() for t in terms)]
+            if len(keep) != len(lines):
+                dropped += len(lines) - len(keep)
+                try:
+                    day.write_text("".join(keep), encoding="utf-8")
+                except OSError as e:
+                    logger.warning(f"memory: could not redact {day.name} ({type(e).__name__})")
+        return dropped
+
     def count(self) -> int:
         return sum(1 for _ in self._iter_notes())
 

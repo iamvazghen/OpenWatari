@@ -82,6 +82,34 @@ class VectorStore:
             logger.debug(f"vector store read failed ({type(e).__name__}); recomputing")
         return out
 
+    def forget(self, keys: list[str]) -> int:
+        """Drop cached embeddings by key. Returns how many rows went (37.F3).
+
+        A deleted fact's vector was harmless to recall — nothing queries a note that is gone — and
+        was still the fact, on disk, in a store the owner had been told no longer held it. "Forget"
+        that leaves the embedding behind is the failure 37.F3 names.
+        """
+        if not keys:
+            return 0
+        try:
+            with self._lock, self._conn() as c:
+                qs = ",".join("?" * len(keys))
+                cur = c.execute(f"DELETE FROM embeddings WHERE key IN ({qs})", list(keys))
+                c.commit()
+                return int(cur.rowcount or 0)
+        except sqlite3.Error as e:  # noqa: BLE001
+            logger.warning(f"vector store delete failed ({type(e).__name__}: {e})")
+            return 0
+
+    def keys(self) -> list[str]:
+        """Every cached key, so a caller can find the rows whose note no longer exists."""
+        try:
+            with self._lock, self._conn() as c:
+                return [r[0] for r in c.execute("SELECT key FROM embeddings").fetchall()]
+        except sqlite3.Error as e:  # noqa: BLE001
+            logger.debug(f"vector store key scan failed ({type(e).__name__})")
+            return []
+
     def put_many(self, rows: list[tuple[str, float, Vector]]) -> None:
         if not rows:
             return

@@ -25,8 +25,49 @@ def _speakable(e: dict) -> str:
     return f"{when} {sub}{where}: {typ + ' — ' if typ else ''}{msg}"[:220]
 
 
+def _why_last() -> str:
+    """45.F3 — how the last answer was reached: what was used, what it rested on, how firmly.
+
+    Asked of the model, "why did you say that" is answered by a model reconstructing its own
+    reasoning after the fact, which is the one source on the subject with no access to the facts.
+    The turn row has them: which tools actually fired, which sites were actually retrieved, and
+    whether the reply hedged or was put flat.
+    """
+    from afon.brain import turn_trace
+
+    row = turn_trace.last()
+    if not row:
+        return "I haven't finished a turn yet, sir, so there's nothing to explain."
+    bits: list[str] = []
+    tools = row.get("tools_fired") or []
+    if tools:
+        seen = list(dict.fromkeys(tools))
+        bits.append("I used " + ", ".join(seen[:5]) + (f" and {len(seen) - 5} more" if len(seen) > 5 else ""))
+    else:
+        # Worth saying plainly: an answer with no tool behind it came from the model, and that is
+        # the single most useful thing the owner can know when he doubts one.
+        bits.append("I used no tools — that answer came from what I already knew")
+    srcs = row.get("sources") or []
+    bits.append("I read " + ", ".join(srcs[:4]) if srcs else "I read nothing on the web")
+    conf = row.get("confidence")
+    if conf == "hedged":
+        bits.append("and I hedged it, so treat it as my best guess")
+    elif conf == "flat":
+        bits.append("and I put it flatly, so I meant it as fact")
+    if not row.get("ok", True):
+        bits.append(f"something went wrong in that turn ({row.get('error')})")
+    took = row.get("total_ms")
+    tail = f" It took {int(took) / 1000:.1f} seconds." if isinstance(took, (int, float)) else ""
+    return "For that last answer, sir: " + "; ".join(bits) + "." + tail
+
+
 async def diagnose(args: dict) -> str:
     """What has gone wrong recently, across every process."""
+    if str(args.get("about") or "").strip().lower() in ("last_turn", "last turn", "why"):
+        try:
+            return _why_last()
+        except Exception as e:  # noqa: BLE001
+            return tool_error("explanation of that last answer", e)
     try:
         minutes = int(args.get("minutes") or 60)
     except (TypeError, ValueError):
@@ -67,8 +108,11 @@ SCHEMAS = [
                 "(the laptop's voice edge and pc_agent, and this brain), with the subsystem that "
                 "produced each. Use when the owner asks 'are you having trouble?', 'what went "
                 "wrong?', 'why did that fail?', 'is anything broken?', or reports that something "
-                "didn't work. Pass turn=<id> to explain one specific turn end to end. This is real "
-                "recorded data — never guess about a failure when this tool can answer."
+                "didn't work. Pass turn=<id> to explain one specific turn end to end. Pass "
+                "about='last_turn' when he asks about the ANSWER rather than a failure — 'why did "
+                "you say that?', 'how do you know?', 'what did you use?', 'are you sure?' — and it "
+                "reports the tools that actually fired, the sites actually read, and whether the "
+                "answer was hedged. This is real recorded data — never guess when this can answer."
             ),
             "parameters": {
                 "type": "object",
@@ -79,6 +123,9 @@ SCHEMAS = [
                                   "description": "Filter, e.g. 'edge', 'brain/tools', 'pipecat'."},
                     "turn": {"type": "string",
                              "description": "A turn id, to trace one turn across both machines."},
+                    "about": {"type": "string",
+                              "description": "'last_turn' to explain the previous ANSWER (tools "
+                                             "used, sources read, confidence) instead of failures."},
                 },
                 "required": [],
             },

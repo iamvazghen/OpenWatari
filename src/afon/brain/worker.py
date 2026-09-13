@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
@@ -59,6 +60,7 @@ class TaskWorker:
         registry: dict[str, Callable[[dict], Awaitable[str]]],
         tools: list[dict[str, Any]],
         max_steps: int = 6,
+        max_seconds: float = 300.0,
         system: str | None = None,
         allow_confirmed: set[str] | None = None,
         origin: str = "",
@@ -68,6 +70,15 @@ class TaskWorker:
         self._registry = registry
         self._tools = tools
         self._max_steps = max(1, max_steps)
+        # 41.F3 — a step budget alone does not bound a research task: six steps of a slow scrape is
+        # several minutes of silence. The wall clock is the budget the owner actually feels.
+        # Floored, not clamped to a sane minimum: a caller that wants a two-second budget for a
+        # test or a probe should get one. Zero or negative is the only value that makes no sense.
+        self._max_seconds = max(0.01, max_seconds)
+        #: Why the loop ended, so the RESULT can say it. Before this, a task that ran out of steps
+        #: was handed back as a finished answer — the model was told to write its summary, and
+        #: wrote one, and nothing anywhere said it was a truncated answer to a bigger question.
+        self.stopped_early = ""
         self._system = system or _WORKER_SYSTEM   # override for specialised loops (e.g. code self-improve)
         # Phase 4.2 — where deferred outward steps go so the owner can actually approve/execute them
         # later (not just read about them). ``origin`` labels what produced them (e.g. an objective id).
@@ -101,7 +112,19 @@ class TaskWorker:
         ]
         deferred: list[str] = []
         last_text = ""
+        self.stopped_early = ""
+        started = time.monotonic()
+        if on_progress:
+            # Declared before the work, not after: a budget the owner hears only in the postmortem
+            # is a excuse, not a budget.
+            on_progress(f"budget: up to {self._max_steps} steps and "
+                        f"{int(self._max_seconds / 60) or 1} minutes")
         for step in range(self._max_steps):
+            spent = time.monotonic() - started
+            if spent >= self._max_seconds:
+                self.stopped_early = (f"I stopped after {int(spent)}s of the "
+                                      f"{int(self._max_seconds)}s I gave myself")
+                break
             msg = await self._llm.complete(messages, tools=self._tools, tool_choice="auto")
             last_text = _clean(getattr(msg, "content", "") or "")
             calls = getattr(msg, "tool_calls", None)
@@ -148,6 +171,9 @@ class TaskWorker:
             if on_progress and used:
                 on_progress(f"step {step + 1}: used {', '.join(used)}")
         else:
+            self.stopped_early = (f"I used all {self._max_steps} steps I gave myself")
+
+        if self.stopped_early:
             # Budget exhausted without a natural stop — force a final written summary, no tools.
             messages.append({"role": "system", "content":
                              "Stop using tools now and write your concise result for the owner."})
@@ -155,6 +181,11 @@ class TaskWorker:
             last_text = _clean(getattr(msg, "content", "") or "")
 
         result = last_text or "I worked on it, sir, but couldn't produce a clear result."
+        if self.stopped_early:
+            # The honest half of a budget: an answer that ran out of room reads exactly like a
+            # complete one unless it says otherwise, and the owner acts on it either way.
+            result += (f" {self.stopped_early}, sir, so this is as far as I got — "
+                       "say the word and I'll keep going.")
         if deferred:
             uniq = list(dict.fromkeys(deferred))
             result += " Needs your approval: " + "; ".join(uniq[:5]) + "."

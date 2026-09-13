@@ -97,10 +97,13 @@ async def forget(args: dict) -> str:
     if not query:
         return tool_error("forget", ValueError("no target (expected a 'query' argument)"))
     try:
-        gone = STORE.forget(query)
-        return f"Forgotten, sir — I've dropped the note about '{query}'." if gone else (
-            f"I had nothing stored about '{query}', sir."
-        )
+        # 37.F3 — every store, then a re-query. `STORE.forget` dropped ONE note and reported the
+        # subject forgotten, leaving its siblings, its embedding, its graph relations and the
+        # journal line that described it. A deletion that reports success on the strength of having
+        # started is the failure this replaces.
+        from afon.brain.forget import everywhere
+
+        return everywhere(query).spoken()
     except Exception as e:  # noqa: BLE001
         return tool_error("forget", e)
 
@@ -171,8 +174,10 @@ SCHEMAS = [
             "name": "forget",
             # Names the three tools that used to steal this call. "forget" is the owner's word for
             # four different erasures, and drop_objective even advertised 'forget X' as its trigger.
-            "description": "Delete ONE remembered fact from long-term memory. Use for 'forget that "
-                           "I…', 'delete what you know about X'. Personal facts only — not macros "
+            "description": "Delete a remembered subject from long-term memory — every matching "
+                           "fact, its embedding, its relations and the journal lines about it, "
+                           "then verified by asking again (37.F3). Use for 'forget that I…', "
+                           "'delete what you know about X'. Personal facts only — not macros "
                            "(delete_macro), objectives (drop_objective) or to-dos (delete_task).",
             "parameters": {
                 "type": "object",
@@ -196,4 +201,5 @@ SCHEMAS = [
     },
 ]
 
-HANDLERS = {"remember": remember, "recall": recall, "forget": forget, "read_journal": read_journal}
+HANDLERS = {"remember": remember, "recall": recall, "forget": forget,
+            "read_journal": read_journal}

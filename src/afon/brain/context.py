@@ -29,16 +29,16 @@ _OPERATING_RULES_PATH = (
     else PERSONALITY_DIR / "operating-rules.md"
 )
 # Fallback shipped inside the code so a missing/corrupt boilerplate still boots with sane defaults.
-_DEFAULT_OPERATING_RULES = (
-    "# Clarify, confirm, speak\n"
-    "If a request is too thin to act on safely, ask one short clarifying question. Confirm before "
-    "anything outward-facing or hard to undo. Spoken output: no markdown or emoji; one or two "
-    "sentences unless asked for more. If you speak unprompted, lead with why.\n\n"
-    "# Check before refusing\n"
-    "If you're about to say 'I can't do that', first try: composio_find_tools (external apps), "
-    "run_powershell / file_op / process_op (laptop), browser / scrape_url (web), play_music "
-    "(music), recall (memory), send_telegram / send_push (phone). Only refuse if every relevant "
-    "tool returns nothing useful."
+#: 25.F3 — what goes in the prompt when the owner's rules file cannot be read. It is deliberately
+#: NOT a second copy of those rules. The copy that lived here had already drifted from the file
+#: (the file names the destructive verbs, this did not), so a brain that fell back was running a
+#: rulebook the owner had never seen and could not edit — the IDENTITY.md/SOUL.md failure exactly.
+#: Better to be one rule short and say so than to be silently governed by the wrong text.
+_RULES_UNREADABLE = (
+    "# Operating rules unavailable\n"
+    "Your operating-rules file could not be read, so you are running without the owner's own "
+    "rules. Say so if he asks why you are behaving differently, and stay conservative: confirm "
+    "anything outward-facing or hard to undo."
 )
 
 
@@ -271,15 +271,17 @@ def build_system_prompt() -> str:
             if rules_text:
                 parts.append(rules_text)
         else:
-            parts.append(_DEFAULT_OPERATING_RULES)
+            logger.warning(f"operating rules missing at {_OPERATING_RULES_PATH} — running without "
+                           "the owner's rules, and saying so in the prompt")
+            parts.append(_RULES_UNREADABLE)
     except Exception as e:  # noqa: BLE001 — a brain with no operating rules is worse than defaults
         # Falling back is right; falling back SILENTLY is not. These rules are how the owner
         # customises behaviour, so an unreadable file means Afon quietly ignores every rule the
         # owner wrote and behaves like a fresh install — a behaviour change with no symptom to
         # notice. Log it loudly enough that "he stopped following my rules" is diagnosable.
         logger.warning(f"operating rules unreadable at {_OPERATING_RULES_PATH} "
-                       f"({type(e).__name__}: {e}) — falling back to built-in defaults")
-        parts.append(_DEFAULT_OPERATING_RULES)
+                       f"({type(e).__name__}: {e}) — running without the owner's rules")
+        parts.append(_RULES_UNREADABLE)
     return "\n\n".join(parts)
 
 

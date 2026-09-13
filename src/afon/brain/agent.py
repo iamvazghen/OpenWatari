@@ -54,10 +54,40 @@ def _turn_situation():
         logger.debug(f"situation unavailable ({type(e).__name__}); turn runs without it")
         yield None
         return
+    # 41.F2 — the turn's citation ledger opens here, beside the situation, because both are
+    # "what was true for THIS turn" and both must be empty for the next one. A ledger that leaked
+    # across turns would let yesterday's reading vouch for today's claim.
+    try:
+        from afon.brain import citations
+
+        citations.start()
+    except Exception as e:  # noqa: BLE001 — provenance bookkeeping never costs a turn
+        logger.debug(f"citation ledger unavailable ({type(e).__name__})")
     # perceive() reads cached facts only — no camera, no blocking call — so this stays inside the
     # 30ms context budget even though it runs on every turn.
     with situation(perceive(PRESENCE), MODES) as s:
         yield s
+
+
+def _own_sources(reply: str) -> str:
+    """41.F2 — a reply that names a page Afon never opened admits it, in one clause.
+
+    A model handed a page of text will attribute a claim to a plausible URL it never fetched, and
+    the answer looks BETTER for having a citation. The owner cannot tell a real link from a
+    well-formed one, which is what makes this worth a sentence rather than a log line. The reply
+    itself is left alone: editing what the model said to hide the problem is the same dishonesty
+    one layer down.
+    """
+    try:
+        from afon.brain import citations
+
+        note = citations.caveat(reply)
+        if note:
+            logger.warning(f"citation not retrieved this turn: {citations.unsupported(reply)}")
+        return reply + note
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"citation check skipped ({type(e).__name__})")
+        return reply
 
 
 # Short spoken filler per tool so a longer turn is never dead air. These are the BASE
@@ -1271,7 +1301,9 @@ class AfonAgent:
         is guaranteed for all of them, including the ones that raise.
         """
         with turn_trace.turn(user_text, streamed=False), _turn_situation():
-            return await self._respond_impl(user_text, on_progress)
+            reply = _own_sources(await self._respond_impl(user_text, on_progress))
+            turn_trace.note_answer(reply)      # 45.F3 — sources + confidence, before the row closes
+            return reply
 
     async def _respond_impl(self, user_text: str, on_progress: Callable | None = None) -> str:
         from afon.brain.metrics import METRICS
@@ -1554,10 +1586,25 @@ class AfonAgent:
                     outcomes[idx] = {"name": name, "result": refusal, "ok": False,
                                      "args": args, "blocked": True}
                     continue
+            # 44.F4 — proceed-with-note: the grade between confirming and just doing it. The
+            # action runs either way, so this is said on the way past rather than held for an
+            # answer. Without it the only way to tell him something was to refuse, which is why
+            # guest mode and lockdown used to change what Afon did and never say that they had.
+            said_note = ""
+            try:
+                from afon.brain.proactive import NOTE, grade as _grade
+
+                verdict = _grade(name, args)
+                if verdict.grade == NOTE and verdict.why:
+                    said_note = f"Just so you know, sir — {verdict.why}."
+            except Exception as e:  # noqa: BLE001 — grading never blocks a permitted action
+                logger.debug(f"grade unavailable for {name} ({type(e).__name__})")
             # ACKNOWLEDGEMENT: announce what we're about to do BEFORE running the tool, always — so
             # Afon is never silently "working" (the Afon "Right away, sir — getting the time"
             # beat). Deterministic + instant (no LLM), and contextual from the args.
             if on_progress:
+                if said_note:
+                    on_progress(said_note)
                 on_progress(_ack_for(name, args))
             runnable.append((idx, name, args))
 
@@ -1711,6 +1758,17 @@ class AfonAgent:
             try:
                 async for chunk in self._respond_stream_impl(user_text, on_progress):
                     yield chunk
+                # 41.F2 — the same admission the blocking path makes, as one more spoken sentence.
+                # It has to come from the finished reply rather than per chunk: a URL can be split
+                # across two sentences, and half a link resolves to nothing.
+                said = ""
+                if self._history and self._history[-1].get("role") == "assistant":
+                    said = str(self._history[-1].get("content") or "")
+                note = _own_sources(said)[len(said):] if said else ""
+                if note:
+                    self._history[-1]["content"] = said + note
+                    yield note
+                turn_trace.note_answer(said + note)   # 45.F3
             finally:
                 if not self._stream_done:
                     self._history.append({"role": "assistant", "content": "(interrupted)"})

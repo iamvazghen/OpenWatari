@@ -15,8 +15,11 @@ These are Afon's OWN web reach. Heavy multi-step domain research still goes to t
 
 from __future__ import annotations
 
+import re
+
 from loguru import logger
 
+from afon.brain import citations
 from afon.brain.cache import CACHE
 from afon.brain.tools.base import clip, http_get, http_post, not_configured, tool_error
 from afon.config import settings
@@ -87,17 +90,27 @@ async def _search_chain(query: str) -> str:
     return f"No web results for '{query}', sir."
 
 
+#: URLs inside a provider's result blob. The providers format differently, so this deliberately
+#: matches any http(s) run rather than parsing each one's shape.
+_URL_IN_RESULT = re.compile(r"https?://[^\s<>\"')\]]+", re.I)
+
+
 async def web_search(args: dict) -> str:
     query = (args.get("query") or "").strip()
     if not query:
         return "What should I search the web for, sir?"
     try:
         # L4 cache: a repeated search inside the TTL window returns instantly (near-zero TTFW).
-        return await CACHE.cached(
+        out = await CACHE.cached(
             "web_search", key=query.lower(), ttl=600, factory=lambda: _search_chain(query)
         )
     except Exception as e:  # noqa: BLE001
         return tool_error("web search", e)
+    # 41.F2 — results are pages Afon has been SHOWN, so citing one is honest even though he has not
+    # opened it. The cached branch records too: a cache hit is still a retrieval that happened.
+    for found in _URL_IN_RESULT.findall(out or ""):
+        citations.record(found, via="web_search")
+    return out
 
 
 # ---- scrape: Jina Reader (keyless) -> Firecrawl ------------------------------------------
@@ -207,6 +220,17 @@ async def _scrape_chain(url: str) -> str:
     return ""
 
 
+def _first_heading(md: str) -> str:
+    """The page's own title from the reader's markdown, for a citation a person can recognise."""
+    for line in (md or "").splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            return clip(line.lstrip("# ").strip(), 90)
+        if line.lower().startswith("title:"):
+            return clip(line.split(":", 1)[1].strip(), 90)
+    return ""
+
+
 async def scrape_url(args: dict) -> str:
     url = (args.get("url") or "").strip()
     if not url:
@@ -225,6 +249,9 @@ async def scrape_url(args: dict) -> str:
             # indistinguishable to the owner from a summary of the article behind it.
             return (f"I couldn't read {url}, sir — {why}. I'd rather tell you that than summarise "
                     "the wall in front of it.")
+        # 41.F2 — a page he really opened. Recorded only on the path where a BODY came back, so an
+        # obstructed fetch never becomes a source he can cite for what was behind the wall.
+        citations.record(url, _first_heading(md), via="scrape_url")
         return clip(md, 3500)
     except Exception as e:  # noqa: BLE001
         return tool_error("page scrape", e)

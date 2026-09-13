@@ -144,6 +144,71 @@ def main() -> None:
     check(not missing, f"persona.example.md covers all {len(shipped)} shipped sections",
           f"missing from the template: {missing}")
 
+    print("\n[single source] 25.F3 — one definition of who he is, and one of how he sounds")
+    # The fleet's lesson, and it cost a week there: retired names kept coming back because only
+    # SOUL.md was ever edited and IDENTITY.md quietly said something else. Here the same shape had
+    # already appeared in miniature — context.py carried a hardcoded copy of the operating rules
+    # that had DRIFTED from the file it was a fallback for, so a brain that fell back was governed
+    # by a rulebook the owner had never seen. Two copies do not stay equal; they stay unequal
+    # quietly, which is worse than one copy being wrong.
+    persona_body = re.sub(r"<!--.*?-->", "",
+                          (ROOT / "personality" / "afon.md").read_text(encoding="utf-8"), flags=re.S)
+    rules_body = re.sub(r"<!--.*?-->", "",
+                        (ROOT / "personality" / "operating-rules.md").read_text(encoding="utf-8"),
+                        flags=re.S)
+    context_src = (ROOT / "src" / "afon" / "brain" / "context.py").read_text(encoding="utf-8")
+    voice_skill = (ROOT / "skills" / "voice-style.md").read_text(encoding="utf-8")
+
+    check(persona_body.count("\u2014 Persona") == 1,
+          "the persona names itself exactly once",
+          "two headers in one file is already two definitions")
+
+    # No Python file may carry persona or rule PROSE. A fallback that quotes the rules is a second
+    # rulebook with no owner; a fallback that says the rules are missing is a status message.
+    check("_DEFAULT_OPERATING_RULES" not in context_src,
+          "no Python module embeds a copy of the operating rules",
+          "the hardcoded copy is back — it drifted from the file last time")
+    check("_RULES_UNREADABLE" in context_src and "could not be read" in context_src,
+          "...and the fallback SAYS the rules are missing instead of inventing some")
+    fallback = context_src.split("_RULES_UNREADABLE = (", 1)[-1].split(chr(10) + ")", 1)[0]
+    check(len(fallback) < 700 and "composio_find_tools" not in fallback,
+          "...and the fallback is a status message, not a rulebook of its own",
+          f"the fallback grew back into rules ({len(fallback)} chars)")
+
+    # The one rule that had three copies. Each of these belongs to exactly one file now.
+    def _owns(text, *needles):
+        low = text.lower()
+        return any(n in low for n in needles)
+
+    check(_owns(persona_body, "short sentences", "one breath"),
+          "the persona owns how long a reply is")
+    check(not _owns(rules_body, "one or two sentences", "no markdown or emoji"),
+          "...and the operating rules no longer restate it",
+          "the spoken-output rule is back in the rules file")
+    check(not _owns(voice_skill, "one or two sentences by default", "no markdown, no emoji"),
+          "...and the voice skill no longer restates it either",
+          "the skill is defining the persona again")
+    check(all(w in voice_skill.lower() for w in ("youtube dot com", "round unless precision")),
+          "the voice skill still carries the technique that is only its own",
+          "trimming the duplication took the useful half with it")
+
+    # Whatever is actually assembled must contain one persona and one set of rules.
+    from afon.brain.context import build_system_prompt
+
+    prompt = build_system_prompt()
+    check(prompt.count("\u2014 Persona") == 1,
+          "the assembled prompt carries exactly one persona header",
+          f"{prompt.count(chr(8212) + ' Persona')} persona headers in one prompt")
+    check(prompt.count("Check before refusing") == 1,
+          "...and one 'check before refusing' rule, not two",
+          f"{prompt.count('Check before refusing')} copies — the fallback is appended as well")
+
+    # persona.example.md is a COPY on purpose (it is the fork-me template) and is never loaded.
+    # That is the one duplicate allowed, so it is pinned rather than merely tolerated.
+    check("persona.example" not in context_src,
+          "the template is not loaded into the prompt",
+          "the example persona is only a template; loading it would make it a second definition")
+
     print("\n[6] the allow-list stays honest")
     # An entry that no doc uses any more is a licence nobody asked for; delete it.
     for token in sorted(EXTERNAL):
