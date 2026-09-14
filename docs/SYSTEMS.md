@@ -648,9 +648,37 @@ planning stays in-process (no extra round trip).
       *gate:* `test_intent_classes.py` [ambiguous] + `test_pure_chat_tools.py`
 - [ ] 01.R3 Goal attribution: the agent can name the objective a turn serves (from `objectives.py`),
       or say it serves none. *gate:* new `test_goal_attribution.py`
-- [ ] 01.R4 Self-model: "what can you do / what can't you do" answers from the real registry and the
-      real config, never from prompt prose. *gate:* `test_registry_complete.py` extended — the
-      spoken capability list is generated, not written.
+- [x] 01.R4 Self-model: "what can you do / what can't you do" answers from the real registry and the
+      real config, never from prompt prose. *gate:* `test_registry_complete.py` [01.R4] (21)
+      *done 2026-09-14:* `brain/selfmodel.py`, and the two halves needed different answers. The
+      **can** half needs no prompt text at all — the model already holds the tool catalogue every
+      turn, so adding a generated capability list would pay the per-turn cost 03.R5 had just spent
+      the afternoon defending, to restate what was already there. What it needed was for the prose
+      to stop naming tools by hand: `personality/operating-rules.md` lists sixteen, and each one is
+      a promise that rots silently the moment a tool is renamed. The gate now fails if any tool
+      named in that file is not in the registry.
+      The **cannot** half was simply missing. Every integration module already knows whether it is
+      configured and what it needs, and none of that reached the prompt — so "text her" against an
+      unconfigured Twilio produced a tool call, a not-configured string and an apology, where one
+      honest sentence up front was the entire answer. `prompt_block()` names the dark integrations
+      only: listing the working ones restates the catalogue, and the useful fact is always the
+      negative one. It is empty when everything is configured, because a block present on every
+      turn stops being read. Discovered by introspection over the tool modules, so a new
+      integration appears the day it is added and a retired one disappears the day it goes; a
+      module that declares a dependency with no way to check it is reported NOT ready, because the
+      failure of a silent default here is Afon claiming a capability he does not have.
+      Writing it found one live lie: `fitness._NEEDS` still sent the owner to enable the Google
+      Fitness API that **34.F1 had already retired**, and because that module borrows the Google
+      login as its readiness probe it reported itself configured while the capability it now uses
+      needs no Google at all. The declared need now names the path that actually works.
+      The block names the dark integrations and **nothing else** — not what each needs. That text is
+      written for the owner (`spoken()` carries it, and `test_finetune.py` holds the prompt to 2,000
+      tokens), and a per-turn cost that grows every time someone writes a friendlier `_NEEDS` string
+      is a cost nobody is watching. Wiring it also found the prompt already carrying ~470 characters
+      of **instructions to whoever edits the file**: `_read` stripped only the LEADING HTML comment,
+      and `operating-rules.md` never went through `_read` at all, so "Target ≤ 1 KB; longer eats the
+      conversation budget" was itself eating the conversation budget on every turn since the rules
+      were externalised. Stripped, and `test_finetune.py` now fails if a comment reaches the model.
 
 **Elite**
 - [ ] 01.E1 Multi-intent combinations ≥90 (last measured **51.5** — the one remaining real lever to
@@ -820,14 +848,42 @@ cannot own the turn.
       one turn, not across two. *gate:* new `test_tool_chaining.py`
 - [ ] 03.R4 Dead-tool sweep: every tool not fired in 90 days is either exercised by a bench case or
       retired. *gate:* `test_tool_usage.py` extended with a staleness report.
-- [ ] 03.R5 **Schema minification.** The catalogue is the dominant per-turn cost and its *size* has
+- [x] 03.R5 **Schema minification.** The catalogue is the dominant per-turn cost and its *size* has
       never been attacked, only its membership: descriptions written for a human reader, parameters
       no caller sets, names longer than they need to be. Measure first with `tiktoken`, then cut, and
       keep a hard per-turn ceiling with an automatic fallback to one clarifying question when the
       router is unsure.
-      *gate:* `test_speed.py` [catalogue-tokens] — a declared ceiling, enforced, with the before and
-      after recorded; `test_registry_complete.py` still green, because a minified schema that the
-      model can no longer use is not a saving.
+      *gate:* new `test_catalogue_budget.py` (27) + `test_speed.py` [catalogue-tokens] ratcheted;
+      `test_registry_complete.py` still green, because a minified schema that the model can no
+      longer use is not a saving.
+      *done 2026-09-14:* **measured first, and the measurement moved the task.** With `tiktoken`
+      (cl100k_base) the full registry is 17,531 tokens over 152 tools and the core surface 6,840
+      over 54; the runtime's own chars/4 counter reads 7% high, which is the safe direction for a
+      ceiling, so it stays the counter and no dependency was added to ship a number. Then the three
+      named targets were checked one at a time, and **none of them was there**: parameters no
+      caller sets — *zero*, every advertised property is read somewhere; descriptions that merely
+      restate their key — twelve, worth 42 tokens on the core surface, less than the mechanism to
+      strip them would cost to keep; and the long core descriptions turn out to be dense with
+      routing triggers ("are you having trouble?"), disambiguation ("use open_url instead") and
+      safety rules ("NEVER call this without the password"), so cutting them buys tokens and pays
+      for them in the wrong-tool rate 03.E1 measures. Renaming tools was declined outright: the
+      blast radius is handlers, traces, memory and the model's learned habits, for a handful of
+      characters.
+      What the measurement *did* find is that the size nobody attacked was the number of lazy
+      groups one turn can arm. Core alone is 7,341t; one group 9,375t; two 10,674t; four 12,164t —
+      and all twenty-five 19,004t, with **nothing preventing it**. The recorded worst of 12,437 was
+      never one enormous utterance; it was two heavy turns back to back, because a group stays
+      advertised for a second turn. `agent.CATALOGUE_TOKEN_BUDGET = 11,000` is now checked *before*
+      each group joins, so the ceiling holds by construction instead of a test reporting the breach
+      the morning after. Groups arm strongest-match-first (`groups_for_text_ranked`), and what this
+      turn asked for outranks what the last one left warm, because a warm group is a guess about
+      the follow-up and a guess loses to a request. A deferred group keeps its TTL — he may say the
+      missing half next turn.
+      The fallback is the point, not the saving: a turn that defers a group is a turn where the
+      trigger matcher matched broadly and could not tell, so Afon is told to ask **one** short
+      question naming the candidates rather than guess with half a surface. `test_speed.py`'s
+      ceiling drops 13,000 → 11,200 (worst measured 10,929), kept a hair above the enforced budget
+      on purpose: equal numbers would let a rounding difference between the two counters flap.
 - [ ] 03.R6 **Speculative dispatch, read tier only.** When the router is confident, start the likely
       call before the model's response completes, and allow genuinely independent calls to run in
       parallel.
@@ -4287,9 +4343,9 @@ green, `E` = elite green.
 
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
-| S01 | Brain / Core Intelligence | structured badly | 3/3 | 0/4 | 0/3 |
+| S01 | Brain / Core Intelligence | structured badly | 3/3 | 1/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 3/3 | 0/3 | 0/1 |
-| S03 | Tool Utilization | complete for now | 4/4 | 0/6 | 0/1 |
+| S03 | Tool Utilization | complete for now | 4/4 | 1/6 | 0/1 |
 | S04 | Device Control | floor green | 4/4 | 0/3 | 0/1 |
 | S05 | Browser Control | floor green | 3/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 3/3 | 0/3 | 0/1 |
@@ -4338,7 +4394,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 3/3 | 0/3 | 0/1 |
 
-**Totals: 151 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 151 of 370.**
+**Totals: 151 of 157 floor tasks green, 2 of 161 raise tasks, 0 of 52 elite tasks — 153 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

@@ -102,6 +102,73 @@ def main() -> int:
           not orphans,
           f"defined but never called: {orphans}" if orphans else "no phantom passes")
 
+    # --- 01.R4: the self-model comes from the registry and the config, never from prose --------
+    # "What can you do / what can't you do" was answered from `personality/operating-rules.md`,
+    # which names sixteen tools by hand. Every one is a promise that rots the moment a tool is
+    # renamed or removed, and the failure is not cosmetic: a self-model assembled from prose lets
+    # Afon claim a capability he does not have, and the owner finds out by asking for it.
+    import sys as _sys
+
+    _sys.path.insert(0, str(BENCH.parent / "src"))
+    from afon.brain import selfmodel as _SM
+    from afon.brain.context import build_system_prompt as _prompt
+    from afon.brain.tools import tool_handlers as _handlers
+
+    _known = set(_handlers())
+
+    # (a) the prose may no longer name a tool that does not exist.
+    _rules = (BENCH.parent / "personality/operating-rules.md").read_text(encoding="utf-8")
+    _claimed = _SM.named_tools(_rules)
+    _ghosts = sorted(n for n in _claimed if n not in _known)
+    check("no tool named in operating-rules.md has been renamed or removed out from under it",
+          not _ghosts, f"prose promises tools that do not exist: {_ghosts}")
+    check("...and the prose does name real tools, so the check above is not vacuous",
+          len(_claimed & _known) >= 5, f"{len(_claimed & _known)} recognised")
+
+    # (b) the CANNOT half is generated from the live config.
+    _ints = _SM.integrations()
+    check("every integration that declares a dependency is discovered by introspection",
+          len(_ints) >= 8, f"{len(_ints)} found")
+    check("each one reports a real readiness, not an assumption",
+          all(isinstance(i.ready, bool) for i in _ints))
+    check("each one advertises only tools something actually handles",
+          all(set(i.tools) <= _known for i in _ints),
+          str([i.name for i in _ints if not set(i.tools) <= _known]))
+    _dark = _SM.unavailable()
+    _blk = _SM.prompt_block()
+    check("the prompt block names every dark integration",
+          all(i.name in _blk for i in _dark), f"dark={[i.name for i in _dark]}")
+    check("...and names no working one, which would just restate the catalogue",
+          all(i.name not in _blk for i in _ints if i.ready),
+          "the per-turn cost 03.R5 exists to defend")
+    check("...and does not carry the per-turn cost of the `needs` prose, which is for the owner",
+          all(i.needs not in _blk for i in _dark) if _dark else True,
+          "a per-turn cost that grows when someone writes a friendlier _NEEDS is unwatched")
+    check("...while the SPOKEN form does say what each one needs, so the owner can act on it",
+          all(i.needs in _SM.spoken() for i in _dark) if _dark else True)
+    check("a fully-configured install produces no block at all",
+          bool(_blk) == bool(_dark),
+          "a block present on every turn stops being read")
+
+    # (c) generated means generated: change the registry, and the answer changes.
+    _before = _SM.prompt_block()
+    _saved = _SM.integrations
+    try:
+        _SM.integrations = lambda: [_SM.Integration("planted", ("x",), False, "a planted key")]
+        check("planting an unconfigured integration changes the generated block",
+              "planted" in _SM.prompt_block() and "planted" not in _before,
+              "if this passes with prose, the block was written rather than generated")
+        check("...and the spoken form changes with it", "planted" in _SM.spoken())
+    finally:
+        _SM.integrations = _saved
+    check("the block is restored once the plant is removed", _SM.prompt_block() == _before)
+
+    # (d) it actually reaches the model.
+    _sys_prompt = _prompt()
+    check("the generated gaps reach the system prompt",
+          (not _dark) or _blk in _sys_prompt,
+          "generated and never sent is the same as not generated")
+
     passed = sum(1 for ok, _, _ in results if ok)
     for ok, label, detail in results:
         if not ok:

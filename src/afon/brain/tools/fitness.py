@@ -12,7 +12,12 @@ from datetime import datetime, timedelta, timezone
 from afon.brain.google import api_get, api_post, configured
 from afon.brain.tools.base import not_configured, tool_error
 
-_NEEDS = "the Google OAuth login (bench/google_login.py) + the Fitness API enabled in the Cloud project"
+# 34.F1 retired the Google Fit dependency: `import_health`/`vitals_trend` read an Apple
+# Health export, which needs no API, no key and no Cloud project. The two Google Fit
+# readers below still exist for anyone who HAS enabled it, so the declared need names the
+# path that actually works first — 01.R4 reads this line to tell the owner what is missing,
+# and it used to send him to enable an API he no longer needs.
+_NEEDS = ("nothing for import_health/vitals_trend — export Health data from the iPhone and give me the file; the two Google Fit readers additionally need bench/google_login.py plus the Fitness API enabled")
 _BASE = "https://www.googleapis.com/fitness/v1/users/me"
 
 

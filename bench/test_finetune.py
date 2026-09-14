@@ -56,6 +56,14 @@ def main() -> None:
     per_fact = settings.memory_digest_fact_chars + 3   # "- " prefix + newline
     worst = (base_no_digest_chars + settings.memory_digest_max * per_fact) // 4
     check(f"prompt stays <= 2000 tok with a full max-length digest (~{worst})", worst <= 2000, f"{worst} tok")
+    # No editor notes in the prompt. Every personality/memory file is markdown with HTML comments
+    # addressed to whoever edits it ("Target <= 1 KB", "To customise: edit below"). `_read` stripped
+    # only the LEADING one, and operating-rules.md did not go through `_read` at all, so ~470
+    # characters of instructions-to-the-author were sent to the model on every turn. Nothing fails
+    # visibly when that regresses — it just costs.
+    check("no HTML comment reaches the prompt (editor notes are not for the model)",
+          "<!--" not in sp, f"{sp.count('<!--')} comment(s) injected")
+
     # Still carries identity + principal + the proactive mandate.
     check("persona present (Afon)", "Afon" in sp)
     check("principal present (Vazghen)", "Vazghen" in sp)

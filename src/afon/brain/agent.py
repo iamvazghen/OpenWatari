@@ -30,6 +30,7 @@ from afon.brain.tools import (
     core_tool_schemas,
     group_tool_schemas,
     groups_for_text,
+    groups_for_text_ranked,
     tool_handlers,
 )
 from afon.brain.tools.base import bound_tool_result
@@ -421,6 +422,26 @@ _WORK_INTENT_RE = re.compile(
     r"comparison|plan|draft|rundown|memo|document)\b",
     re.IGNORECASE,
 )
+#: 03.R5 — the hard per-turn catalogue budget, in the same chars/4 tokens `turn_trace` records.
+#: Measured 2026-09-14: core alone 7,341t over 54 tools; one armed group 9,375t; two 10,674t;
+#: three 11,449t; four 12,164t; and all twenty-five groups 19,004t, which nothing prevented.
+#: `test_speed.py` asserted a 13,000 ceiling on RECORDED traces — a ceiling that reports a breach
+#: the morning after instead of stopping it. 11,000 admits core plus the two heaviest groups, which
+#: is the honest reading of one clause, one group: two clauses, two groups. A third means the
+#: trigger matcher matched broadly and could not tell, and the answer to that is a question, not
+#: another 1,500 tokens of catalogue that also makes the wrong-tool rate worse.
+CATALOGUE_TOKEN_BUDGET = 11_000
+
+#: What the model is told when the budget deferred a group. One question, naming the candidates —
+#: guessing between them is the failure this exists to prevent, and asking twice is the failure the
+#: owner actually notices.
+_UNSURE_NUDGE = (
+    "Your tools for this turn cover {armed}, but the request also reads as {deferred}, and you are "
+    "NOT holding those tools. Do not guess between them and do not pretend to have done the part "
+    "you cannot: ask ONE short question about which he meant, then stop. If the part you CAN do "
+    "stands on its own, do that first and ask the question after it."
+)
+
 _WORK_INTENT_NUDGE = (
     "This is a multi-step research-and-write-up request. Call work_on_task to do it in the BACKGROUND "
     "(it researches and drafts, then reports back) and tell the owner you're on it — do NOT try to "
@@ -743,6 +764,7 @@ class AfonAgent:
         # improve_own_code is advertised only alongside the coding lazy group (see _tools_for_turn),
         # so it never bloats the every-turn surface — it appears when the turn is about code.
         self._group_ttl: dict[str, int] = {}     # group -> turns it stays advertised
+        self._deferred_groups: list[str] = []    # 03.R5: groups the budget refused THIS turn
         # Which language the conversation is in. Built lazily on the first mirror-mode turn so a
         # single-language deployment never pays for it.
         self._lang_tracker: lang.LanguageTracker | None = None
@@ -785,6 +807,14 @@ class AfonAgent:
         # over the generic multi-intent nudge so the model hands off instead of answering inline.
         work_intent = _is_work_intent(user_text)
         multi_intent = _is_multi_intent(user_text) and not work_intent
+        # 03.R5 — the budget refused a group the utterance really did ask for. That is the router
+        # saying it could not tell, so Afon asks instead of guessing with half a catalogue.
+        if self._deferred_groups:
+            messages.append({"role": "system", "content": _UNSURE_NUDGE.format(
+                armed=", ".join(g for g, ttl in self._group_ttl.items()
+                                if g not in self._deferred_groups and ttl > 0) or "the core tools",
+                deferred=" or ".join(self._deferred_groups))})
+
         if work_intent:
             messages.append({"role": "system", "content": _WORK_INTENT_NUDGE})
         elif multi_intent:
@@ -851,17 +881,34 @@ class AfonAgent:
             self._group_ttl = {g: ttl for g, ttl in self._group_ttl.items() if ttl > 0}
             self._tools = []
             return []
-        for g in groups_for_text(user_text):     # (re)arm groups the utterance calls for
+        fresh = groups_for_text_ranked(user_text)   # strongest match first
+        for g in fresh:                          # (re)arm groups the utterance calls for
             self._group_ttl[g] = 2               # this turn + one follow-up
-        active = [g for g, ttl in self._group_ttl.items() if ttl > 0]
         self._group_ttl = {g: ttl for g, ttl in self._group_ttl.items() if ttl > 0}
+        # What THIS utterance asked for outranks what the last one left warm: a group still on its
+        # second turn is a guess about the follow-up, and a guess loses to a request.
+        warm = [g for g in self._group_ttl if g not in fresh]
         tools = list(self._core_tools)
-        for g in active:
-            tools.extend(group_tool_schemas(g))
-        if "coding" in active:                    # code self-improve rides with the coding group only
-            tools.append(IMPROVE_CODE_SCHEMA)
+        active: list[str] = []
+        self._deferred_groups = []
+        for g in [*fresh, *warm]:
+            extra = group_tool_schemas(g)
+            if g == "coding":                     # code self-improve rides with the coding group only
+                extra = [*extra, IMPROVE_CODE_SCHEMA]
+            # 03.R5: the budget is checked BEFORE the group joins, so the ceiling holds by
+            # construction rather than by a test noticing afterwards. A deferred group keeps its
+            # TTL — he may well say the missing half next turn, and dropping it would make the
+            # follow-up pay the trigger cost again.
+            if turn_trace.catalogue_tokens(tools + extra) > CATALOGUE_TOKEN_BUDGET:
+                self._deferred_groups.append(g)
+                continue
+            tools.extend(extra)
+            active.append(g)
         if active:
             logger.info(f"lazy tool groups active this turn: {active} (+{len(tools) - len(self._core_tools)} tools)")
+        if self._deferred_groups:
+            logger.info(f"catalogue budget deferred {self._deferred_groups} "
+                        f"({turn_trace.catalogue_tokens(tools)}t of {CATALOGUE_TOKEN_BUDGET})")
         self._tools = tools
         return tools
 

@@ -124,11 +124,13 @@ def _read(p: Path) -> str:
     except FileNotFoundError:
         logger.warning(f"brain context: missing {p.name}")
         return ""
-    # Strip leading HTML comments — they're human-facing documentation, not for the LLM.
-    # Comments are kept in the FILE so authors see the placeholder docs, but excluded from the
-    # prompt to save ~1.5KB per turn.
+    # Strip HTML comments — they're human-facing documentation, not for the LLM. Comments are kept
+    # in the FILE so authors see the placeholder docs, but excluded from the prompt. This used to
+    # strip only the LEADING one, and operating-rules.md (which carries a second, mid-file note and
+    # was not read through here at all) shipped ~470 characters of editor instructions to the model
+    # on every single turn.
     import re
-    text = re.sub(r"^\s*<!--.*?-->\s*", "", text, count=1, flags=re.DOTALL)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     return text.strip()
 
 
@@ -259,6 +261,20 @@ def build_system_prompt() -> str:
     except Exception:  # noqa: BLE001
         pass
 
+    # 01.R4 — what he genuinely CANNOT do, generated from the live config rather than written.
+    # Only the dark integrations are named: listing the working ones would restate the catalogue
+    # the model already holds, and the useful fact is always the negative one. Without this,
+    # "text her" against an unconfigured Twilio produced a tool call, a not-configured string and
+    # an apology, where one honest sentence up front was the whole answer.
+    try:
+        from afon.brain.selfmodel import prompt_block
+
+        gaps = prompt_block()
+        if gaps:
+            parts.append(gaps)
+    except Exception:  # noqa: BLE001
+        pass
+
     # Operating rules — loaded from `personality/operating-rules.md` so anyone can fork the repo
     # and customise the rules without touching Python. See the top of that file for the pattern.
     # Falls back to a minimal hardcoded default only if the file is missing/corrupt (so a brand-new
@@ -267,7 +283,7 @@ def build_system_prompt() -> str:
         from afon.config import settings as _s  # noqa: F401 — imported for type only
         op_rules_path = _OPERATING_RULES_PATH
         if op_rules_path.is_file():
-            rules_text = op_rules_path.read_text(encoding="utf-8", errors="ignore").strip()
+            rules_text = _read(op_rules_path)
             if rules_text:
                 parts.append(rules_text)
         else:

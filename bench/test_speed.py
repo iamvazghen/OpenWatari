@@ -75,7 +75,15 @@ async def main() -> None:
 # ≤2.5k tokens and 03.R1's two-stage selection is what reaches it; until then this stops the
 # number growing, which is the failure that actually happened (58 → 91 tools once lazy groups
 # arm). The gap is printed on every run so it stays visible rather than settling in.
-CATALOGUE_TOKEN_CEILING = 13_000     # measured worst today: 12,437 (coding group armed)
+#
+# 03.R5 (2026-09-14) turned this from an observation into a limit. `agent.CATALOGUE_TOKEN_BUDGET`
+# is now checked BEFORE a lazy group joins the turn, so the catalogue cannot exceed it at all;
+# a group that would breach it is deferred and Afon asks one clarifying question instead of
+# guessing with half a surface. Before: 13,000 asserted, 12,437 measured, 19,004 possible with
+# every group armed and nothing stopping it. After: 11,000 enforced, 10,929 worst measured.
+# This ceiling stays a hair above the budget on purpose — if the two were equal, a rounding
+# difference between the trace's count and the agent's would make the gate flap.
+CATALOGUE_TOKEN_CEILING = 11_200     # enforced budget 11,000; measured worst today: 10,929
 CATALOGUE_TOOL_CEILING = 95          # measured worst today: 91
 CATALOGUE_TOKEN_TARGET = 2_500       # S03 budget — 03.R1, not asserted yet
 

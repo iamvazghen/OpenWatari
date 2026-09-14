@@ -339,6 +339,9 @@ TESTS = [
      "test_new_integrations.py", "offline", ["checks passed ==="]),
     ("C4 Speed: streaming TTFW — first spoken word reaches the owner before the slow tail finishes",
      "test_speed.py", "offline", ["checks passed ==="]),
+    ("Catalogue budget (03.R5): the per-turn tool surface has an ENFORCED ceiling, and an unsure "
+     "router asks one question instead of guessing",
+     "test_catalogue_budget.py", "offline", ["checks passed ==="]),
     ("C3 edge: AffectTTS pushes a live voice-settings update per owner mood (change-filtered, downstream)",
      "test_affect_tts_edge.py", "offline", ["checks passed ==="]),
     ("No-result sentinels: every read tool speaks a complete negative when empty", "test_no_result_sentinels.py",

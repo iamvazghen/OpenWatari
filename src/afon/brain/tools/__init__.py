@@ -249,6 +249,25 @@ def groups_for_text(text: str) -> set[str]:
     return {g for g, kws in LAZY_GROUP_TRIGGERS.items() if any(k in t for k in kws)}
 
 
+def groups_for_text_ranked(text: str) -> list[str]:
+    """The same groups, strongest match first — so a per-turn budget drops the weakest, not a
+    random one.
+
+    03.R5. Strength is the number of distinct triggers the utterance hit, then the longest one it
+    hit. Both matter and neither alone is enough: a single hit on "pull request" is a better
+    reading than a single hit on "how many", and three hits beat one however short they are.
+    Deterministic on ties (group name) because a catalogue that varies between identical turns
+    cannot be measured, and the prompt cache would miss on every one of them.
+    """
+    t = (text or "").lower()
+    scored = []
+    for g, kws in LAZY_GROUP_TRIGGERS.items():
+        hits = [k for k in kws if k in t]
+        if hits:
+            scored.append((len(hits), len(max(hits, key=len)), g))
+    return [g for _, _, g in sorted(scored, key=lambda r: (-r[0], -r[1], r[2]))]
+
+
 def schemas_by_name(names) -> list[dict[str, Any]]:
     """Schemas for the given tool names, pulled from the FULL registry (any group). Used by the
     B1 intent router to narrow a turn to exactly the right tool(s). Silently skips unknown names."""
