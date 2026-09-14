@@ -49,10 +49,18 @@ from afon.shared.paths import state_dir
 REQUIRED = ("ts", "intent", "tools_considered", "catalogue_tokens", "prefill_tokens",
             "tools_fired", "stages_ms", "total_ms", "ok")
 
-#: The classes S01.R1 will have to make explicit and testable. The floor derives what the existing
-#: routing signals already decide and labels the rest "general" — deriving "ambiguous" needs the
-#: classifier R1 builds, and inventing it here would put a guess in the evidence.
-INTENTS = ("chat", "lookup", "act", "multi", "general", "refused")
+#: The classes 01.R1 made explicit. "ambiguous" arrived with the classifier that can derive it
+#: (`intent_router.classify`), and "emergency" was here all along in everything but name:
+#: `agent.py` has always called `set_intent("emergency")`, and because the word was missing from
+#: this tuple every one of those turns was silently coerced to "general". A vocabulary that
+#: quietly rewrites what it is told is worse than a short one — the turns it loses are the ones
+#: most worth counting.
+#:
+#: "general" stays, and means what it says: a turn that reached the tracer without reaching the
+#: classifier. `turn_trace.classify` below mirrors `_prepare_turn`'s precedence rather than calling
+#: `intent_router.classify`, because it answers from the signals the router has ALREADY computed
+#: for the turn — no second parse, and `test_metrics.py` holds the two in step.
+INTENTS = ("chat", "lookup", "act", "multi", "ambiguous", "emergency", "general", "refused")
 
 #: Tool-name prefixes that CHANGE something. A narrowed turn is a lookup unless its one tool is
 #: one of these. Deliberately the inverse of an allowlist of read verbs: most of the 142 tools are
@@ -122,7 +130,8 @@ def message_tokens(messages: list[dict[str, Any]] | None) -> int:
 
 
 def classify(*, pure_chat: bool = False, multi_intent: bool = False, work_intent: bool = False,
-             narrowed: bool = False, forced_name: str | None = None) -> str:
+             ambiguous: bool = False, narrowed: bool = False,
+             forced_name: str | None = None) -> str:
     """Name the turn from the signals the router already computed.
 
     Order mirrors `_prepare_turn`: a work intent takes precedence over the multi-intent nudge
@@ -130,6 +139,8 @@ def classify(*, pure_chat: bool = False, multi_intent: bool = False, work_intent
     """
     if work_intent:
         return "act"
+    if ambiguous:
+        return "ambiguous"       # 01.R2 — a pointer with no antecedent is its own class
     if multi_intent:
         return "multi"
     if pure_chat:
@@ -162,6 +173,12 @@ class TurnTrace:
     #: made up about his own certainty is the least trustworthy thing in the row.
     sources: list[str] = field(default_factory=list)
     confidence: str = "unstated"
+    #: 02.R1 \u2014 which model was charged, and for how much output. Money per intent class cannot be
+    #: computed from the prefill alone, and attributing every turn to the PRIMARY model would be a
+    #: lie on exactly the turns that cost most: a failover answers on a different, differently
+    #: priced model, and those are the slow expensive ones worth seeing.
+    model: str = ""
+    answer_tokens: int = 0
     seq: int = 0
     _t0: float = field(default_factory=time.perf_counter)
 
@@ -178,8 +195,14 @@ class TurnTrace:
         if name:
             self.tools_fired.append(name)
 
+    def note_model(self, model: str) -> None:
+        """02.R1 \u2014 the model that actually answered, recorded where the chain knows it."""
+        if model:
+            self.model = str(model)
+
     def note_answer(self, reply: str) -> None:
-        """Close the row's account of WHY: what was read, and how firmly the answer was put."""
+        """Close the row's account of WHY: what was read, how firmly it was put, and what it cost."""
+        self.answer_tokens = _tokens(reply or "")
         try:
             from afon.shared.uncertainty import hedged
 
@@ -221,6 +244,8 @@ class TurnTrace:
             "tools_fired": list(self.tools_fired),
             "sources": list(self.sources),
             "confidence": self.confidence,
+            "model": self.model,
+            "answer_tokens": self.answer_tokens,
             "stages_ms": dict(self.stages_ms),
             "reached": list(self.reached),
             "total_ms": round((time.perf_counter() - self._t0) * 1000.0, 1),
@@ -304,6 +329,13 @@ def last() -> dict | None:
         return dict(_RING[-1]) if _RING else None
 
 
+def note_model(model: str) -> None:
+    """02.R1 \u2014 record the answering model on the turn in flight, if there is one."""
+    t = _CURRENT.get()
+    if t is not None:
+        t.note_model(model)
+
+
 def note_answer(reply: str) -> None:
     """Record what the turn in flight actually answered. No-op outside a turn."""
     t = _CURRENT.get()
@@ -322,6 +354,9 @@ def _emit(row: dict) -> None:
     METRICS.observe("turn_total_ms", row["total_ms"])
     METRICS.observe("turn_prefill_tokens", float(row["prefill_tokens"]))
     METRICS.incr(f"intent.{row['intent']}")
+    # 02.R1 \u2014 the same breakdown /metrics already had for turn COUNTS, now for what they cost.
+    METRICS.incr(f"prefill_tokens.{row['intent']}", int(row.get("prefill_tokens") or 0))
+    METRICS.incr(f"answer_tokens.{row['intent']}", int(row.get("answer_tokens") or 0))
 
 
 def _append(row: dict) -> None:
@@ -368,8 +403,26 @@ def summary(n: int = 50) -> dict:
         "max_prefill_tokens": prefills[-1],
         "p50_total_ms": mid(totals),
         "by_intent": by_intent,
+        "cost_by_intent": _cost_by_intent(rows),
         "failed": sum(1 for r in rows if not r["ok"]),
     }
+
+
+def _cost_by_intent(rows: list[dict]) -> dict:
+    """02.R1 \u2014 tokens and estimated money per intent class, for the HUD.
+
+    Carries `priced_on` and `estimate` with the numbers rather than beside them: a dollar figure
+    that travels without the date its price table was checked gets read as a fact.
+
+    Fail-quiet: a HUD section is never worth losing the rest of the summary over.
+    """
+    try:
+        from afon.brain.cost import PRICED_ON, by_intent as _by
+
+        return {"estimate": True, "priced_on": PRICED_ON, "by_class": _by(rows)}
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"cost breakdown unavailable: {type(e).__name__}: {e}")
+        return {}
 
 
 def load(days: int = 3) -> list[dict]:

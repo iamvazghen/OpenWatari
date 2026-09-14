@@ -24,6 +24,13 @@ from afon.shared import language as lang
 from afon.brain import delegation, emergency, turn_trace
 from afon.brain.context import build_system_prompt
 from afon.brain.fleet import FLEET_TOOL_SCHEMA, FleetUnavailable, delegate_to_fleet
+from afon.brain.intent_router import (           # 01.R1 — one place decides what kind of turn
+    _is_multi_intent,
+    _is_pure_chat,
+    _is_work_intent,
+    classify,
+    forced_tools,
+)
 from afon.config import settings
 from afon.brain.llm import LLMClient
 from afon.brain.tools import (
@@ -253,17 +260,6 @@ def _wants_forced_tool(user_text: str) -> bool:
     return bool(_COMMAND_RE.search(t) or _IMPERATIVE_RE.search(t) or _READ_INTENT_RE.search(t))
 
 
-# Multi-intent connectors (Roadmap 4.2): a compound request ("look up X AND remember it", "do A then
-# B") where a weak model often satisfies only the first part. We detect the connector joining a SECOND
-# action and add a completion nudge so the tool loop keeps going until every part is done. Connectors
-# are paired with an action verb so "fish and chips" / "nice and quiet" don't trigger.
-_MULTI_INTENT_RE = re.compile(
-    r"\b(and|then|also|plus|afterwards?|after that|as well as)\b[^.?!]{0,40}?\b("
-    r"remember|note|save|send|set|add|schedule|create|draft|reply|look up|search|check|find|"
-    r"play|turn|lock|unlock|email|message|text|remind|put|delete|cancel|summarise|summarize|"
-    r"write|tell|give|update)\b",
-    re.IGNORECASE,
-)
 _MULTI_INTENT_NUDGE = (
     "This request has MORE THAN ONE part. Complete EVERY part — use the right tool for each, one "
     "after another — and do not give your final reply until all parts are done or you've said which "
@@ -284,10 +280,6 @@ _SUMMARY_NUDGE = (
     "Now reply to the owner in one or two spoken sentences, summarising what you did and what you "
     "found. Do NOT call or write any tool calls."
 )
-
-
-def _is_multi_intent(user_text: str) -> bool:
-    return bool(_MULTI_INTENT_RE.search(user_text or ""))
 
 
 class TurnPlan(NamedTuple):
@@ -412,16 +404,6 @@ def _catastrophic(user_text: str) -> bool:
     return bool(_CATASTROPHIC_RE.search(user_text or ""))
 
 
-# Background-work intent (Phase 4.1 / Autonomy): a research-AND-produce request that should be handed to
-# work_on_task (the bounded background worker), not answered inline. Requires BOTH an investigate verb
-# AND a deliverable noun, so a quick "what's the capital of Japan" still answers live on auto.
-_WORK_INTENT_RE = re.compile(
-    r"\b(?:look into|research|dig into|investigate|analyse|analyze|compile|put together|work on|"
-    r"write\s*up|write me|draft me|prepare|pull together)\b[^.?!]*\b(?:"
-    r"summary|summarise|summarize|write[-\s]?up|report|brief|briefing|overview|analysis|breakdown|"
-    r"comparison|plan|draft|rundown|memo|document)\b",
-    re.IGNORECASE,
-)
 #: 03.R5 — the hard per-turn catalogue budget, in the same chars/4 tokens `turn_trace` records.
 #: Measured 2026-09-14: core alone 7,341t over 54 tools; one armed group 9,375t; two 10,674t;
 #: three 11,449t; four 12,164t; and all twenty-five groups 19,004t, which nothing prevented.
@@ -442,15 +424,30 @@ _UNSURE_NUDGE = (
     "stands on its own, do that first and ask the question after it."
 )
 
+#: 01.R2 — the request points at something and there is nothing to point at. One question, then
+#: stop: guessing which of two readings he meant is the failure, and a wrong guess on "delete it"
+#: is not recoverable by apologising afterwards.
+_AMBIGUOUS_NUDGE = (
+    "This request refers to something you have not been told. Do NOT guess which one he means and "
+    "do NOT act on the most likely reading: ask ONE short question naming what you need (which "
+    "one, to whom, which file), and stop there."
+)
+
+#: ...but only once. Asked the same thing twice in one session, he stopped answering and started
+#: repeating himself, which reads as not listening. The second time, take the likeliest reading and
+#: SAY which one you took, so a wrong guess is visible and correctable in one word.
+_AMBIGUOUS_AGAIN_NUDGE = (
+    "You already asked him to clarify this once in this conversation. Do NOT ask again. Take the "
+    "most likely reading, say in the same breath which reading you took ('the last one, the draft "
+    "to Anna'), and do it — unless it sends, deletes or spends something, in which case confirm "
+    "that specific reading instead."
+)
+
 _WORK_INTENT_NUDGE = (
     "This is a multi-step research-and-write-up request. Call work_on_task to do it in the BACKGROUND "
     "(it researches and drafts, then reports back) and tell the owner you're on it — do NOT try to "
     "answer it all inline in this turn."
 )
-
-
-def _is_work_intent(user_text: str) -> bool:
-    return bool(_WORK_INTENT_RE.search(user_text or ""))
 
 
 # NOTE: the per-turn "flaky tool" reliability note was REMOVED. Telling a non-thinking model that its
@@ -524,37 +521,6 @@ _AFFIRM_RE = re.compile(
 
 def _is_affirmation(text: str) -> bool:
     return bool(_AFFIRM_RE.match(text or ""))
-
-
-# Pure conversational turns (greetings, thanks, small talk, opinions, a joke) never call a tool. Yet the
-# model is otherwise handed the full ~56-tool surface every turn — a ~10k-token (~31KB) prefill that adds
-# ~1.7s of first-word latency (measured: MiniMax TTFT 0.5s with no tools vs ~2.2s with the full surface)
-# for nothing. On a high-confidence chatter turn we carry NO tools, so the model answers immediately.
-# ANCHORED to the whole utterance + length-capped, so it can NEVER swallow a tool-needing turn
-# ("what do you think about my calendar?" is 7 words but fails the ^…$ match → keeps its tools).
-_PURE_CHAT_RE = re.compile(
-    r"^\s*(hi|hey+|hello|hiya|yo|howdy|good\s*(morning|afternoon|evening|night)|greetings|"
-    r"how\s*(are|'?re)\s*(you|ya|things)|how\s*(are\s*)?you\s*doing|how'?s\s*it\s*going|"
-    r"how\s*have\s*you\s*been|what'?s\s*up|sup|"
-    r"thank(s| you)( so much| a lot| very much)?|cheers|much appreciated|appreciate it|"
-    r"well done|good job|nice(\s*(work|one))?|awesome|great(\s*job)?|amazing|brilliant|perfect|excellent|"
-    r"good\s*night|goodnight|bye|goodbye|see\s*(you|ya)( later| soon)?|talk\s*(to\s*you\s*)?later|"
-    r"tell me a joke|say something funny|you'?re (funny|hilarious|great|the best)|that'?s funny|ha+|lol|lmao|"
-    r"how do you feel|are you (ok|okay|there|alright|awake|listening)|you good|you there|"
-    r"i (love|like|appreciate) you|love you|"
-    r"cool|nice|neat|got it|gotcha|i see|makes sense|no worries|my bad|of course|"
-    r"never\s*mind|nevermind|forget it|just (saying|checking|kidding))"
-    r"[\s,.!'?]*(afon|afon|sir|buddy|mate|man|dude|please|then|too|though|there|everyone|all)?[\s,.!'?]*$",
-    re.IGNORECASE,
-)
-
-
-def _is_pure_chat(text: str) -> bool:
-    """High-confidence conversational turn that needs no tool (so we advertise none → fast first word)."""
-    t = (text or "").strip()
-    if not t or len(t.split()) > 7:
-        return False
-    return bool(_PURE_CHAT_RE.match(t))
 
 
 def _clean_reply(text: str) -> str:
@@ -764,7 +730,10 @@ class AfonAgent:
         # improve_own_code is advertised only alongside the coding lazy group (see _tools_for_turn),
         # so it never bloats the every-turn surface — it appears when the turn is about code.
         self._group_ttl: dict[str, int] = {}     # group -> turns it stays advertised
-        self._deferred_groups: list[str] = []    # 03.R5: groups the budget refused THIS turn
+        self._deferred_groups: list[str] = []
+        #: 01.R2 — normalised requests he has already been asked to clarify, so the
+        #: second one gets an assumption stated out loud instead of the same question.
+        self._clarified: set[str] = set()    # 03.R5: groups the budget refused THIS turn
         # Which language the conversation is in. Built lazily on the first mirror-mode turn so a
         # single-language deployment never pays for it.
         self._lang_tracker: lang.LanguageTracker | None = None
@@ -803,6 +772,17 @@ class AfonAgent:
         if self._reference is not None:
             messages.append({"role": "system", "content": self._reference.note()})
 
+        # 01.R2 — `_resolve_reference` above is the one thing that can supply an antecedent, and
+        # it declines when the reference is ambiguous, so its verdict IS the context signal: a
+        # bound "it" is an ordinary command, an unbound one is a question waiting to be asked.
+        ambiguous = classify(user_text, has_context=self._reference is not None) == "ambiguous"
+        if ambiguous:
+            key = " ".join((user_text or "").lower().split())
+            messages.append({"role": "system",
+                             "content": _AMBIGUOUS_AGAIN_NUDGE if key in self._clarified
+                             else _AMBIGUOUS_NUDGE})
+            self._clarified.add(key)
+
         # Research-and-write-up requests go to work_on_task (background); this takes precedence
         # over the generic multi-intent nudge so the model hands off instead of answering inline.
         work_intent = _is_work_intent(user_text)
@@ -819,6 +799,19 @@ class AfonAgent:
             messages.append({"role": "system", "content": _WORK_INTENT_NUDGE})
         elif multi_intent:
             messages.append({"role": "system", "content": _MULTI_INTENT_NUDGE})
+
+        # 01.R3 — which standing objective this turn serves, if any. Empty on almost every turn by
+        # design (most of what he does serves nothing standing), so this costs nothing until it has
+        # something true to say — and when it does, "why are you doing that?" has a real answer
+        # instead of a plausible one.
+        try:
+            from afon.brain.objectives import why_this_turn
+
+            goal_note = why_this_turn(user_text)
+            if goal_note:
+                messages.append({"role": "system", "content": goal_note})
+        except Exception:  # noqa: BLE001 — an unreadable objective book never breaks a live turn
+            pass
 
         lang_note = self._language_note(user_text)   # multilingual: answer in the language he used
         if lang_note:
@@ -862,7 +855,8 @@ class AfonAgent:
         if tr is not None:
             tr.set_intent(turn_trace.classify(
                 pure_chat=_is_pure_chat(user_text), multi_intent=multi_intent,
-                work_intent=work_intent, narrowed=narrowed, forced_name=forced_name))
+                work_intent=work_intent, ambiguous=ambiguous, narrowed=narrowed,
+                forced_name=forced_name))
             tr.note_prompt(messages, turn_tools)
             tr.add_ms("prepare", (time.monotonic() - _prep_started) * 1000)
 
@@ -1079,20 +1073,27 @@ class AfonAgent:
         said each morning pays it — the one turn where a delay is most noticeable, because there is
         no conversation in flight to hide it.
 
-        Synchronous and cheap (it is CPU-bound import work, ~90ms once). The lazy imports themselves
-        stay lazy: they keep the module import graph acyclic, and this only pre-populates
-        `sys.modules` so the first turn finds them already there.
+        Synchronous and cheap (it is CPU-bound import work, ~90ms once). Since 01.R1 `intent_router`
+        is imported by this module rather than lazily on the turn path, so its regexes compile when
+        the brain imports the agent — earlier than here, and earlier is the point.
+
+        This block used to call `schemas_by_name()` with no arguments, which has taken a `names`
+        argument for as long as it has existed. Every warm since then raised `TypeError` on its
+        FIRST statement and was swallowed by the `except` below at debug level, so nothing was
+        warmed and the owner's first sentence each morning paid the full cost this method exists to
+        remove. Nothing failed visibly; that is what made it survive. The check that the warm
+        actually warms something now lives in `test_latency_guard.py`.
         """
         t0 = time.monotonic()
         try:
-            from afon.brain import intent_router  # noqa: F401 — imported for the side effect
-            from afon.brain.tools import schemas_by_name
+            from afon.brain.tools import tool_schemas
 
-            schemas_by_name()   # builds the name->schema dict the router narrows against
-            intent_router.forced_tools("warm")   # forces the regex compile, not just the import
+            tool_schemas()                       # builds the registry the router narrows against
+            forced_tools("warm")                 # exercises the compiled routes end to end
             logger.debug(f"turn path warm in {(time.monotonic() - t0) * 1000:.0f}ms")
         except Exception as e:  # noqa: BLE001 — a cold first turn is slower, never broken
-            logger.debug(f"turn path warm skipped: {type(e).__name__}: {e}")
+            logger.warning(f"turn path warm skipped: {type(e).__name__}: {e} — the first turn "
+                           "after a restart will be slower than it should be")
 
     async def _load_mcp_tools(self) -> None:
         """Start any configured MCP servers and fold their tools into the registry + core surface, so

@@ -482,8 +482,9 @@ class LLMClient:
             # The turn's model stage, measured from `route_started` so a failover's cost lands on
             # the turn that paid it. Only successful routes arrive here; a chain that fails
             # outright raises, and the trace records that turn as failed instead.
-            from afon.brain.turn_trace import add_stage
+            from afon.brain.turn_trace import add_stage, note_model
             add_stage("llm", latency_ms)
+            note_model(model)   # 02.R1 \u2014 a failover is charged to the model that answered
         self.last_route = {
             "mode": mode,
             "answered_by": model,

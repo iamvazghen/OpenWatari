@@ -14,6 +14,14 @@ What this asserts:
   * the review names an objective nothing on the list is serving, which is the reading that
     changes what he does next.
 
+01.R3 adds the TURN half. A task carries a declared `meta.objective` and the attribution above
+refuses to guess from the title — rightly, because a task is filed once and read for months. A turn
+has no such field and never will, so the choice there is between inferring and having no answer at
+all, and "why are you doing that?" answered with plausible prose is the failure. So the inference is
+dull on purpose (two or more distinctive words shared with the objective's own text), ad-hoc is a
+real answer rather than a blank, and an attributed turn carries the objective's words into the
+prompt while an ad-hoc one carries nothing.
+
 Hermetic: a temp objective book and hand-built task stand-ins. No store, no LLM, no network.
 
     uv run python bench/test_goal_attribution.py
@@ -137,7 +145,58 @@ async def main() -> None:
     finally:
         ttools.TASKS = real_store
 
-    print("\n[6] the tools are registered")
+    print("\n[6] 01.R3 \u2014 the same question asked of a TURN rather than a task")
+    from afon.brain.objectives import turn_attribution, why_this_turn
+
+    # `book` above already holds "Get Party Map beta launch-ready" and "Ship the Rently migration".
+    for text, want in [
+        ("what's left before the Party Map beta ships", party.id),
+        ("any blockers on the party map launch", party.id),
+        ("how far along is the Rently migration", rently.id),
+    ]:
+        got = turn_attribution(text, book)
+        check(f"{text!r} names its objective", got == want, f"got {got}")
+    for text in ["what time is it", "when is the spacex launch", "remind me to call mum",
+                 "thanks", ""]:
+        check(f"{text!r} is ad-hoc", turn_attribution(text, book) == AD_HOC,
+              f"got {turn_attribution(text, book)}")
+    check("one shared word is never enough on its own",
+          turn_attribution("when is the launch", book) == AD_HOC,
+          "a classifier that finds an objective for every turn tells him what he wants to hear")
+    check("identical turns attribute identically",
+          len({turn_attribution("any blockers on the party map launch", book)
+               for _ in range(5)}) == 1)
+
+    note = why_this_turn("what's left before the Party Map beta ships", book)
+    check("an attributed turn carries the objective's OWN WORDS, not its id",
+          "Party Map beta launch-ready" in note and party.id not in note)
+    check("...and says to answer 'why are you doing that' with it", "if he asks" in note.lower())
+    check("an ad-hoc turn carries nothing \u2014 most turns serve nothing standing",
+          why_this_turn("what time is it", book) == "")
+
+    class _Dropped:
+        """active() still lists it; get() can no longer produce it \u2014 the daily driver can
+        complete or drop an objective between the two calls, and naming an objective he no longer
+        holds is worse than saying nothing."""
+
+        def active(self):
+            return book.active()
+
+        def get(self, _oid):
+            return None
+
+    check("an objective dropped mid-turn degrades to silence, not a wrong name",
+          why_this_turn("what's left before the Party Map beta ships", _Dropped()) == "")
+
+    src = (Path(__file__).resolve().parents[1] / "src/afon/brain/agent.py").read_text(
+        encoding="utf-8")
+    check("_prepare_turn consults it", "why_this_turn(user_text)" in src)
+    _i = src.index("why_this_turn(user_text)")
+    check("...inside a try/except \u2014 an unreadable book is not a reason to lose the turn",
+          "except Exception" in src[_i:_i + 400])
+    check("...and appends only when there is something to say", "if goal_note:" in src[_i:_i + 400])
+
+    print("\n[7] the tools are registered")
     from afon.brain.tools import tool_names
 
     names = set(tool_names())

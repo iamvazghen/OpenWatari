@@ -263,6 +263,66 @@ def attribution(task: Any) -> str:
     return str((getattr(task, "meta", None) or {}).get("objective") or AD_HOC)
 
 
+#: Words that appear in every objective and every request, so sharing one means nothing. Kept
+#: short on purpose: a long stop-list is a tuning knob nobody revisits, and the >3-character rule
+#: below already removes most of them.
+_NOISE = frozenset({
+    "the", "and", "for", "with", "this", "that", "from", "into", "your", "you", "our", "get",
+    "got", "make", "made", "need", "want", "please", "afon", "about", "what", "when", "where",
+    "should", "would", "could", "have", "has", "was", "were", "are", "its", "it's", "his", "her",
+    "them", "they", "some", "any", "all", "more", "most", "just", "now", "then", "next", "one",
+    "two", "how", "why", "who", "can", "will", "shall", "let", "lets", "let's", "keep", "still",
+    "work", "working", "thing", "things", "stuff", "done", "doing", "does",
+})
+
+
+def _content_words(text: str) -> set[str]:
+    # Three characters, not four: "map" is the distinguishing word in "Party Map" and a
+    # four-character floor silently dropped it. Hyphens split, so "launch-ready" matches "launch" —
+    # the owner writes an objective once and then talks about it in ordinary words.
+    return {w for w in re.findall(r"[a-z0-9]{3,}", (text or "").lower()) if w not in _NOISE}
+
+
+def turn_attribution(user_text: str, book: "ObjectiveBook | None" = None) -> str:
+    """The objective id THIS turn serves, or `AD_HOC`.
+
+    01.R3. A task can carry a declared `meta.objective` and `attribution` above refuses to guess
+    from its title — rightly, because a task is filed once and read for months. A turn has no such
+    field and never will, so the choice here is between inferring and having no answer at all.
+
+    The inference is deliberately dull: two or more distinctive words shared with the objective's
+    own text. One is not enough — "the launch" is shared by a launch objective and by asking when
+    the SpaceX launch is — and demanding a phrase match would mean he could only recognise a goal
+    when the owner quoted it back. Ties go to the objective sharing the most words, then to the
+    oldest id, so the same sentence always attributes to the same objective: an explanation that
+    changes between identical turns is worse than none.
+
+    `AD_HOC` is a real answer, not a failure. Most of what he does serves nothing standing, and a
+    classifier that finds an objective for every turn is telling the owner what he wants to hear.
+    """
+    words = _content_words(user_text)
+    if not words:
+        return AD_HOC
+    best, best_n = AD_HOC, 1          # strictly more than one shared word
+    for obj in sorted((book or OBJECTIVES).active(), key=lambda o: o.id):
+        n = len(words & _content_words(obj.text))
+        if n > best_n:
+            best, best_n = obj.id, n
+    return best
+
+
+def why_this_turn(user_text: str, book: "ObjectiveBook | None" = None) -> str:
+    """The spoken answer to "what is this in aid of?" — for the owner, and for the prompt."""
+    oid = turn_attribution(user_text, book)
+    if oid == AD_HOC:
+        return ""      # silent by design: most turns serve nothing standing, and saying so is noise
+    obj = (book or OBJECTIVES).get(oid)
+    if obj is None:
+        return ""
+    return (f"# This request serves a standing objective of his: \"{obj.text}\". Say so if he asks "
+            f"why you are doing it, and prefer the step that moves it.")
+
+
 def attribution_report(book: ObjectiveBook | None = None, todos: list | None = None) -> str:
     """Open work grouped under the objective it serves, with the ad-hoc pile named last."""
     from afon.brain.tasks import TASKS

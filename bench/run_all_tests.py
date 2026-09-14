@@ -286,6 +286,15 @@ TESTS = [
      "test_uncertainty.py", "offline", ["checks passed ==="]),
     ("B1: intent router — high-precision intents narrow to the one right tool; multi-intent/chat untouched",
      "test_intent_router.py", "offline", ["checks passed ==="]),
+    ("02.R2: the stable half of the system prompt is byte-identical between turns, so a prompt "
+     "cache can actually hit it",
+     "test_prompt_prefix_stable.py", "offline", ["checks passed ==="]),
+    ("02.R2: the stable half of the system prompt is byte-identical between turns, so a prompt "
+     "cache can actually hit it",
+     "test_prompt_prefix_stable.py", "offline", ["checks passed ==="]),
+    ("01.R1/01.R2: the five intent classes are explicit and measured, and an ambiguous turn asks "
+     "ONE question instead of guessing \u2014 and never the same one twice",
+     "test_intent_classes.py", "offline", ["checks passed ==="]),
     ("B6: clause routing — each clause of a multi-intent turn asks for its own tool, not just the first",
      "test_clause_routing.py", "offline", ["checks passed ==="]),
     ("B6: clause completion — a compound request fires every tool its plan names, on BOTH response paths",

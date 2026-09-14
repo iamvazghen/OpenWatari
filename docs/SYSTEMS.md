@@ -640,14 +640,64 @@ planning stays in-process (no extra round trip).
       *gate:* `test_metrics.py` extended — every turn emits a complete trace row. 54/54.
 
 **Raise**
-- [ ] 01.R1 Intent classes explicit and testable (chat · lookup · act · multi-clause · ambiguous)
-      rather than emergent from routing. *gate:* new `test_intent_classes.py` — 40 labelled prompts,
-      ≥90% class accuracy.
-- [ ] 01.R2 Ambiguity resolution: a genuinely ambiguous instruction asks **one** clarifying question
+- [x] 01.R1 Intent classes explicit and testable (chat · lookup · act · multi-clause · ambiguous)
+      rather than emergent from routing. *gate:* new `test_intent_classes.py` (30) — 42 labelled
+      prompts, 100%, plus a mechanically-labelled holdout.
+      *done 2026-09-14:* the five classes were all present and none of them was named. `forced_tools`
+      decided act-vs-lookup by which route matched first, `clause_tools` decided multi, and agent.py
+      carried its own three detectors — so three files each held part of the answer, no file held the
+      question, and "why did he treat that as chatter?" had nowhere to look and no number to move.
+      `_is_pure_chat`, `_is_multi_intent` and `_is_work_intent` moved verbatim into
+      `intent_router.py` (agent.py imports them; every existing gate still imports them from
+      `afon.brain.agent` unchanged, because the name is still there), and `classify()` composes
+      them. Nothing new is guessed: every class is a signal that was already deciding turns.
+      The act/lookup split is the one fact that had to be written down — `_WRITE_TOOLS` /
+      `_READ_TOOLS` over the tools `_ROUTES` can return. A set rather than a split of the route
+      list, because route ORDER is priority (writes sit before reads on purpose, so "remember to
+      check my mail" routes to `remember`) and reordering to label it would change which route wins.
+      The gate fails if a new route returns a tool in neither set, so adding one forces the label.
+      **The 100% is not the evidence.** A labelled set written alongside the classifier measures
+      agreement with myself, so the gate also scores a holdout it cannot tune: every turn in
+      `behavioral_suite.py` — written months ago for the live benchmark — labelled mechanically by
+      its own `expect_tools` field. 13 of 14. The one miss is honest and worth recording: "Open
+      example.com and tell me the page heading" classifies as multi, because `_MULTI_INTENT_RE`
+      reads the reporting tail "and tell me" as a second action. That over-detection predates this
+      task and is left alone — it costs a wider tool surface on a handful of turns, and narrowing
+      the live detector on the strength of one holdout row is how a benchmark starts driving.
+- [x] 01.R2 Ambiguity resolution: a genuinely ambiguous instruction asks **one** clarifying question
       instead of guessing, and never asks twice about the same thing in a session.
-      *gate:* `test_intent_classes.py` [ambiguous] + `test_pure_chat_tools.py`
-- [ ] 01.R3 Goal attribution: the agent can name the objective a turn serves (from `objectives.py`),
-      or say it serves none. *gate:* new `test_goal_attribution.py`
+      *gate:* `test_intent_classes.py` [ambiguous] (30) + `test_pure_chat_tools.py` (51)
+      *done 2026-09-14:* ambiguity here means a pointer with nothing to point at — "send it",
+      "delete that", "the usual" — and the hard part is that those are perfectly good sentences one
+      turn after "here's the draft". The context signal already existed and was not being read:
+      07.F3's `_resolve_reference` runs first, binds "it"/"the second one" where it can, and
+      declines whenever the reference is ambiguous. Its verdict IS the answer, so a bound pronoun
+      stays an ordinary command and only an unbound one becomes a question. Refusing to act on a
+      pronoun the owner just gave you is its own failure, and it is the one this could easily have
+      introduced.
+      The second half is the one the owner actually notices. Asking twice in a session reads as not
+      listening, so a normalised memo of what he has already been asked to clarify turns the second
+      identical request into a different instruction: take the likeliest reading, say in the same
+      breath which reading you took, and do it — unless it sends, deletes or spends, where the
+      confirmation is of that specific reading. Per-request, not a global latch: a different
+      ambiguous request still gets its own question.
+- [x] 01.R3 Goal attribution: the agent can name the objective a turn serves (from `objectives.py`),
+      or say it serves none. *gate:* `test_goal_attribution.py` [01.R3] (38) — extended, not new:
+      33.F3 already built that file for the TASK half.
+      *done 2026-09-14:* `turn_attribution` / `why_this_turn`. 33.F3's `attribution` refuses to
+      guess a task's objective from its title, and that refusal is right: a task is filed once and
+      read for months, so a guess there hardens into a fact. A turn has no declared field and never
+      will, so the choice is between inferring and having no answer at all — and "why are you doing
+      that?" answered with plausible prose is exactly the fabrication 01.F2 exists to prevent.
+      So the inference is dull on purpose: two or more distinctive words shared with the objective's
+      own text. One is not enough — "the launch" is shared by a launch objective and by asking when
+      the SpaceX launch is. `AD_HOC` is a real answer rather than a blank, because most of what he
+      does serves nothing standing and a classifier that finds an objective for every turn is
+      telling the owner what he wants to hear. Deterministic on ties, because an explanation that
+      changes between identical turns is worse than none.
+      Wired like 01.R4's block: silent unless it has something true to say, so an owner with no
+      objectives never pays for it, and an objective dropped between `active()` and `get()` degrades
+      to silence rather than naming one he no longer holds.
 - [x] 01.R4 Self-model: "what can you do / what can't you do" answers from the real registry and the
       real config, never from prompt prose. *gate:* `test_registry_complete.py` [01.R4] (21)
       *done 2026-09-14:* `brain/selfmodel.py`, and the two halves needed different answers. The
@@ -747,10 +797,42 @@ thinking tier only where it changes the answer (<15% of turns).
       *gate:* new `test_provider_cooldown.py` 28/28, twelve plants.
 
 **Raise**
-- [ ] 02.R1 Per-tier cost accounting in `metrics` — tokens and money per intent class, in the HUD.
-      *gate:* `test_metrics.py`
-- [ ] 02.R2 Prompt-cache discipline: the stable prefix (persona, rules) is byte-identical across
-      turns so the cache actually hits. *gate:* new `test_prompt_prefix_stable.py`
+- [x] 02.R1 Per-tier cost accounting in `metrics` — tokens and money per intent class, in the HUD.
+      *gate:* `test_metrics.py` [02.R1] (78)
+      *done 2026-09-14:* `brain/cost.py`. The trace already knew what each turn was charged for —
+      the catalogue it presented and the prefill it sent — and could not say which KIND of turn
+      spends it. That is the only breakdown that changes a decision: "chatter costs 7,300 tokens a
+      turn" can be acted on by not advertising tools to chatter, where one weekly total can only be
+      winced at. 01.R1 is what made this possible; without named classes there was nothing to group
+      by.
+      Two rules keep the money honest. **An unpriced model is never counted as free** — most of the
+      chain IS free today (the proxy, Groq's free tier), so a zero meaning "we don't know" mixed
+      with a zero meaning "it cost nothing" would make the total untrustworthy; unpriced turns are
+      counted and reported separately. **Prices are declared, not fetched** — a voice assistant
+      that calls a pricing API to render a HUD line has bought an outage — and they travel with
+      the date they were checked, because a dollar figure without one gets read as a fact.
+      Two row fields were missing and both were needed: the model that ANSWERED (a failover answers
+      on a different, differently priced model, and those are exactly the slow expensive turns worth
+      seeing — charging them to the primary would be a lie) and the answer's own token count.
+      Writing it found that the trace vocabulary was silently rewriting two classes: `agent.py` has
+      always called `set_intent("emergency")` and the word was missing from `INTENTS`, so every
+      emergency turn was recorded as "general" — losing the turns most worth counting. "ambiguous"
+      joined it, now that 01.R2 can derive it.
+- [x] 02.R2 Prompt-cache discipline: the stable prefix (persona, rules) is byte-identical across
+      turns so the cache actually hits. *gate:* new `test_prompt_prefix_stable.py` (13)
+      *done 2026-09-14:* a prompt cache is prefix-matched — it hits for exactly as many leading
+      bytes as two requests share and stops at the first byte that differs — so WHERE a changing
+      section sits decides what the cache is worth. The learned digest rebuilds every
+      `memory_digest_refresh_every_turns` turns and the delegation hint moves as domains repeat,
+      and **both sat in the middle of the prompt**, ahead of the Composio catalogue and the entire
+      operating-rules block. Every refresh therefore invalidated the back third of a prompt whose
+      contents had not changed at all. Both moved to the end: the cacheable prefix goes from
+      **62% to 90%** of 7,625 characters.
+      Nothing failed when that regressed, and nothing would have. The prompt was correct, the
+      answers were right, and the only symptoms were a bill and a time-to-first-word — which is
+      why it needs a gate rather than attention. `stable_prefix()` exists so the gate asserts the
+      property instead of re-deriving the section order, and so a new section has one obvious
+      question to answer: before that line, or after it.
 - [ ] 02.R3 Streaming correctness under failover — no duplicated or truncated sentence when the
       chain switches mid-stream. *gate:* `test_streaming.py` extended.
 
@@ -4343,8 +4425,8 @@ green, `E` = elite green.
 
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
-| S01 | Brain / Core Intelligence | structured badly | 3/3 | 1/4 | 0/3 |
-| S02 | LLM Integration | complete for now | 3/3 | 0/3 | 0/1 |
+| S01 | Brain / Core Intelligence | structured badly | 3/3 | 4/4 | 0/3 |
+| S02 | LLM Integration | complete for now | 3/3 | 2/3 | 0/1 |
 | S03 | Tool Utilization | complete for now | 4/4 | 1/6 | 0/1 |
 | S04 | Device Control | floor green | 4/4 | 0/3 | 0/1 |
 | S05 | Browser Control | floor green | 3/3 | 0/3 | 0/1 |
@@ -4394,7 +4476,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 3/3 | 0/3 | 0/1 |
 
-**Totals: 151 of 157 floor tasks green, 2 of 161 raise tasks, 0 of 52 elite tasks — 153 of 370.**
+**Totals: 151 of 157 floor tasks green, 7 of 161 raise tasks, 0 of 52 elite tasks — 158 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

@@ -223,10 +223,42 @@ def validate_vault(retries: int = 3, grace: float = 0.4) -> tuple[bool, str]:
     return False, msg
 
 
+def stable_prefix() -> str:
+    """02.R2 \u2014 the leading bytes of the system prompt that do NOT change between turns.
+
+    Exists so the gate can assert the property instead of re-deriving the section order, and so a
+    future section has one obvious question to answer: does it belong before this line or after it.
+    """
+    full = build_system_prompt()
+    for marker in _VOLATILE_MARKERS:
+        i = full.find(marker)
+        if i != -1:
+            return full[:i]
+    return full
+
+
+#: The first line of each volatile section. A section with no marker here would be invisible to
+#: `stable_prefix`, so `test_prompt_prefix_stable.py` fails if a volatile section appears that this
+#: tuple does not name.
+_VOLATILE_MARKERS = ("# Recently learned about", "Auto-delegate:")
+
+
 def build_system_prompt() -> str:
-    """Assemble the full system prompt: persona + memory, with clear section headers."""
+    """Assemble the full system prompt: persona + memory, with clear section headers.
+
+    Section ORDER is load-bearing (02.R2): everything stable first, everything that can differ
+    between two turns of one session last. See `volatile` below.
+    """
     persona = _apply_identity(_read(_persona_path()))
     parts: list[str] = []
+    # 02.R2 \u2014 anything that can differ between two turns of the same session goes in here and is
+    # appended LAST, so the bytes ahead of it are identical every time and a provider's prompt
+    # cache can actually hit them. The learned digest rebuilds every
+    # `memory_digest_refresh_every_turns` turns and the delegation hint moves as domains repeat;
+    # both used to sit in the MIDDLE, which invalidated the cache for everything after them \u2014
+    # including the persona's second half, the Composio catalogue and the whole operating-rules
+    # block. Order within the prompt is not free to choose, but this half of it was never chosen.
+    volatile: list[str] = []
     if persona:
         parts.append(persona)
     mem_blocks = [f"## {name}\n{content}" for name, content in load_memory_files() if content]
@@ -238,7 +270,7 @@ def build_system_prompt() -> str:
     digest = _learned_digest()
     if digest:
         who = (settings.user_name or "the user").strip()
-        parts.append(
+        volatile.append(
             f"# Recently learned about {who} (use `recall` for older)\n" + digest
         )
     # Learned delegation bias (one line, only once domains repeat) — see fleet.routing_hint.
@@ -247,7 +279,7 @@ def build_system_prompt() -> str:
 
         hint = routing_hint()
         if hint:
-            parts.append(hint)
+            volatile.append(hint)
     except Exception:  # noqa: BLE001
         pass
     # T12 — Composio catalog awareness. Without this, the LLM has no idea that 17 apps with
@@ -298,7 +330,7 @@ def build_system_prompt() -> str:
         logger.warning(f"operating rules unreadable at {_OPERATING_RULES_PATH} "
                        f"({type(e).__name__}: {e}) — running without the owner's rules")
         parts.append(_RULES_UNREADABLE)
-    return "\n\n".join(parts)
+    return "\n\n".join([*parts, *volatile])
 
 
 if __name__ == "__main__":

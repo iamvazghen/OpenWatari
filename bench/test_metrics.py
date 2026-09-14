@@ -92,6 +92,89 @@ def _agent(llm):
     return a
 
 
+def cost_sections() -> None:
+    """02.R1 \u2014 tokens and money per intent class, and the honesty rules around the money."""
+    import os
+    import tempfile
+
+    from afon.brain import cost as K
+    from afon.brain import turn_trace as T
+
+    print("\n[8] 02.R1 \u2014 what a turn costs, split by the class of turn that caused it")
+    check("the price table is dated, so a stale estimate is visibly stale",
+          bool(K.PRICED_ON) and K.PRICED_ON.count("-") == 2, K.PRICED_ON)
+    check("the longest matching prefix wins, so a family price cannot shadow a specific one",
+          K.price_of("groq:llama-3.3-70b-versatile") != K.price_of("groq:something-else"))
+    # The rule the whole breakdown rests on. A zero for "we don't know" mixed with a zero for
+    # "it was free" makes the total a number nobody can act on, and most of this chain IS free.
+    check("a model the table has never met is UNPRICED, not free",
+          K.usd("a-model-nobody-priced", 10_000, 1_000) is None)
+    check("...while a free tier is priced at zero deliberately",
+          K.usd("groq:something-else", 10_000, 1_000) == 0.0)
+    check("a priced model costs what the table says",
+          abs(K.usd("minimax:x", 1_000_000, 0) - K.PRICES["minimax:"][0]) < 1e-9)
+
+    rows = [
+        {"intent": "chat", "prefill_tokens": 700, "catalogue_tokens": 0, "answer_tokens": 40,
+         "model": "minimax:MiniMax-Text-01"},
+        {"intent": "act", "prefill_tokens": 9000, "catalogue_tokens": 7300, "answer_tokens": 60,
+         "model": "minimax:MiniMax-Text-01"},
+        {"intent": "act", "prefill_tokens": 9000, "catalogue_tokens": 7300, "answer_tokens": 60,
+         "model": "a-model-nobody-priced"},
+    ]
+    agg = K.by_intent(rows)
+    check("each class gets its own row", set(agg) == {"chat", "act"}, str(set(agg)))
+    check("turns are counted per class", agg["act"]["turns"] == 2)
+    check("unpriced turns are counted, not hidden in the total", agg["act"]["unpriced"] == 1)
+    check("the priced half still produces a figure", agg["act"]["usd"] > 0)
+    check("per-turn cost is reported, because the total alone cannot be acted on",
+          agg["act"]["prefill_per_turn"] == 9000 and agg["chat"]["prefill_per_turn"] == 700)
+    check("the heaviest class is listed first \u2014 the HUD is read top-down",
+          list(agg)[0] == "act")
+    check("an empty history is an empty breakdown, not a crash", K.by_intent([]) == {})
+
+    print("\n[9] 02.R1 \u2014 the trace carries what the accounting needs")
+    with tempfile.TemporaryDirectory() as td:
+        os.environ["AFON_TRACE_DIR"] = td
+        try:
+            with T.turn("hello") as t:
+                t.set_intent("chat")
+                t.note_prompt([{"role": "user", "content": "hello"}], [])
+                T.note_model("minimax:MiniMax-Text-01")
+                t.note_answer("Morning, sir.")
+            row = T.recent(1)[0]
+            check("the row names the model that answered", row["model"] == "minimax:MiniMax-Text-01")
+            check("...and the size of the answer it produced", row["answer_tokens"] > 0)
+            # A failover answers on a different, differently priced model, and those are exactly
+            # the slow expensive turns worth seeing. Attributing them to the primary would be a lie.
+            with T.turn("hello again") as t:
+                t.set_intent("chat")
+                T.note_model("minimax:MiniMax-Text-01")
+                T.note_model("groq:llama-3.3-70b-versatile")
+            check("a failover is charged to the model that actually answered",
+                  T.recent(1)[0]["model"] == "groq:llama-3.3-70b-versatile")
+            summary = T.summary(10)
+            check("the summary carries the cost breakdown the HUD renders",
+                  "cost_by_intent" in summary)
+            check("...labelled as an estimate, with the date its prices were checked",
+                  summary["cost_by_intent"].get("estimate") is True
+                  and summary["cost_by_intent"].get("priced_on") == K.PRICED_ON,
+                  "a dollar figure that travels without its date gets read as a fact")
+            check("...and broken down by class", "by_class" in summary["cost_by_intent"])
+        finally:
+            os.environ.pop("AFON_TRACE_DIR", None)
+
+    print("\n[10] 02.R1 \u2014 /metrics counts the same split")
+    from afon.brain.metrics import METRICS
+
+    counters = METRICS.snapshot()["counters"]
+    check("per-class turn counts are on /metrics",
+          any(k.startswith("intent.") for k in counters), str(list(counters)[:6]))
+    check("...and so are the tokens they spent",
+          any(k.startswith("prefill_tokens.") for k in counters),
+          "a class count without its cost is the half that was already there")
+
+
 def trace_sections() -> None:
     import os
     import tempfile
@@ -145,6 +228,20 @@ def trace_sections() -> None:
             check(f"all {len(WRITES)} narrowed writes classify as 'act'", not wrong, str(wrong))
             check("anything else is 'general', not a guess",
                   T.classify() == "general")
+            # Two classes were being silently rewritten. `agent.py` has always called
+            # set_intent("emergency"), and because the word was missing from INTENTS every one of
+            # those turns was coerced to "general" — losing exactly the turns most worth counting.
+            check("'emergency' survives being recorded, rather than becoming 'general'",
+                  "emergency" in T.INTENTS)
+            check("01.R2's ambiguous turn is its own class in the evidence",
+                  T.classify(ambiguous=True) == "ambiguous" and "ambiguous" in T.INTENTS)
+            check("...and a work intent still outranks it, as in _prepare_turn",
+                  T.classify(ambiguous=True, work_intent=True) == "act")
+            # The vocabulary and the classifier must not drift apart in either direction.
+            from afon.brain.intent_router import INTENT_CLASSES
+            check("every class the router can return is a class the trace can record",
+                  set(INTENT_CLASSES) <= set(T.INTENTS),
+                  str(set(INTENT_CLASSES) - set(T.INTENTS)))
 
             print("\n[6] EVERY turn emits exactly one row — including the ones that end badly")
             import asyncio as _a
@@ -349,6 +446,8 @@ def main() -> None:
     check("/metrics checks authorization", "_post_authorized" in src and "/metrics" in src)
 
     trace_sections()
+
+    cost_sections()
 
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:

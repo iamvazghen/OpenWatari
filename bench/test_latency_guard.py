@@ -97,15 +97,29 @@ def main() -> None:
     import sys as _sys
 
     from afon.brain.agent import AfonAgent
-    for _m in ("afon.brain.intent_router",):
-        _sys.modules.pop(_m, None)
+    # 01.R1 moved the turn-kind detectors into intent_router and agent.py imports it at module
+    # level, so the regexes compile when the brain imports the agent — earlier than the warm, which
+    # is strictly better. Popping it from sys.modules can no longer prove anything: the package
+    # still holds the attribute, so `from afon.brain import intent_router` would not re-import.
+    check("importing the agent has already paid intent_router's import",
+          "afon.brain.intent_router" in _sys.modules,
+          "the first turn of the day would compile 27 regexes")
+    # What the warm still owes: the tool registry, and a route actually executed end to end. This
+    # ran for months raising TypeError on its first statement, swallowed at debug level, so it
+    # warmed NOTHING and nothing said so. Assert the effect, not the source text.
     _agent = AfonAgent()
-    check("intent_router is NOT imported merely by constructing the agent",
-          "afon.brain.intent_router" not in _sys.modules,
-          "already imported — this check can no longer prove the warm does anything")
-    _agent._warm_turn_path()
-    check("_warm_turn_path imports the turn path's lazy modules",
-          "afon.brain.intent_router" in _sys.modules)
+    _warned: list[str] = []
+    from loguru import logger as _lg
+
+    _sink = _lg.add(lambda m: _warned.append(str(m)), level="WARNING")
+    try:
+        _agent._warm_turn_path()
+    finally:
+        _lg.remove(_sink)
+    check("_warm_turn_path completes without being swallowed",
+          not any("warm skipped" in w for w in _warned), "; ".join(_warned)[:200])
+    from afon.brain.intent_router import forced_tools as _ft
+    check("...and the routes it warmed actually answer", _ft("remind me to call mum") != [])
     check("warmup() actually calls it (not just defined)",
           "_warm_turn_path" in AfonAgent.warmup.__code__.co_names,
           str(AfonAgent.warmup.__code__.co_names))

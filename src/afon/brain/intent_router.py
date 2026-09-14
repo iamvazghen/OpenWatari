@@ -198,6 +198,170 @@ def clause_tools(user_text: str) -> list[str]:
     return ordered if len(ordered) >= 2 else []
 
 
+# ------------------------------------------------------------------------------------------------
+# 01.R1 — what KIND of turn is this?
+#
+# The five classes were always in here, just never named: `forced_tools` decided act-vs-lookup by
+# which route matched, `clause_tools` decided multi, and agent.py carried its own three detectors.
+# Three files each held part of the answer and no file held the question, so "why did he treat that
+# as chatter?" had no single place to look and no way to measure. The detectors below were moved
+# here verbatim from agent.py (they are unchanged; agent.py imports them) and `classify` composes
+# them. Nothing new is guessed: every class is a signal that was already deciding turns.
+# ------------------------------------------------------------------------------------------------
+
+# Multi-intent connectors (Roadmap 4.2): a compound request ("look up X AND remember it", "do A then
+# B") where a weak model often satisfies only the first part. We detect the connector joining a SECOND
+# action and add a completion nudge so the tool loop keeps going until every part is done. Connectors
+# are paired with an action verb so "fish and chips" / "nice and quiet" don't trigger.
+_MULTI_INTENT_RE = re.compile(
+    r"\b(and|then|also|plus|afterwards?|after that|as well as)\b[^.?!]{0,40}?\b("
+    r"remember|note|save|send|set|add|schedule|create|draft|reply|look up|search|check|find|"
+    r"play|turn|lock|unlock|email|message|text|remind|put|delete|cancel|summarise|summarize|"
+    r"write|tell|give|update)\b",
+    re.IGNORECASE,
+)
+
+def _is_multi_intent(user_text: str) -> bool:
+    return bool(_MULTI_INTENT_RE.search(user_text or ""))
+
+# Background-work intent (Phase 4.1 / Autonomy): a research-AND-produce request that should be handed to
+# work_on_task (the bounded background worker), not answered inline. Requires BOTH an investigate verb
+# AND a deliverable noun, so a quick "what's the capital of Japan" still answers live on auto.
+_WORK_INTENT_RE = re.compile(
+    r"\b(?:look into|research|dig into|investigate|analyse|analyze|compile|put together|work on|"
+    r"write\s*up|write me|draft me|prepare|pull together)\b[^.?!]*\b(?:"
+    r"summary|summarise|summarize|write[-\s]?up|report|brief|briefing|overview|analysis|breakdown|"
+    r"comparison|plan|draft|rundown|memo|document)\b",
+    re.IGNORECASE,
+)
+
+def _is_work_intent(user_text: str) -> bool:
+    return bool(_WORK_INTENT_RE.search(user_text or ""))
+
+# Pure conversational turns (greetings, thanks, small talk, opinions, a joke) never call a tool. Yet the
+# model is otherwise handed the full ~56-tool surface every turn — a ~10k-token (~31KB) prefill that adds
+# ~1.7s of first-word latency (measured: MiniMax TTFT 0.5s with no tools vs ~2.2s with the full surface)
+# for nothing. On a high-confidence chatter turn we carry NO tools, so the model answers immediately.
+# ANCHORED to the whole utterance + length-capped, so it can NEVER swallow a tool-needing turn
+# ("what do you think about my calendar?" is 7 words but fails the ^…$ match → keeps its tools).
+_PURE_CHAT_RE = re.compile(
+    r"^\s*(hi|hey+|hello|hiya|yo|howdy|good\s*(morning|afternoon|evening|night)|greetings|"
+    r"how\s*(are|'?re)\s*(you|ya|things)|how\s*(are\s*)?you\s*doing|how'?s\s*it\s*going|"
+    r"how\s*have\s*you\s*been|what'?s\s*up|sup|"
+    r"thank(s| you)( so much| a lot| very much)?|cheers|much appreciated|appreciate it|"
+    r"well done|good job|nice(\s*(work|one))?|awesome|great(\s*job)?|amazing|brilliant|perfect|excellent|"
+    r"good\s*night|goodnight|bye|goodbye|see\s*(you|ya)( later| soon)?|talk\s*(to\s*you\s*)?later|"
+    r"tell me a joke|say something funny|you'?re (funny|hilarious|great|the best)|that'?s funny|ha+|lol|lmao|"
+    r"how do you feel|are you (ok|okay|there|alright|awake|listening)|you good|you there|"
+    r"i (love|like|appreciate) you|love you|"
+    r"cool|nice|neat|got it|gotcha|i see|makes sense|no worries|my bad|of course|"
+    r"never\s*mind|nevermind|forget it|just (saying|checking|kidding))"
+    r"[\s,.!'?]*(afon|afon|sir|buddy|mate|man|dude|please|then|too|though|there|everyone|all)?[\s,.!'?]*$",
+    re.IGNORECASE,
+)
+
+def _is_pure_chat(text: str) -> bool:
+    """High-confidence conversational turn that needs no tool (so we advertise none → fast first word)."""
+    t = (text or "").strip()
+    if not t or len(t.split()) > 7:
+        return False
+    return bool(_PURE_CHAT_RE.match(t))
+
+
+#: Which of the tools `_ROUTES` can return CHANGE something. This is what separates `act` from
+#: `lookup`, and it is a set rather than a split of `_ROUTES` because route ORDER is priority
+#: (writes deliberately sit before reads so "remember to check my mail" routes to `remember`) and
+#: reordering the list to label it would change which route wins. `test_intent_classes.py` fails if
+#: a route ever returns a tool that is in neither set, so adding a route forces the label.
+_WRITE_TOOLS = frozenset({
+    "remember", "forget", "send_email", "draft_email", "send_telegram",
+    "notion_create_task", "notion_complete_task", "notion_delete_task", "notion_update_task",
+    "set_reminder", "create_event",
+})
+_READ_TOOLS = frozenset({
+    "read_skill", "scrape_url", "list_events", "read_email", "check_telegram", "notion_tasks",
+    "recall", "define_word", "crypto_price", "stock_price", "weather", "search_vault",
+    "web_search", "get_time",
+})
+
+#: A request whose OBJECT is a bare pointer with nothing to point at. "Send it" is a perfectly good
+#: sentence one turn after "here's the draft" and an unanswerable one as the first thing said, so
+#: this is only ambiguity when `classify` is told there is no conversation behind it. Anchored to
+#: the whole utterance: "cancel that meeting" names its object and is an ordinary act.
+_AMBIGUOUS_RE = re.compile(
+    r"^\s*(?:can you |could you |please |just |go (?:ahead )?and )*"
+    r"(?:do|send|delete|remove|cancel|fix|change|update|move|book|call|text|message|share|post|"
+    r"run|start|stop|open|close|finish|handle|sort|deal with|take care of)\s+"
+    r"(?:it|that|this|them|those|these|him|her|the usual|the same|that one|the other one)"
+    r"[\s.,!?]*$",
+    re.I,
+)
+#: Reference-only phrases: no verb at all, just a pointer at something unstated.
+_REFERENCE_ONLY_RE = re.compile(
+    r"^\s*(?:the usual|the same(?: as (?:before|last time|usual))?|same as (?:before|last time)|"
+    r"you know the one|that thing|the other one|like last time|as before)[\s.,!?]*$", re.I)
+
+
+def _is_ambiguous(text: str) -> bool:
+    """A pointer with no antecedent. See `_AMBIGUOUS_RE` — context is the caller's to supply."""
+    t = (text or "").strip()
+    return bool(_AMBIGUOUS_RE.match(t) or _REFERENCE_ONLY_RE.match(t))
+
+
+#: A turn that routes to no tool can still plainly be a question ("how far is the moon") or plainly
+#: a command ("turn the lights off") — both real classes, neither of which `_ROUTES` covers, because
+#: the router only narrows where narrowing was worth it.
+_QUESTION_RE = re.compile(r"\?\s*$|^\s*(?:who|what|when|where|why|how|which|is|are|was|were|do|does|"
+                          r"did|can|could|will|would|should|has|have|tell me|show me)\b", re.I)
+_IMPERATIVE_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:turn|switch|play|pause|stop|start|open|close|lock|unlock|set|put|make|"
+    r"run|launch|kill|restart|move|copy|delete|install|download|upload|call|text|email|send|order|"
+    r"book|buy|add|create|write|draft|remind|schedule|cancel|mute|unmute|dim|brighten)\b", re.I)
+
+
+#: The five classes. Ordered by how much they constrain the turn, which is also the order
+#: `classify` tests them in.
+INTENT_CLASSES = ("chat", "ambiguous", "multi", "act", "lookup")
+
+
+def classify(user_text: str, *, has_context: bool = False) -> str:
+    """Which of `INTENT_CLASSES` this turn is. Pure, text-only, and cheap enough for every turn.
+
+    `has_context=True` means something was said earlier this turn-chain, which is what makes
+    "send it" an ordinary act rather than a question: the antecedent exists, and refusing to act on
+    a pronoun the owner just gave you is its own failure.
+
+    Precedence is deliberate:
+
+    * **chat** first — the pure-chat fast path carries NO tools, and letting a later class claim a
+      greeting would cost ~1.7s of first-word latency for nothing.
+    * **ambiguous** before multi/act, because a pointer at nothing should be asked about, not split.
+    * **multi** before act/lookup, because a compound request needs the full surface and one class
+      per clause would be a lie about a single turn.
+    * **act** before **lookup**: "remember to check my mail" is a write, and the routes already say
+      so by putting the write route first.
+
+    The fallthrough is the honest one: a turn that routes to nothing and asks nothing is chat.
+    """
+    t = (user_text or "").strip()
+    if not t:
+        return "ambiguous"
+    if _is_pure_chat(t):
+        return "chat"
+    if not has_context and _is_ambiguous(t):
+        return "ambiguous"
+    if _is_work_intent(t):
+        return "act"        # one background job, even though it reads compound (agent.py agrees)
+    if clause_tools(t) or _is_multi_intent(t):
+        return "multi"
+    routed = forced_tools(t)
+    if routed:
+        return "act" if routed[0] in _WRITE_TOOLS else "lookup"
+    return "lookup" if _QUESTION_RE.search(t) else ("act" if _IMPERATIVE_RE.match(t) else "chat")
+
+
+
+
 def demo() -> None:
     cases = {
         "what's on my calendar today?": "list_events",
