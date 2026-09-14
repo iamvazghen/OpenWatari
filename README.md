@@ -47,6 +47,19 @@ configured yet" instead of crashing, so you light up integrations one at a time.
 > An *optional* external multi-agent fleet can be **consulted** as one tool among many — it never
 > becomes the assistant.
 
+### Where the work is planned
+
+Three documents, all tracked in this repo, none of them generated:
+
+| Document | What it is |
+|---|---|
+| **[`docs/SYSTEMS.md`](docs/SYSTEMS.md)** | The canonical plan: 50 subsystems × **floor / raise / elite**, every task with a named test that decides whether it is done, plus a scoreboard the build checks against the checkboxes. |
+| **[`docs/MASTER-PLAN.md`](docs/MASTER-PLAN.md)** | The long-range shape — what this is meant to become. |
+| **[`TODO.md`](TODO.md)** | The running engineering log: what was built, what it broke, and what it measured. |
+
+Current position: **159 of 370** tasks green — the floor tier essentially complete, the raise tier
+under way.
+
 ### Why a framework
 
 - **Bring your own everything.** Cloud quality (ElevenLabs + Deepgram) or 100% local CPU
@@ -270,14 +283,19 @@ Markdown layers are always the source of truth.
 
 ## The tool belt
 
-All tools live in `src/afon/brain/tools/` and self-degrade when unconfigured. Highlights:
+All tools live in `src/afon/brain/tools/` (46 modules, **152 tools**) and self-degrade when
+unconfigured. The whole registry is never advertised at once: **54 core tools** are on every turn and
+the remaining 25 groups arm only when what you said matches them, under an enforced per-turn token
+budget — a turn that would exceed it asks you one short question instead of guessing. Highlights:
 
 - **Knowledge** — `search_vault`, `read_vault_note`, **`write_vault`** (save a note on the
   authoritative host), `web_search` (Tavily), `scrape_url` (Jina Reader — free, keyless),
   `browse_web` (Browserbase).
 - **Memory** — `remember`, `recall`, `forget`, `read_journal`.
 - **Channels** — `check_telegram`, `read_chat`, `mark_telegram`, `send_telegram`, `read_email` /
-  `draft_email` / `send_email` (Gmail), `notion_search` / `read` / `append` / `comment` / `create`.
+  `draft_email` / `send_email` (Gmail), `notion_search`, `notion_read_page`, `notion_append`,
+  `notion_comment`. Your task list is Notion: `notion_tasks`, `notion_create_task`,
+  `notion_complete_task`, `notion_update_task`, `notion_delete_task`.
 - **Calendar & home** — `list_events`, `create_event`, `set_home_location`; Home Assistant tools.
 - **Utilities** — `weather`, `crypto_price`, `stock_price`, `fx_rate`, `news_brief`, `wiki_lookup`,
   `define_word`, `convert`.
@@ -321,16 +339,19 @@ reverts cleanly if anything regresses.
 
 ## Testing & benchmarks
 
-- **`uv run python bench/run_all_tests.py`** — the single gate. Each phase has a hermetic
-  `bench/test_*.py` (offline, no real network/keys). Network/fleet tests report **SKIP** (not FAIL)
-  when their backend is unreachable, so an offline run still passes.
+- **`uv run python bench/run_all_tests.py`** — the single gate: **201 tests, all green**. Each
+  capability has a hermetic `bench/test_*.py` (offline, no real network/keys). Network/fleet tests
+  report **SKIP** (not FAIL) when their backend is unreachable, so an offline run still passes. The
+  same suite runs on `git push` via `scripts/githooks/pre-push`, so nothing lands red.
+- **Every task in the plan carries a named gate.** `bench/test_systems_plan.py` fails the build if a
+  task in [`docs/SYSTEMS.md`](docs/SYSTEMS.md) has no gate, or if the scoreboard disagrees with the
+  checkboxes — a plan that can drift from the code is a plan that gets believed anyway.
 - **`uv run python bench/efficiency_report.py`** — measures the hot paths (memory recall, cache, brain
   TTFT, full-turn latency, prompt size) against efficiency targets. See
   [`SOP.md`](SOP.md) §9 for how to act on the numbers.
 
 **Publish gate:** this repo stays **private** until the suite is green *and* the efficiency report
-meets its targets. (Current state: suite green; one marginal item — streaming TTFT — tracked in the
-audit.)
+meets its targets.
 
 ---
 
@@ -392,7 +413,8 @@ website/           # the Next.js documentation site (deploy to Vercel)
 deploy/vps/        # the always-on recurring-reminder ticker
 scripts/           # edge service install/uninstall helpers
 bench/             # the test suite + benchmarks + one-time login helpers
-docs/              # MASTER-PLAN, NEXT-UPGRADE-DECISION, home-assistant
+docs/              # SYSTEMS.md (the plan), MASTER-PLAN, NEXT-UPGRADE-DECISION, home-assistant
+TODO.md            # the running engineering log — what was done, and what it cost
 LICENSE · THIRD_PARTY_NOTICES.md · SECURITY.md · SOP.md · TESTING_GUIDE.md · .env.example
 ```
 

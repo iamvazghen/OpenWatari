@@ -43,9 +43,12 @@ memory/projects.md
 memory/environment.md
 memory/openclaw-fleet.md
 
-# --- Internal working docs (kept local, not published) ---
-fine-tuning.md
-TODO-NOW.md
+# --- Planning docs are TRACKED on purpose ---
+# docs/SYSTEMS.md (the plan), docs/MASTER-PLAN.md and TODO.md are the record of what this is and
+# why, so they belong in the repo. This block used to ignore fine-tuning.md, TODO-NOW.md and
+# AFON-PRODUCTION-RECOMMENDATIONS.md; none of those files still exists (they were folded into
+# TODO.md and docs/SYSTEMS.md), so the rules only meant that recreating one would silently
+# untrack it. Removed. Personal, per-instance checklists stay out below.
 IPHONE-AFON-CHECKLIST.md
 
 # --- OS ---
@@ -68,8 +71,7 @@ website/
 next-steps/
 # Personal finish-line checklist (this instance, not the framework)
 MY-AFON-CHECKLIST.md
-# Production-readiness recommendations + behavioral run artifacts (local working docs)
-AFON-PRODUCTION-RECOMMENDATIONS.md
+# Behavioral run artifacts (machine-generated, not source)
 bench/_behavioral_run.txt
 bench/_behavioral_scorecard.json
 bench/_artifacts/

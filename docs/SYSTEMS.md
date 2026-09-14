@@ -833,8 +833,27 @@ thinking tier only where it changes the answer (<15% of turns).
       why it needs a gate rather than attention. `stable_prefix()` exists so the gate asserts the
       property instead of re-deriving the section order, and so a new section has one obvious
       question to answer: before that line, or after it.
-- [ ] 02.R3 Streaming correctness under failover — no duplicated or truncated sentence when the
-      chain switches mid-stream. *gate:* `test_streaming.py` extended.
+- [x] 02.R3 Streaming correctness under failover — no duplicated or truncated sentence when the
+      chain switches mid-stream. *gate:* `test_streaming.py` [02.R3] (22)
+      *done 2026-09-14:* the two streaming paths were wrong in **opposite** directions, which is why
+      neither looked wrong on its own. `stream_with_tools` refused to fail over once it had spoken —
+      right, because restarting says the opening twice — and therefore ended the turn wherever the
+      fault landed, mid-sentence. `stream`, which is the PURE-CHAT path and so the commonest turn
+      there is, had no such guard at all: it fell through to the next model, which answered from the
+      beginning, and the owner heard the first sentence twice. One path had the rule and the other
+      never got it.
+      Neither behaviour is necessary, because what was already spoken is a perfectly good assistant
+      turn to hand the next model. `_finish_broken_stream` asks it for the REST: **non-streaming**
+      so it cannot itself break mid-stream and recurse, **one attempt** on the rest of the chain so
+      an outage cannot turn one broken turn into a queue of them, and **fail-quiet** so a
+      continuation that does not arrive leaves exactly the truncated utterance this replaces —
+      never worse than today.
+      `_drop_overlap` handles the stutter: a model told not to repeat itself still echoes the last
+      few words, and the owner hears that as one. Longest overlap wins, capped at 400 characters,
+      because an overlap longer than that is not a stutter — it is the model starting again, and a
+      visible repeat is better than this quietly deleting a paragraph. The spacing at the join is
+      kept deliberately: trimming it glues "calendar" to "and", which is a worse artefact than the
+      stutter it removes.
 
 **Elite**
 - [ ] 02.E1 A full outage of primary + first fallback is inaudible in the voice path: the owner
@@ -4426,7 +4445,7 @@ green, `E` = elite green.
 | # | System | Today | F | R | E |
 |---|---|---|---|---|---|
 | S01 | Brain / Core Intelligence | structured badly | 3/3 | 4/4 | 0/3 |
-| S02 | LLM Integration | complete for now | 3/3 | 2/3 | 0/1 |
+| S02 | LLM Integration | complete for now | 3/3 | 3/3 | 0/1 |
 | S03 | Tool Utilization | complete for now | 4/4 | 1/6 | 0/1 |
 | S04 | Device Control | floor green | 4/4 | 0/3 | 0/1 |
 | S05 | Browser Control | floor green | 3/3 | 0/3 | 0/1 |
@@ -4476,7 +4495,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 3/3 | 0/3 | 0/1 |
 
-**Totals: 151 of 157 floor tasks green, 7 of 161 raise tasks, 0 of 52 elite tasks — 158 of 370.**
+**Totals: 151 of 157 floor tasks green, 8 of 161 raise tasks, 0 of 52 elite tasks — 159 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

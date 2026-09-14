@@ -131,11 +131,105 @@ async def test_cancelled_stream_no_dangling_user() -> None:
                and agent._history[-1]["role"] == "user" and agent._history[-2]["role"] == "user"))
 
 
+async def test_midstream_break_is_continued() -> None:
+    """02.R3 — the two streaming paths were wrong in opposite directions.
+
+    `stream_with_tools` refused to fail over once it had spoken (right: restarting says the opening
+    twice) and therefore ended the turn wherever the fault landed — half a sentence. `stream`, the
+    PURE-CHAT path and the commonest turn there is, had no such guard at all: it fell through to the
+    next model, which answered from the beginning, and the owner heard the first sentence twice.
+    Both now ask the next model for the REST.
+    """
+    print("\n[5] 02.R3 — a break mid-sentence is finished, not repeated and not cut")
+    import httpx
+    from openai import APITimeoutError
+    from types import SimpleNamespace
+
+    from afon.brain.llm import LLMClient, _drop_overlap
+
+    # The de-overlap rule on its own: a model told not to repeat itself still often echoes the last
+    # few words, and the owner hears that as a stutter.
+    check("an echoed tail is dropped",
+          _drop_overlap("I checked the calendar and", " and you have two meetings")
+          == " you have two meetings",
+          repr(_drop_overlap("I checked the calendar and", " and you have two meetings")))
+    # The spacing at the join survives on purpose: trimming it would glue "calendar" to "and" —
+    # a fix for a stutter that produces a worse artefact than the stutter.
+    check("the word boundary at the join is kept",
+          _drop_overlap("I checked the calendar and", " and you have").startswith(" "))
+    check("a continuation that does not overlap is left alone",
+          _drop_overlap("Morning, sir.", " You have two meetings.") == " You have two meetings.")
+    check("an empty continuation stays empty", _drop_overlap("anything", "") == "")
+    check("a whole repeat is NOT silently deleted",
+          _drop_overlap("x" * 500, "y" * 10) == "y" * 10,
+          "past the cap, a repeat is better visible than quietly swallowed")
+
+    # --- the tool path: broke after speaking, used to stop there ---------------------------------
+    llm = LLMClient()
+    llm._chain = ["a", "b"]
+
+    async def break_after_lead(**kwargs):
+        async def gen():
+            if kwargs["model"] == "a":
+                yield _chunk("I checked the calendar and ")
+                raise APITimeoutError(request=httpx.Request("POST", "http://localhost"))
+            yield _chunk("RESTARTED FROM THE TOP")
+        return gen()
+
+    llm._default.chat.completions.create = break_after_lead
+
+    seen: list[str] = []
+
+    async def fake_complete(messages, **_kw):
+        seen.append(messages[-2]["content"])      # what the continuation was handed
+        return SimpleNamespace(content=" and you have two meetings, sir.", tool_calls=None)
+
+    llm.complete = fake_complete
+    out = []
+    async for kind, payload in llm.stream_with_tools([{"role": "user", "content": "my day?"}]):
+        if kind == "text":
+            out.append(payload)
+    spoken = "".join(out)
+    check("the utterance is finished, not cut off mid-sentence",
+          spoken.endswith("two meetings, sir."), repr(spoken))
+    check("...and nothing is said twice", spoken.count("I checked the calendar") == 1, repr(spoken))
+    check("...and the fallback did NOT restart from the top",
+          "RESTARTED" not in spoken, repr(spoken))
+    check("the continuation is handed what was already spoken",
+          seen and seen[0].startswith("I checked the calendar"), str(seen))
+
+    # --- the pure-chat path: broke after speaking, used to repeat itself -------------------------
+    llm2 = LLMClient()
+    llm2._chain = ["a", "b"]
+    llm2._default.chat.completions.create = break_after_lead
+    llm2.complete = fake_complete
+    pieces = [p async for p in llm2.stream([{"role": "user", "content": "my day?"}])]
+    said = "".join(pieces)
+    check("the pure-chat path no longer restarts the answer",
+          "RESTARTED" not in said, repr(said))
+    check("...and it is finished too", said.endswith("two meetings, sir."), repr(said))
+
+    # --- and when the continuation itself fails, we keep what we had ----------------------------
+    llm3 = LLMClient()
+    llm3._chain = ["a", "b"]
+    llm3._default.chat.completions.create = break_after_lead
+
+    async def dead_complete(*_a, **_kw):
+        raise RuntimeError("the chain is down too")
+
+    llm3.complete = dead_complete
+    kept = "".join([p async for p in llm3.stream([{"role": "user", "content": "my day?"}])])
+    check("a failed continuation leaves the partial utterance, never an exception",
+          kept == "I checked the calendar and ", repr(kept))
+    check("...and still does not restart", "RESTARTED" not in kept, repr(kept))
+
+
 async def main() -> None:
     await test_plain_answer()
     await test_tool_then_stream()
     await test_no_double_failover_midstream()
     await test_cancelled_stream_no_dangling_user()
+    await test_midstream_break_is_continued()
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

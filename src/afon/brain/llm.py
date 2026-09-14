@@ -332,6 +332,26 @@ def _model_extra(model_name: str) -> dict[str, Any]:
     return {}
 
 
+def _drop_overlap(said: str, new: str) -> str:
+    """Strip from `new` any leading text that repeats the tail of `said`.
+
+    02.R3. A model told not to repeat itself will still often echo the last few words before
+    carrying on, and the owner hears that as a stutter. Longest overlap wins, and the comparison is
+    capped at the last 400 characters of what was said because an overlap longer than that is not a
+    stutter — it is the model starting again, and the caller is better served by the repeat being
+    visible than by this quietly deleting a paragraph.
+    """
+    tail = (said or "")[-400:]
+    n = min(len(tail), len(new or ""))
+    while n > 0:
+        if tail.endswith(new[:n]):
+            # Spacing at the join is KEPT: stripping it would glue 'calendar' to 'and',
+            # which is a worse artefact than the stutter this removes.
+            return new[n:]
+        n -= 1
+    return new or ""
+
+
 class LLMClient:
     """OpenAI-compatible client with model failover + per-model provider routing.
 
@@ -621,6 +641,50 @@ class LLMClient:
                        context={"errors": str(errors)[:200]})
         raise ChainExhausted(f"{CHAIN_EXHAUSTED}; last error: {last_err}")
 
+    #: 02.R3 — what the next model is told when a stream broke mid-sentence. It is given what was
+    #: ALREADY SPOKEN as an assistant turn, so "continue" is a real instruction rather than a hope.
+    _CONTINUE_NOTE = (
+        "The previous answer was cut off mid-sentence by a network fault. Continue it from exactly "
+        "where it stops, in the same voice. Do not repeat any part of it, do not start again, and "
+        "do not mention the fault — the owner heard the first half and is waiting for the rest."
+    )
+
+    async def _finish_broken_stream(self, messages: list[dict[str, Any]], said: str) -> str:
+        """One bounded attempt to finish an utterance whose stream died after it started speaking.
+
+        02.R3. Both streaming paths were wrong here and in opposite directions. `stream_with_tools`
+        refused to fail over once it had spoken — correct, because restarting would say the opening
+        twice — and so ended the turn wherever the fault landed, which is a sentence cut in half.
+        `stream` had no such guard at all: it fell through to the next model, which started the
+        answer from the beginning, and the owner heard the first sentence twice.
+
+        Neither is necessary. What was already spoken is a perfectly good assistant turn to hand the
+        next model, so the fix for both is to ask for the REST. Deliberately:
+
+        * **non-streaming**, so this cannot itself break mid-stream and recurse;
+        * **one attempt**, on the rest of the chain, so a provider outage cannot turn one broken
+          turn into a queue of them;
+        * **fail-quiet** — if the continuation does not arrive, the caller keeps the truncated
+          utterance it already had, which is exactly the behaviour this replaces, never worse.
+        """
+        if not (said or "").strip():
+            return ""
+        try:
+            msg = await self.complete(
+                [*messages,
+                 {"role": "assistant", "content": said},
+                 {"role": "system", "content": self._CONTINUE_NOTE}],
+                tools=None, tool_choice="none", skip_primary=True,
+            )
+            rest = _drop_overlap(said, getattr(msg, "content", "") or "")
+            if rest:
+                logger.warning(f"LLM stream broke mid-utterance; continued in {len(rest)} chars")
+            return rest
+        except Exception as e:  # noqa: BLE001 — a half answer beats an exception in the voice path
+            logger.warning(f"LLM stream broke mid-utterance and could not be continued: "
+                           f"{type(e).__name__}: {e}")
+            return ""
+
     async def stream_with_tools(
         self,
         messages: list[dict[str, Any]],
@@ -651,6 +715,7 @@ class LLMClient:
             client, model_name = self._resolve(model)
             tool_acc: dict[int, dict[str, str]] = {}
             got_any = False
+            said = ""              # 02.R3 — what the owner has actually heard so far
             stripper = _ThinkStripper()  # withhold a MiniMax <think> block from the spoken stream
             # Lead-buffer classification: hold the first chunk of CONTENT until we can tell prose
             # from a textual tool-call. Prose flushes and streams normally; a textual tool-call is
@@ -697,9 +762,11 @@ class LLMClient:
                             elif len(lead) >= 24:
                                 lead_state = "prose"
                                 got_any = True
+                                said += lead
                                 yield ("text", lead)
                         elif lead_state == "prose":
                             got_any = True
+                            said += piece
                             yield ("text", piece)
                         # lead_state == "toolcall": swallow content (no native call -> will fail over)
                     for tcd in getattr(delta, "tool_calls", None) or []:
@@ -718,11 +785,13 @@ class LLMClient:
                         lead += tail
                     elif lead_state == "prose":
                         got_any = True
+                        said += tail
                         yield ("text", tail)
                 # Stream ended mid-buffer: flush a short prose lead (e.g. "Yes, sir."). A withheld
                 # textual tool-call is intentionally NOT flushed -> stays unspoken, fails over.
                 if lead_state == "buffering" and lead and not _looks_like_textual_toolcall(lead):
                     got_any = True
+                    said += lead
                     yield ("text", lead)
                 if not got_any:
                     raise _EmptyResponse("stream produced no content")
@@ -740,10 +809,15 @@ class LLMClient:
                 # NOT flushed, so it still fails over to a native-tool-calling model.
                 if lead_state == "buffering" and lead and not _looks_like_textual_toolcall(lead):
                     got_any = True
+                    said += lead
                     yield ("text", lead)
                 if got_any:
-                    # Already speaking — don't fail over and repeat; end the utterance here.
+                    # Already speaking, so failing over would say the opening twice. 02.R3: ask the
+                    # next model for the REST instead of ending the turn on half a sentence.
                     logger.warning(f"LLM stream '{model}' broke mid-utterance ({type(e).__name__})")
+                    rest = await self._finish_broken_stream(messages, said)
+                    if rest:
+                        yield ("text", rest)
                     latency_ms = (asyncio.get_running_loop().time() - route_started) * 1000
                     self._mark_success(model, failures, "stream_with_tools", latency_ms, errors)
                     return
@@ -831,6 +905,7 @@ class LLMClient:
                 if model != self._chain[0]:
                     logger.warning(f"LLM streaming via fallback '{model}'")
                 got_any = False
+                said = ""              # 02.R3 \u2014 what the owner has actually heard so far
                 stripper = _ThinkStripper()  # strip a MiniMax <think> block from the text stream
                 # The FIRST token must arrive within the deadline, exactly as in stream_with_tools.
                 # This path had NO deadline at all: a bare `async for chunk in stream`. It is the
@@ -856,10 +931,12 @@ class LLMClient:
                         piece = stripper.feed(delta)
                         if piece:
                             got_any = True
+                            said += piece
                             yield piece
                 tail = stripper.flush()
                 if tail:
                     got_any = True
+                    said += tail
                     yield tail
                 if not got_any:
                     raise _EmptyResponse("stream produced no content")
@@ -868,6 +945,19 @@ class LLMClient:
                 return
             except (*_FAILOVER, _EmptyResponse) as e:
                 last_err = e
+                # 02.R3 \u2014 this path had NO mid-utterance guard, so a break after the owner had
+                # already heard the opening fell through to the next model, which answered from the
+                # beginning: the first sentence spoken twice. `stream_with_tools` has refused to do
+                # that for months; the pure-chat path, which is the commonest turn there is, never
+                # got the same rule. Ask for the REST instead of repeating or stopping.
+                if got_any:
+                    logger.warning(f"LLM stream '{model}' broke mid-utterance ({type(e).__name__})")
+                    rest = await self._finish_broken_stream(messages, said)
+                    if rest:
+                        yield rest
+                    latency_ms = (asyncio.get_running_loop().time() - route_started) * 1000
+                    self._mark_success(model, failures, "stream", latency_ms, errors)
+                    return
                 failures += 1
                 errors.append({"model": model, "error": type(e).__name__})
                 self._mark_failure(model, e)
