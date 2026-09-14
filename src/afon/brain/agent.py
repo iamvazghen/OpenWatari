@@ -40,7 +40,7 @@ from afon.brain.tools import (
     groups_for_text_ranked,
     tool_handlers,
 )
-from afon.brain.tools.base import bound_tool_result
+from afon.brain.tools.base import ErrorKind, bound_tool_result, kind_of
 
 
 @contextmanager
@@ -443,6 +443,24 @@ _AMBIGUOUS_AGAIN_NUDGE = (
     "that specific reading instead."
 )
 
+#: 03.R2 — what the model is handed when a call could not be dispatched. It names the tool, the
+#: argument and what was expected, because the point is that it can be fixed in ONE more attempt;
+#: "invalid arguments" only tells it to guess again. Explicitly NOT spoken: the owner asked for a
+#: thing, and a self-corrected second call is the answer, not a progress report about the first.
+_BAD_ARGS_REPAIR = (
+    "TOOL CALL REJECTED before it ran — {problem}. Call the same tool again with the arguments "
+    "corrected. Do NOT tell the owner anything failed and do NOT answer from memory instead: "
+    "nothing has happened yet, so there is nothing to apologise for."
+)
+
+#: The SECOND bad call to the same tool in one turn gets no repair instruction. One correction is
+#: help; a second is a loop, and a model that cannot call a tool correctly twice will not manage it
+#: on the third go either — it should tell the owner instead of spending his turn on retries.
+_BAD_ARGS_GIVE_UP = (
+    "TOOL CALL REJECTED again — {problem}. Do not try this tool a third time. Tell the owner "
+    "plainly that you could not do that part, in one sentence, and carry on with the rest."
+)
+
 _WORK_INTENT_NUDGE = (
     "This is a multi-step research-and-write-up request. Call work_on_task to do it in the BACKGROUND "
     "(it researches and drafts, then reports back) and tell the owner you're on it — do NOT try to "
@@ -733,7 +751,10 @@ class AfonAgent:
         self._deferred_groups: list[str] = []
         #: 01.R2 — normalised requests he has already been asked to clarify, so the
         #: second one gets an assumption stated out loud instead of the same question.
-        self._clarified: set[str] = set()    # 03.R5: groups the budget refused THIS turn
+        self._clarified: set[str] = set()
+        #: 03.R2 — tools already given one argument-repair THIS turn. Reset per turn, not per
+        #: session: the same tool failing on two unrelated turns is two honest mistakes.
+        self._repaired: set[str] = set()    # 03.R5: groups the budget refused THIS turn
         # Which language the conversation is in. Built lazily on the first mirror-mode turn so a
         # single-language deployment never pays for it.
         self._lang_tracker: lang.LanguageTracker | None = None
@@ -767,6 +788,7 @@ class AfonAgent:
         # reference is ambiguous, so this adds a note or it adds nothing; it never rewrites what
         # the owner said, because a rewrite that guesses wrong is unrecoverable from the transcript.
         self._reference = self._resolve_reference(user_text)
+        self._repaired = set()          # 03.R2 — one repair per tool, per turn
         self._history.append({"role": "user", "content": user_text})
         messages = [self._system, *self._history]
         if self._reference is not None:
@@ -1681,6 +1703,25 @@ class AfonAgent:
                     said_note = f"Just so you know, sir — {verdict.why}."
             except Exception as e:  # noqa: BLE001 — grading never blocks a permitted action
                 logger.debug(f"grade unavailable for {name} ({type(e).__name__})")
+            # 03.R2 — the last gate before the handler sees the call. A malformed call used to be
+            # discovered inside the tool, halfway through the work, and came back as prose the model
+            # reads as an answer: a mistyped argument became a spoken apology instead of a corrected
+            # second attempt. Checked here rather than in each handler because here is the only
+            # place that holds the schema and the call at the same time.
+            args, problem = self._check_args(name, args)   # types only — see argcheck's docstring
+            if problem:
+                first = name not in self._repaired
+                self._repaired.add(name)
+                template = _BAD_ARGS_REPAIR if first else _BAD_ARGS_GIVE_UP
+                logger.warning(f"tool call rejected before dispatch: {problem} "
+                               f"({'repair offered' if first else 'second failure, giving up'})")
+                audit.record(name, args, f"rejected before dispatch: {problem}", ok=False,
+                             decision="deny", rule="argcheck:malformed_call",
+                             reasoning="the call did not match the tool's own schema")
+                outcomes[idx] = {"name": name, "result": template.format(problem=problem),
+                                 "ok": False, "args": args, "blocked": True}
+                continue
+
             # ACKNOWLEDGEMENT: announce what we're about to do BEFORE running the tool, always — so
             # Afon is never silently "working" (the Afon "Right away, sir — getting the time"
             # beat). Deterministic + instant (no LLM), and contextual from the args.
@@ -1725,6 +1766,25 @@ class AfonAgent:
                 self._pending_confirm = None
         return [{"name": o["name"], "result": str(o["result"]), "ok": o["ok"]} for o in outcomes]
 
+    def _check_args(self, name: str, args: dict) -> tuple[dict, str]:
+        """03.R2 — schema check before dispatch. Fail-OPEN: an unreadable schema runs the call.
+
+        A validator that can break a working tool because its own lookup failed is worse than no
+        validator, so anything unexpected here lets the call through to the handler, which has
+        defended itself since long before this existed.
+        """
+        try:
+            from afon.brain.tools import schemas_by_name
+            from afon.brain.argcheck import check_args
+
+            found = schemas_by_name([name])
+            if not found:
+                return args, ""          # agent/fleet schemas live outside the registry
+            return check_args(name, args, found[0])
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"argcheck unavailable for {name} ({type(e).__name__}) — dispatching")
+            return args, ""
+
     async def _run_one_tool(
         self, name: str, args: dict, on_progress: Callable | None
     ) -> dict[str, Any]:
@@ -1751,6 +1811,19 @@ class AfonAgent:
         # "isn't configured yet" or "I couldn't complete the…" looks like a normal answer to the
         # agent loop, which is how a dead integration can stay dead unnoticed. Arguments are kept
         # (scrubbed and clipped) because "which tool failed" is rarely enough to fix anything.
+        # 03.R2 — a call the HANDLER rejected as malformed ("unknown argument(s) ['body_text']")
+        # comes back as speakable prose, and the model reads prose as an answer: the owner hears an
+        # apology for something that never ran, and the retry ladder never fires because nothing
+        # said the CALL was the problem. The kind is already typed (J7.3), so no sentence is parsed.
+        if ok and kind_of(result) is ErrorKind.BAD_ARGS:
+            ok = False
+            first = name not in self._repaired
+            self._repaired.add(name)
+            template = _BAD_ARGS_REPAIR if first else _BAD_ARGS_GIVE_UP
+            logger.warning(f"tool {name} rejected the call as malformed "
+                           f"({'repair offered' if first else 'second failure, giving up'})")
+            result = template.format(problem=f"`{name}` did not accept those arguments")
+
         soft = ok and _err.looks_failed(result)
         _err.record_op(
             "tool", name,

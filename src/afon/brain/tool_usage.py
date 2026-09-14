@@ -110,6 +110,31 @@ class ToolUsage:
         with self._lock:
             return sorted(n for n in known if n not in self._counts)
 
+    def stale(self, known: list[str], days: int = 90) -> list[tuple[str, str]]:
+        """03.R4 — `(name, last_called_or_"never")` for every tool not fired inside `days`.
+
+        `unused()` answers "never called", which on a young store is almost everything. This answers
+        the question the sweep actually asks: what has gone quiet. A tool with no timestamp is
+        reported as "never" rather than omitted, because the two are the same decision — nothing has
+        used it — and dropping one of them would make the report look shorter than the truth.
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now() - timedelta(days=max(0, days))
+        out: list[tuple[str, str]] = []
+        with self._lock:
+            for name in known:
+                last = self._last.get(name)
+                if not last:
+                    out.append((name, "never"))
+                    continue
+                try:
+                    if datetime.fromisoformat(last) < cutoff:
+                        out.append((name, last))
+                except ValueError:
+                    out.append((name, "never"))   # unreadable stamp is not evidence of use
+        return sorted(out)
+
     def total(self) -> int:
         with self._lock:
             return sum(self._counts.values())

@@ -113,6 +113,48 @@ def main() -> int:
         check("and it can write over the corrupt file", json.loads(
             bad.read_text(encoding="utf-8"))["tools"]["weather"]["calls"] == 1)
 
+        print("\n[8] 03.R4 — the staleness report: what has gone quiet, and is anything testing it")
+        from datetime import timedelta
+
+        u5 = ToolUsage(Path(td) / "stale.json")
+        now = datetime.now()
+        u5.record("weather", when=now)
+        u5.record("crypto_price", when=now - timedelta(days=120))
+        known = ["weather", "crypto_price", "never_called_tool"]
+        stale = dict(u5.stale(known, days=90))
+        check("a tool used today is not stale", "weather" not in stale, str(stale))
+        check("a tool last used 120 days ago is stale", stale.get("crypto_price") is not None)
+        check("...and the report says WHEN, not just that it is stale",
+              str(stale.get("crypto_price", "")).startswith(str((now - timedelta(days=120)).year)))
+        check("a tool never called is reported as 'never', not omitted",
+              stale.get("never_called_tool") == "never",
+              "never-called and long-unused are the same decision; hiding one shrinks the report")
+        check("an unreadable timestamp counts as stale, not as use",
+              "x" not in ToolUsage(Path(td) / "s2.json").stale(["x"], days=90)[0][1].replace(
+                  "never", ""))
+
+        # The rule 03.R4 states: a tool that is not being USED must at least be EXERCISED, or it is
+        # dead code advertised to the model — catalogue tokens spent on something nothing checks.
+        # The usage store is machine-local and young, so "used" cannot be the test on a fresh
+        # clone; "exercised by a bench case" can, and it is the half that keeps a retired-in-all-
+        # but-name tool from sitting in the registry unnoticed.
+        import re as _re
+
+        from afon.brain.tools import tool_names
+
+        bench_dir = Path(__file__).resolve().parent
+        corpus = "\n".join(p.read_text(encoding="utf-8", errors="ignore")
+                           for p in bench_dir.glob("*.py"))
+        names = sorted(tool_names())
+        unexercised = [n for n in names
+                       if not _re.search(r"\b" + _re.escape(n) + r"\b", corpus)]
+        print(f"        {len(names) - len(unexercised)}/{len(names)} tools are named by a bench case")
+        for n in unexercised:
+            print(f"        NOT exercised: {n}")
+        check("every registered tool is exercised by at least one bench case",
+              not unexercised,
+              f"{len(unexercised)} advertised to the model and checked by nothing: {unexercised}")
+
     print(f"\n  {passed} passed, {failed} failed")
     return 1 if failed else 0
 

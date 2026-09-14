@@ -102,6 +102,21 @@ def main() -> int:
           not orphans,
           f"defined but never called: {orphans}" if orphans else "no phantom passes")
 
+    # --- every handler is awaitable, because the agent awaits every handler --------------------
+    # `_run_one_tool` passes the handler's return value straight to `asyncio.ensure_future`, so a
+    # handler written `def` instead of `async def` raises TypeError before its result is read. It
+    # cannot be caught by reading the module: both spellings look right, and the tool simply answers
+    # "That tool hit an error: TypeError" forever. `list_recent_actions` was exactly this, unnoticed
+    # because nothing called it (03.R4).
+    import inspect as _inspect
+
+    from afon.brain.tools import tool_handlers as _handlers_for_async
+
+    _sync = sorted(n for n, fn in _handlers_for_async().items()
+                   if not _inspect.iscoroutinefunction(fn))
+    check("every registered handler is a coroutine function", not _sync,
+          f"the agent awaits these and they are not awaitable: {_sync}")
+
     # --- 01.R4: the self-model comes from the registry and the config, never from prose --------
     # "What can you do / what can't you do" was answered from `personality/operating-rules.md`,
     # which names sixteen tools by hand. Every one is a promise that rots the moment a tool is

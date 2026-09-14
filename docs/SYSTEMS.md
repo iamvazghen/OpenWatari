@@ -943,12 +943,50 @@ cannot own the turn.
       plus a linear classifier, or a distilled ~100MB classifier with a declared RSS ceiling.
       *gate:* new `test_catalogue_narrowing.py` — 60 prompts, correct tool still reachable ≥98% at
       ≤20 presented, **and no worse than `intent_router` on the same 60**.
-- [ ] 03.R2 Argument validation before dispatch, with a repair prompt on the first failure only.
-      *gate:* `test_reminder_args.py`, `test_tool_error_handling.py`
+- [x] 03.R2 Argument validation before dispatch, with a repair prompt on the first failure only.
+      *gate:* `test_reminder_args.py` (14), `test_tool_error_handling.py` [03.R2] (82)
+      *done 2026-09-14:* `brain/tools/argcheck.py`, and **measuring first changed the design**. The
+      obvious build rejects a call that omits a `required` property; measured against the registry,
+      that would have broken **eleven working tools**. `remember(content=…)`, `send_push(body=…)`,
+      `set_reminder(what=…)`, `resolve_contact(who=…)` all work today, because `base.missing_arg`
+      takes "the full set of accepted spellings, synonyms included" while the schema advertises one
+      of them to keep the catalogue small — the exact economy 03.R5 spent an afternoon defending.
+      A schema-only view also cannot see the distinction `missing_arg` exists to draw: `{}` means
+      the OWNER left the detail out and the answer is to ask him; `{"wrong_key": …}` means the MODEL
+      invented a key and the answer is an error that makes the retry fire. Both look identical from
+      outside the handler.
+      So the division of labour is: the pre-dispatch check proves what the schema can actually prove
+      — a declared property arrived as the wrong type — and coerces the stringified forms a model
+      really sends (`"5"` for an integer meant five, and a round-trip to say so serves nobody). The
+      handler keeps deciding what a missing value means. A gate now pins the eleven synonym calls so
+      nobody "tightens" this later.
+      The half that was actually missing is the repair. A rejected call came back as **prose**, and
+      the model reads prose as an answer: the owner heard an apology for something that never ran,
+      while the retry ladder sat idle because nothing said the CALL was the problem. The kind was
+      already typed (J7.3 `ErrorKind.BAD_ARGS`), so no sentence is parsed — a BAD_ARGS result
+      becomes one instruction naming what to fix, and the SECOND failure on the same tool in the
+      same turn stops the loop and tells the owner instead. Per turn, not per session: the same tool
+      failing on two unrelated turns is two honest mistakes.
 - [ ] 03.R3 Chaining: a result that obviously feeds another (search→open, contact→message) chains in
       one turn, not across two. *gate:* new `test_tool_chaining.py`
-- [ ] 03.R4 Dead-tool sweep: every tool not fired in 90 days is either exercised by a bench case or
-      retired. *gate:* `test_tool_usage.py` extended with a staleness report.
+- [x] 03.R4 Dead-tool sweep: every tool not fired in 90 days is either exercised by a bench case or
+      retired. *gate:* `test_tool_usage.py` [03.R4] (24) + `test_tool_error_handling.py` (82)
+      *done 2026-09-14:* `ToolUsage.stale()` answers the question the sweep actually asks. `unused()`
+      answered "never called", which on a machine-local store that resets with the laptop is almost
+      everything; `stale()` reports what has gone quiet and WHEN, with a never-called tool listed as
+      "never" rather than omitted — the two are the same decision, and dropping one makes the report
+      look shorter than the truth.
+      The enforceable half is the other one: a tool nothing uses must at least be a tool something
+      CALLS, or it is catalogue tokens spent on code no one checks. **Six of 152 were named by no
+      bench file at all** — `define_macro`, `list_macros`, `list_recent_actions`, `mark_telegram`,
+      `telegram_music`, `undo_last`. None deserved retiring; the README advertises all six. They are
+      now called with empty arguments and asserted to answer in Afon's voice with a typed failure.
+      That small test is not a rubber stamp: it immediately found **`list_recent_actions` had never
+      worked**. It was written `def` in a registry the agent `await`s, so
+      `asyncio.ensure_future` raised `TypeError` before its result was ever read — "show me what you
+      can undo" has answered "That tool hit an error: TypeError" since the day it shipped, and
+      nothing noticed because nothing called it. Fixed, and the whole CLASS is now gated:
+      `test_registry_complete.py` fails if any registered handler is not a coroutine function.
 - [x] 03.R5 **Schema minification.** The catalogue is the dominant per-turn cost and its *size* has
       never been attacked, only its membership: descriptions written for a human reader, parameters
       no caller sets, names longer than they need to be. Measure first with `tiktoken`, then cut, and
@@ -4446,7 +4484,7 @@ green, `E` = elite green.
 |---|---|---|---|---|---|
 | S01 | Brain / Core Intelligence | structured badly | 3/3 | 4/4 | 0/3 |
 | S02 | LLM Integration | complete for now | 3/3 | 3/3 | 0/1 |
-| S03 | Tool Utilization | complete for now | 4/4 | 1/6 | 0/1 |
+| S03 | Tool Utilization | complete for now | 4/4 | 3/6 | 0/1 |
 | S04 | Device Control | floor green | 4/4 | 0/3 | 0/1 |
 | S05 | Browser Control | floor green | 3/3 | 0/3 | 0/1 |
 | S06 | Document Creation | half-built | 3/3 | 0/3 | 0/1 |
@@ -4495,7 +4533,7 @@ green, `E` = elite green.
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
 | S50 | Legacy Continuity | half-built | 3/3 | 0/3 | 0/1 |
 
-**Totals: 151 of 157 floor tasks green, 8 of 161 raise tasks, 0 of 52 elite tasks — 159 of 370.**
+**Totals: 151 of 157 floor tasks green, 10 of 161 raise tasks, 0 of 52 elite tasks — 161 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

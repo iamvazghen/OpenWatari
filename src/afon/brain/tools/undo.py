@@ -95,8 +95,15 @@ async def undo_last(_args: dict) -> str:
     return f"Undone, sir — {what}."
 
 
-def list_recent(args: dict) -> str:
-    """Show the recent reversible action log."""
+async def list_recent(args: dict) -> str:
+    """Show the recent reversible action log.
+
+    `async` is not decoration: `agent._run_one_tool` hands every handler's return value to
+    `asyncio.ensure_future`, so a sync handler raises TypeError before its result is ever read.
+    This one was sync from the day it was written, and nothing exercised it, so "show me what you
+    can undo" has always answered "That tool hit an error: TypeError". Found by 03.R4's rule that a
+    tool nothing uses must at least be something a test calls.
+    """
     entries = [e for e in _load() if not e.get("undone")]
     if not entries:
         return "No recent reversible actions, sir."
