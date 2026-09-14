@@ -226,6 +226,37 @@ async def crypto_price(args: dict) -> str:
         return tool_error("crypto price", e)
 
 
+async def _yahoo_meta(ticker: str) -> dict:
+    """One fetch, one owner. Yahoo's public chart endpoint — no key; non-US tickers carry a
+    suffix (AIR.DE). Both the spoken price and the portfolio's numeric quote read this."""
+    r = await http_get(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+        params={"interval": "1d", "range": "1d"},
+    )
+    results = (((r.json() or {}).get("chart") or {}).get("result")) or []
+    return (results[0].get("meta") or {}) if results else {}
+
+
+async def quote_ticker(symbol: str) -> tuple[float | None, str, float, str]:
+    """(price, currency, as-of epoch, source) for one ticker — the numeric half of `stock_price`.
+
+    Split out for the portfolio (40.F3), which needs the NUMBER and, more importantly, the time the
+    number was true: a quote read on a Sunday is Friday's close, and a valuation that does not say
+    so invites the owner to act on a two-day-old price. Yahoo returns that time and the prose
+    version discarded it along with everything else that was not a sentence.
+    """
+    ticker = (symbol or "").strip().upper()
+    if not ticker:
+        return None, "", 0.0, "no ticker given"
+    meta = await _yahoo_meta(ticker)
+    price = meta.get("regularMarketPrice")
+    if price is None:
+        return None, "", 0.0, f"no quote for {ticker}"
+    as_of = meta.get("regularMarketTime") or 0
+    return (float(price), str(meta.get("currency") or ""),
+            float(as_of) if isinstance(as_of, (int, float)) else 0.0, "Yahoo Finance")
+
+
 async def stock_price(args: dict) -> str:
     symbol = (args.get("symbol") or "").strip()
     if not symbol:
@@ -233,15 +264,7 @@ async def stock_price(args: dict) -> str:
     ticker = symbol.upper()
 
     async def fetch() -> str:
-        # Yahoo Finance's public chart endpoint — no key. Non-US tickers carry a suffix (AIR.DE).
-        r = await http_get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
-            params={"interval": "1d", "range": "1d"},
-        )
-        results = (((r.json() or {}).get("chart") or {}).get("result")) or []
-        if not results:
-            return f"I couldn't get a quote for '{symbol}', sir."
-        meta = results[0].get("meta") or {}
+        meta = await _yahoo_meta(ticker)
         price = meta.get("regularMarketPrice")
         if price is None:
             return f"I couldn't get a quote for '{symbol}', sir."

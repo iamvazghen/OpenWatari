@@ -41,6 +41,7 @@ from afon.brain.tools import (
     notion,
     objectives,
     phone,
+    portfolio,
     privacy,
     protocols,
     reminders,
@@ -48,6 +49,7 @@ from afon.brain.tools import (
     routines,
     skills,
     smarthome,
+    stock,
     system,
     tasks,
     telegram,
@@ -64,7 +66,7 @@ _MODULES = [vault, memory, web, telegram, voicechat, music, localplay, system, b
             coding, skills, notion, tasks, contacts, documents, composio, channels,
             macros, multimodal, undo, graphmem, activity, coaching, camera, objectives,
             approvals, relationship, phone, maps, wolfram, fitness, diagnose,
-            audioout, day_shape, inbox, privacy]  # noqa: E501
+            audioout, day_shape, inbox, privacy, stock, portfolio]  # noqa: E501
 
 Handler = Callable[[dict], Awaitable[str]]
 
@@ -93,10 +95,12 @@ _LAZY_GROUPS: dict[str, list] = {
     "phone": [phone],                    # real phone calls via Twilio (parked until account) — 2026-07-28
     "places": [maps],                    # live travel time + place search (Google Maps)
     "compute": [wolfram],                # exact math/facts via Wolfram Alpha
-    "vitals": [fitness],                 # sleep/steps/heart from the wearable via Google Fit
+    "vitals": [fitness],                 # sleep/steps/heart — Apple Health export or Google Fit
     "audioout": [audioout],              # which speaker/headphones Afon talks through — H1.3
     "dayshape": [day_shape],           # draft routines / check a day holds together — S21
     "privacy": [privacy],                # what Afon stores about the owner, and for how long — S37
+    "stock": [stock],                    # what the owner has and when it runs out — S47
+    "money": [portfolio],                # read his ledger and value it; never moves any — S40
 }
 # Substring triggers (lowercased) that activate a group for a turn. Broad on purpose — a miss just
 # means a one-turn delay (the follow-up usually contains the word, and groups stay warm one turn).
@@ -184,7 +188,8 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
                 "percent of", "compound", "equation", "solve", "integral", "derivative",
                 "in kilograms", "in pounds", "in euros", "in dollars", "sunset", "sunrise"),
     "vitals": ("sleep", "slept", "steps", "heart rate", "vitals", "how active", "my workout data",
-               "recovery", "resting heart"),
+               "recovery", "resting heart", "health data", "health export", "apple health",
+               "import my health", "my weight", "how am i doing physically"),
     # Distinctive enough to trigger reliably, which is why this can be lazy rather than eating a
     # slot in the per-turn surface. "out loud" is deliberately absent — it belongs to playback.
     "audioout": ("headphone", "headphones", "airpod", "airpods", "speaker", "speakers", "earbuds",
@@ -198,7 +203,17 @@ LAZY_GROUP_TRIGGERS: dict[str, tuple[str, ...]] = {
                 "my data", "where does my data", "how long do you keep", "how long are you keeping",
                 "retention", "delete everything", "what you keep", "stored about me",
                 "privacy", "forget everything"),
-    "dayshape": ("my routines", "my routine", "draft my", "propose my",
+    "money": ("portfolio", "my holdings", "what do i own", "net worth", "my investments",
+              "my ledger", "what am i worth", "how are my stocks", "my shares", "my positions",
+              "worth right now", "my assets"),
+    "stock": ("how much", "how many", "running low", "run out", "running out", "we have left",
+              "have left", "in stock", "out of", "restock", "reorder", "used up", "used the",
+              "sacks", "supplies", "inventory", "how long will", "do we have any",
+              "do i have any", "bought more", "came in", "keep track of"),
+    "dayshape": ("what should i do", "what should i work on", "what next", "what do i do next",
+                 "where do i start", "most important", "prioritise", "prioritize",
+                 "what should i tackle", "recommend", "suggest what",
+                 "my routines", "my routine", "draft my", "propose my",
                  "adopt the routine", "adopt my routine", "shape of my day",
                  "does my day", "will my day", "double-booked", "double booked",
                  "check my day", "my day work", "clash", "clashes",

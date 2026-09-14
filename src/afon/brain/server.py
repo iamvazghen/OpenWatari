@@ -648,6 +648,7 @@ async def serve(host: str | None = None, port: int | None = None) -> None:
         SCHEDULER.schedule_pattern_scan()
         SCHEDULER.schedule_weekly_review()
         SCHEDULER.schedule_restore_drill()   # 22.F4 — an untested backup is a rumour
+        SCHEDULER.schedule_portable_drill()  # 50.F2 — and an unread export is a rumour twice over
     except Exception as e:  # noqa: BLE001
         logger.warning(f"pattern scan / weekly review / restore drill not scheduled: {e}")
 

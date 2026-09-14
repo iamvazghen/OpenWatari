@@ -1677,13 +1677,31 @@ recommendation at all when the basis is thin (cheaper *and* more honest).
 | **guess** | 30 logged recommendations and their acceptance rate | 3 / 5 / 2 d | 20 min (name the domains that matter) | 0 | one registry line removes the tool |
 
 **Floor** *(convert zero into one: a single domain, end to end)*
-- [ ] 15.F1 A `recommend(domain, context)` tool covering **one** domain first — next task to work on
+- [x] 15.F1 A `recommend(domain, context)` tool covering **one** domain first — next task to work on
       — sourced from `objectives.py` + `tasks.py` + calendar, with an explicit reason.
-      *gate:* new `test_recommend.py` — the reason cites the data it used.
-- [ ] 15.F2 Every recommendation is logged with its context, so acceptance can be learned later.
+      *gate:* `test_recommend.py` — the reason cites the data it used.
+      *done 2026-09-13:* `brain/recommend.py` and `recommend_next`, in the existing `dayshape` lazy
+      group rather than the core surface. Rules in a stated order — overdue, then due soonest, then
+      work serving an objective he is actually driving, then priority — and the reason names both
+      the rule and the field it read: "it's overdue by two days", not "this seems important". A
+      recommendation whose reason cannot be checked is indistinguishable from a guess, and a guess
+      delivered confidently is worse than no answer, because he reorganises his morning around it.
+      Domain chosen for the reason the plan gives: next-task is the one where Afon already holds
+      the inputs. Restaurants and reading need taste there is no data for.
+- [x] 15.F2 Every recommendation is logged with its context, so acceptance can be learned later.
       *gate:* `test_recommend.py` [logged]
-- [ ] 15.F3 Afon declines to recommend when he has no basis, instead of inventing taste.
+      *done 2026-09-13:* the choice, the rule, the reason and everything it was chosen over, logged
+      before the answer is spoken, with a slot for whether he actually did it and a breakdown of
+      acceptance per rule. **Log first** is the plan's own instruction and it is the right one: a
+      recommender trained on a handful of events is a random number generator with a confidence
+      interval, so there is no ranker here, only a table that will make one possible — or show it
+      is not worth building.
+- [x] 15.F3 Afon declines to recommend when he has no basis, instead of inventing taste.
       *gate:* `test_recommend.py` [no-basis case]
+      *done 2026-09-13:* `NoBasis` is a first-class answer, not an empty one. When every open item
+      has no deadline, no priority and no objective, nothing distinguishes them and the answer says
+      so — it does not fall back to the first in list order, which would be presenting the sort
+      order of a database table as judgement. Equal priorities are likewise not a reason.
 
 **Raise**
 - [ ] 15.R1 Acceptance feedback loop — accepted/ignored/rejected updates a per-domain preference
@@ -2876,11 +2894,29 @@ replication is a background stream, not a batch job.
 - [x] 32.F1 LLM provider failover chain. *gate:* `test_brain_llm.py`, `test_resilience.py`
 - [x] 32.F2 Single-instance enforcement (no two brains, no two edges).
       *gate:* `test_singleton_and_macro_guard.py`
-- [ ] 32.F3 **Explicit degraded modes.** Define and implement three: brain-down (edge answers what it
+- [x] 32.F3 **Explicit degraded modes.** Define and implement three: brain-down (edge answers what it
       can), edge-down (text channels only), network-down (local model + local tools). Each announces
-      itself. *gate:* new `test_degraded_modes.py`
-- [ ] 32.F4 Health of the *other* host is known to each host, not assumed.
-      *gate:* `test_connectivity.py` extended.
+      itself. *gate:* `test_degraded_modes.py`
+      *done 2026-09-13:* `shared/degraded.py` — a table, in `shared/` because both hosts read the
+      same one. Model failover was real and nothing above it was: losing a host produced whatever
+      each component happened to do on its own, none of it written down, so "what works right now"
+      had no answer. The plan declined Kubernetes, Consul and etcd, and that reasoning IS the
+      design — consensus coordinates many nodes and there are two, so the honest answer at two is a
+      declared mode. Each mode says what is lost AND what is kept, since "degraded" alone tells the
+      owner nothing he can act on. Severity-ordered, so a dead network is reported as a dead
+      network and not as three coincidental failures. Announced once on the way in and **once on
+      the way out**: repeated every tick it becomes noise he talks over, and without the recovery
+      he keeps working around a limitation that has been gone for an hour. Two copies of this table
+      would agree the day they were written and drift silently after — the fleet's two identity
+      files, in miniature.
+- [x] 32.F4 Health of the *other* host is known to each host, not assumed.
+      *gate:* `test_connectivity.py` [32.F4]
+      *done 2026-09-13:* the brain ASKS the laptop over the wire rather than trusting that a socket
+      is registered — a closed lid leaves one open for over a minute, and reporting "connected" on
+      that basis is a status page that is green because it never asked. The laptop derives its own
+      view from the real socket state of its supervised loop and turns it into the same declared
+      mode, so brain-down is announced by the only side still able to speak. Both readings feed one
+      matrix; neither side decides the other is fine by default.
 
 **Raise**
 - [ ] 32.R1 State replication: memory and task stores mirrored between hosts on a schedule, with a
@@ -3008,12 +3044,44 @@ aggregates, not raw samples.
 | **guess** | naming which wearable he actually wears daily | 2 / 4 / 2 d | 15 min (enable the API or name the device) | 0 | the tool degrades to typed not-configured |
 
 **Floor**
-- [ ] 34.F1 **Enable the fitness data source** and verify a real read; today the tool exists and the
+- [x] 34.F1 **Enable the fitness data source** and verify a real read; today the tool exists and the
       API is not enabled. *gate:* `test_new_integrations.py` [fitness]
-- [ ] 34.F2 Screen-time and activity signals are real and dated, not estimated.
-      *gate:* `test_phase12_utility.py` extended.
-- [ ] 34.F3 Health talk stays inside a stated boundary — observations and patterns, never diagnosis.
-      *gate:* `test_companion_safety.py` extended.
+      *done 2026-09-13:* **unblocked by removing the dependency, exactly as the blocker table
+      settled it.** The tools were written against Google Fit, which needs a Cloud-project
+      enablement nobody has done, so for months the capability existed and answered "not configured
+      yet" to every question — a feature that is present, passing, and has never once worked.
+      `brain/vitals.py` now reads Apple Health's `export.xml`, which every iPhone produces from the
+      Health app with no developer account, no API, no consent screen and no key. Streamed with
+      `iterparse` and cleared element by element, because a real export is hundreds of megabytes
+      and `ET.parse` would pass on a fixture and then take the brain down on the owner's actual
+      file. Only daily aggregates are kept; a copy of his entire health history in the state root
+      answers no question worth asking. Naming the watch later changes no code.
+- [x] 34.F2 Screen-time and activity signals are real and dated, not estimated.
+      *gate:* `test_phase12_utility.py` [34.F2]
+      *done 2026-09-13:* each active sample used to credit `settings.presence_poll_seconds`, and
+      that was wrong in two ways. The poller does not run at a steady cadence — the laptop sleeps,
+      the brain restarts — so a three-hour hole between two samples was credited as one poll
+      interval, and an outage read as productivity. Worse, the constant was applied at READ time,
+      so **changing the setting silently rewrote every past day**: yesterday's four hours became
+      five because a number in a config file moved. Credit is now the real interval to the next
+      sample; a gap longer than three typical intervals is not credited at all and the uncredited
+      time is reported, because "I wasn't looking for two hours" and "you weren't at the screen for
+      two hours" are different facts. The fallback for a hole and for the last sample of the day is
+      the MEDIAN observed interval, measured from that day's own samples — using the configured
+      constant there left the same defect one level down, which is how the first fix was caught.
+      And the report says the window it actually covers: a figure with no window reads as a whole
+      day.
+- [x] 34.F3 Health talk stays inside a stated boundary — observations and patterns, never diagnosis.
+      *gate:* `test_companion_safety.py` [34.F3]
+      *done 2026-09-13:* `vitals.BOUNDARY` is stated in one place, carried into the tool
+      descriptions so the model has it in front of it rather than in training, and asserted by the
+      gate. Afon reports what the numbers say and what has changed; he does not name conditions,
+      explain causes, or advise on treatment. The distinction is not squeamishness: "you slept five
+      hours, three nights running" is a fact he measured, and "you're not sleeping because of X" is
+      a claim he invented that a person may act on instead of asking somebody qualified.
+      `diagnostic_language` checks **Afon's own phrasing and never the owner's** — he is entitled
+      to describe his own health in any terms he likes, and a guard that policed his speech would
+      be both useless and insulting.
 
 **Raise**
 - [ ] 34.R1 Sleep-pattern tracking feeding S17's adaptive timing.
@@ -3027,7 +3095,7 @@ aggregates, not raw samples.
 - [ ] 34.E1 A month of wellness nudges with ≥50% acceptance and zero the owner calls nagging.
       *gate:* acceptance log.
 
-**Blocked** owner: enable the Fitness API.
+**Was blocked** on enabling the Fitness API; **retired 2026-09-13** by ingesting an open export format instead (34.F1). Naming the wearable changes no code.
 
 ---
 
@@ -3459,13 +3527,36 @@ only when it changes.
 | **guess** | him writing one real ledger file | 3 / 5 / 2 d | **60 min (the first ledger)** | 0 | read-only by construction; delete the file to disable |
 
 **Floor** *(deliberately small, deliberately read-only)*
-- [ ] 40.F1 A Beancount ledger the owner controls, read by a `portfolio_snapshot` tool that values it
+- [x] 40.F1 A Beancount ledger the owner controls, read by a `portfolio_snapshot` tool that values it
       with the existing price tools. Plain text, so it is diffable, git-versioned and auditable by
-      him without Afon. *gate:* new `test_portfolio.py`
-- [ ] 40.F2 **No transaction capability, by construction** — asserted, not merely absent.
+      him without Afon. *gate:* `test_portfolio.py`
+      *done 2026-09-13:* `brain/portfolio.py`, with `ledger.example.beancount` shipped and the real
+      `ledger.beancount` gitignored. Beancount is used as a **file format and never imported**, so
+      its licence does not reach this package and he keeps the option of editing the file with
+      anything at all, `bean-query` included. The parser reads the subset that says what is held
+      and **reports any line it could not read** rather than skipping it: a portfolio that silently
+      drops a row produces a number that looks complete, which is the one failure mode that matters
+      when the number is money. The valuation reuses the quote endpoint `stock_price` already had —
+      split into `quote_ticker` so there is still one owner of it — and a bare balancing leg, the
+      commonest line in a real ledger, is recognised rather than reported as noise.
+- [x] 40.F2 **No transaction capability, by construction** — asserted, not merely absent.
       *gate:* `test_portfolio.py` [no mutating tool in the finance family]
-- [ ] 40.F3 Values carry their as-of time and source; a stale price says so.
+      *done 2026-09-13:* the gate finds the finance tool family by name and asserts none is named
+      for moving money, none takes a destination, and the module has no write, no HTTP post and no
+      credential. **The first version of that check was wrong in an instructive way**: it flagged
+      any tool taking an `amount`, which caught `fx_rate` — a tool that converts a number and
+      returns a number. Weakening the check to let it pass would have been the wrong repair, so the
+      check now names the property that actually matters, which is having somewhere to send it.
+- [x] 40.F3 Values carry their as-of time and source; a stale price says so.
       *gate:* `test_portfolio.py` [staleness]
+      *done 2026-09-13:* every value is "twelve at 312.40 EUR, Yahoo Finance, as of Friday 17:31",
+      and past a day it says how old. That is not fussiness: a quote read on a Sunday is Friday's
+      close, and a valuation that omits the time invites him to act on a two-day-old price while
+      having to remember for himself which days markets are open. A holding that could not be
+      priced is listed, left OUT of the total, and the total says what it is missing — the prose
+      the old price tools produced had no way to express a partial answer. The age of the ledger
+      file is reported too, since a portfolio nobody has updated in two hundred days is a different
+      kind of wrong from a stale quote.
 
 **Raise**
 - [ ] 40.R1 Change notification — a threshold move raises a proactive signal.
@@ -3863,12 +3954,37 @@ question · nothing spoken below the confidence floor (cheaper *and* more honest
 | **guess** | a month of scored predictions beating the naive baseline | 3 / 5 / 2 d | — | 0 | predictions are suppressed by default until the ledger justifies them |
 
 **Floor** *(one predictor, honestly scored, before any second one)*
-- [ ] 46.F1 A single predictor: **will today's plan fit the day**, from calendar + task estimates +
-      historical overrun. *gate:* new `test_forecast.py`
-- [ ] 46.F2 Every prediction is recorded with its outcome so accuracy is measurable.
+- [x] 46.F1 A single predictor: **will today's plan fit the day**, from calendar + task estimates +
+      historical overrun. *gate:* `test_forecast.py`
+      *done 2026-09-13:* `brain/forecast.py` — committed minutes against available ones, arithmetic,
+      in-process, no model call. `anticipation.py` reads what is already written in the calendar and
+      reads it back; that never says anything that could turn out to be wrong, so it can never be
+      checked, which is why it is a look-ahead and not a forecast. The assumption a day rests on —
+      thirty minutes for an open task with no estimate — is carried in the prediction's own basis
+      and spoken with it, rather than buried as a constant. It reads the calendar through
+      `schedule._parse`, so the forecast and the clash report cannot disagree about what counts as
+      busy: someone's all-day birthday must not make a day overbooked. It answers inside
+      `day_clashes`, where the owner already asks about his day, because a per-turn schema slot is
+      charged on every turn whether or not anyone asks.
+- [x] 46.F2 Every prediction is recorded with its outcome so accuracy is measurable.
       *gate:* `test_forecast.py` [scoring ledger]
-- [ ] 46.F3 A prediction below a confidence floor is not spoken.
+      *done 2026-09-13:* written down before the day happens, scored after, and **the naive
+      baseline is reported beside the score every time**. "Seventy-two percent correct" means
+      nothing on its own: if most days fit, always saying so scores seventy-two percent too, costs
+      nothing to run, and cannot be wrong in an interesting way. The plan declined Prophet and the
+      foundation models until that baseline is beaten and the ledger is what will settle it. A
+      prediction too weak to speak is recorded anyway — scoring only the confident ones would make
+      the accuracy figure flattering by construction.
+- [x] 46.F3 A prediction below a confidence floor is not spoken.
       *gate:* `test_forecast.py` [suppression]
+      *done 2026-09-13:* below the floor it says nothing — not a hedged version of the same claim,
+      nothing. Confidence is distance from the boundary MULTIPLIED by how much has been scored, and
+      the multiplication is the whole point: the first draft added the two, so a blatantly
+      overbooked day scored high enough to speak with a track record of nothing, which is exactly
+      the failure this task forbids. Multiplied, having been checked is a precondition rather than
+      a bonus, so a new predictor is silent for its first fortnight and a day sitting right on the
+      line stays silent forever — that answer turns on a rounding error in somebody's meeting
+      length.
 
 **Raise**
 - [ ] 46.R1 A second predictor once the first beats a naive baseline: task-duration estimation.
@@ -3916,12 +4032,33 @@ guessed · no background job until there is data to sweep.
 | **guess** | him naming the first category | 2 / 4 / 1 d | 10 min (the category) + ongoing entry | 0 | the table is standalone; drop it |
 
 **Floor** *(one category, one store, no framework)*
-- [ ] 47.F1 A local inventory store with add/consume/query, seeded with **one** category the owner
-      chooses. *gate:* new `test_inventory.py`
-- [ ] 47.F2 Consumption is recorded with a date so depletion can be estimated at all.
+- [x] 47.F1 A local inventory store with add/consume/query, seeded with **one** category the owner
+      chooses. *gate:* `test_inventory.py`
+      *done 2026-09-13:* `brain/stock.py` — one sqlite file, two tables, no framework, and Grocy
+      held in reserve exactly as the plan records. The first category is the one the blocker table
+      defaulted to: **Afon's own consumables**, seeded from numbers he can read himself — free disk
+      on the state volume and archives in the backup folder — taken by the hygiene job that already
+      runs daily. That matters more than it sounds: a run rate cannot form in a table nobody writes
+      to, so the alternative was a schema waiting for someone to start typing. A physical category
+      the owner names later is another string in the same three columns. Two tools rather than
+      four: adding and using are one act with a sign, and they are not confirm-gated for the reason
+      task capture is not — an inventory only works if recording something costs less than
+      remembering it.
+- [x] 47.F2 Consumption is recorded with a date so depletion can be estimated at all.
       *gate:* `test_inventory.py` [history]
-- [ ] 47.F3 Unknown is unknown — Afon never guesses stock he was not told about.
+      *done 2026-09-13:* every change is an event row with its timestamp and its sign. And
+      depletion is **refused with a reason** until the history can carry it: one recorded use is a
+      sample of one, and two inside the same hour is a busy afternoon rather than a rate. "I've no
+      estimate of how long that lasts yet, because there's only one recorded use" is a real answer;
+      a number derived from that one use would be arithmetic dressed as a forecast.
+- [x] 47.F3 Unknown is unknown — Afon never guesses stock he was not told about.
       *gate:* `test_inventory.py` [no invention]
+      *done 2026-09-13:* consuming an item nobody has recorded is refused rather than creating it,
+      because creating it on the way down would have to invent what was there before. Asked about
+      something unrecorded he says he has nothing recorded and that this **is not the same as
+      none**, and states no quantity at all. The two answers send a person to different places —
+      one to the shop, one to the shelf to look — and an inventory that quietly turns the second
+      into the first is worse than no inventory, because it will be believed.
 
 **Raise**
 - [ ] 47.R1 Depletion prediction and a reorder reminder into S16.
@@ -4087,13 +4224,46 @@ than loading whole files.
 | reasoned | a cold-start rebuild from the export alone | 4 / 4 / 3 d | 15 min (off-site target) | 1–3 (shared with S22) | the export is read-only; nothing depends on it |
 
 **Floor**
-- [ ] 50.F1 **A portable export**: memory, decisions, documents and audit summary written as plain
+- [x] 50.F1 **A portable export**: memory, decisions, documents and audit summary written as plain
       markdown + JSON that a human can read without the codebase.
-      *gate:* new `test_portable_export.py` — export produced and re-read by a fresh process.
-- [ ] 50.F2 The export is verified by restoring it into an empty environment, on a schedule.
+      *gate:* `test_portable_export.py` — export produced and re-read by a fresh process.
+      *done 2026-09-13:* `protocols/portable.py`. The substrate was all there — vault, backups,
+      checkpoints, audit — and none of it delivered the property. A backup is a tar of this
+      program's private layout: sqlite whose schema lives in the code, a `learned` tree whose
+      meaning is a docstring, a JSONL whose fields are named in a dataclass. **Restoring it needs
+      Afon**, which is the opposite of preservation. The export is markdown and JSON with a README
+      in plain language and a sha256 per file. Two decisions worth recording. The audit is
+      **summarised, not copied** — tool counts per day, never the values those tools were handed,
+      and the export says so where a reader will see it. And a store that was not there is named in
+      the manifest as absent rather than omitted, because an export missing half the memory
+      otherwise looks exactly like an export of half as much memory. The gate's load-bearing check
+      shells out to an isolated interpreter that cannot import `afon` and has it read the whole
+      thing; asserting portability from a process that has already imported the package proves
+      nothing, since every helper it reaches for is the thing meant to be unnecessary.
+- [x] 50.F2 The export is verified by restoring it into an empty environment, on a schedule.
       *gate:* `test_backup_restore.py` [portable restore]
-- [ ] 50.F3 The vault-write rule is enforced in code, not only in documentation: writes go to the
-      authoritative host or fail loudly. *gate:* `test_vault_search.py` extended.
+      *done 2026-09-13:* `run_export_drill` writes into a fresh temporary directory and reads it
+      back, daily at 05:20, twenty minutes after the backup drill so the two logs stay readable.
+      Into an EMPTY directory on purpose: verifying the live export folder would pass on files left
+      by a previous run, which is precisely what a drill exists to catch. It is silent on success
+      and speaks only on failure, for the same reason 22.F4 gives — a drill that congratulates
+      itself daily teaches the owner to ignore it. The two drills check different properties and
+      fail for different reasons: the backup drill proves Afon can read his own archive, this
+      proves a person could read the export without him.
+- [x] 50.F3 The vault-write rule is enforced in code, not only in documentation: writes go to the
+      authoritative host or fail loudly. *gate:* `test_vault_search.py` [50.F3]
+      *done 2026-09-13:* the rule was a sentence in a document, and a sentence is not a mechanism.
+      The only thing between a dictated note and a directory that gets nuked-and-replaced was
+      `AFON_VAULT_WRITABLE` being set correctly on every host, forever — set it wrong once on the
+      laptop and every note would be written, reported as saved, and deleted by the next pull, with
+      nothing anywhere recording that it happened. The replica already carries proof of what it is:
+      the one-way sync leaves its own pull script and log in the root, and the authoritative copy
+      cannot have them because it is the side being pulled FROM. So `replica_reason` reads the
+      directory, and where the flag and the directory disagree **the directory wins** — it is the
+      thing that will actually lose the note. The refusal is loud: recorded where failures are
+      counted, and it names the authoritative host rather than ending the conversation with a
+      pleasant sentence that leaves no trace. The gate also holds the single-writer rule, so the
+      check cannot be walked around by a second module opening a file under the vault path.
 
 **Raise**
 - [ ] 50.R1 Curation — what is worth preserving is decided by policy, not by keeping everything.
@@ -4131,7 +4301,7 @@ green, `E` = elite green.
 | S12 | Multi-Device | floor green | 3/3 | 0/4 | 0/1 |
 | S13 | Notifications | floor green | 3/3 | 0/3 | 0/1 |
 | S14 | Proactivity | floor green | 3/3 | 0/3 | 0/1 |
-| S15 | Recommendations | missing | 0/3 | 0/3 | 0/1 |
+| S15 | Recommendations | missing | 3/3 | 0/3 | 0/1 |
 | S16 | Task Queue | floor green | 3/3 | 0/3 | 0/1 |
 | S17 | Morning Brief | floor green | 3/3 | 0/3 | 0/1 |
 | S18 | Mic & Speaker | complete for now | 4/4 | 0/3 | 0/1 |
@@ -4148,27 +4318,27 @@ green, `E` = elite green.
 | S29 | Automation & Workflow | floor green | 4/4 | 0/3 | 0/1 |
 | S30 | Persistent Memory | structured badly | 3/3 | 0/9 | 0/2 |
 | S31 | Self-Monitoring | complete for now | 4/4 | 0/6 | 0/1 |
-| S32 | Redundancy & Failover | partly missing | 2/4 | 0/3 | 0/1 |
+| S32 | Redundancy & Failover | partly missing | 4/4 | 0/3 | 0/1 |
 | S33 | Goal & Project Mgmt | floor green | 3/3 | 0/3 | 0/1 |
-| S34 | Health & Wellness | half-built | 0/3 | 0/3 | 0/1 |
+| S34 | Health & Wellness | half-built | 3/3 | 0/3 | 0/1 |
 | S35 | Crisis Response | half-built | 3/3 | 0/3 | 0/1 |
 | S36 | Security & Access | complete for now | 5/5 | 0/3 | 0/1 |
 | S37 | Privacy & Governance | half-built | 3/3 | 0/3 | 0/1 |
 | S38 | Communication Hub | structured badly | 3/3 | 0/3 | 0/1 |
 | S39 | Multi-Agent Delegation | thin | 3/3 | 0/3 | 0/1 |
-| S40 | Financial & Asset Mgmt | missing | 0/3 | 0/3 | 0/1 |
+| S40 | Financial & Asset Mgmt | missing | 3/3 | 0/3 | 0/1 |
 | S41 | Research & Synthesis | half-built | 3/3 | 0/3 | 0/1 |
 | S42 | Media Control | structured badly | 3/3 | 0/3 | 0/1 |
 | S43 | Presence & Continuity | half-built | 3/3 | 0/3 | 0/1 |
 | S44 | Ethics & Safety | complete for now | 4/4 | 0/3 | 0/1 |
 | S45 | Explainability | complete for now | 3/3 | 0/3 | 0/1 |
-| S46 | Predictive Analytics | missing | 0/3 | 0/3 | 0/1 |
-| S47 | Inventory & Resources | missing | 0/3 | 0/3 | 0/1 |
+| S46 | Predictive Analytics | missing | 3/3 | 0/3 | 0/1 |
+| S47 | Inventory & Resources | missing | 3/3 | 0/3 | 0/1 |
 | S48 | Multi-Agent Coordination | thin | 3/3 | 0/3 | 0/1 |
 | S49 | Fabrication Control | parked by decision | 0/3 | 0/0 | 0/0 |
-| S50 | Legacy Continuity | half-built | 0/3 | 0/3 | 0/1 |
+| S50 | Legacy Continuity | half-built | 3/3 | 0/3 | 0/1 |
 
-**Totals: 131 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 131 of 370.**
+**Totals: 151 of 157 floor tasks green, 0 of 161 raise tasks, 0 of 52 elite tasks — 151 of 370.**
 
 > The **424 engineering-days** figure at the top of this document, and the per-system `Effort F/R/E`
 > columns, predate the four raises added on 2026-09-12 (03.R5, 03.R6, 31.R5, 31.R6). They are

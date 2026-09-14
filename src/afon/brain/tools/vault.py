@@ -180,6 +180,37 @@ async def read_vault_note(args: dict) -> str:
         return tool_error("vault read", e)
 
 
+#: Files the one-way pull leaves in the root of the copy it maintains. `.vps-sync.ps1` is the pull
+#: script itself and `.sync.log` is its record; neither exists in the authoritative vault, because
+#: the authoritative host is the one being pulled FROM. They are evidence rather than declaration,
+#: which is the point: a flag can be set wrong on a laptop, and this cannot.
+REPLICA_MARKERS = (".vps-sync.ps1", ".sync.log")
+
+
+class VaultIsReplica(RuntimeError):
+    """Raised when a write would land in a copy that the next sync deletes."""
+
+
+def replica_reason(root: Path) -> str:
+    """Why this copy is a replica, or '' if it looks authoritative.
+
+    50.F3. The rule "writes go to the VPS, never the local replica" was documentation, and
+    documentation is not a mechanism: the only thing standing between a voice note and a directory
+    that gets nuked-and-replaced was `AFON_VAULT_WRITABLE` being set correctly on every host,
+    forever. Set it wrong once on the laptop and every note Afon saved would be written, reported
+    as saved, and then deleted by the next pull, with nothing anywhere recording that it happened.
+    The local copy already carries proof of what it is; this reads it.
+    """
+    for marker in REPLICA_MARKERS:
+        try:
+            if (root / marker).exists():
+                return (f"this copy carries {marker}, which the one-way sync leaves behind — "
+                        "anything written here is deleted by the next pull")
+        except OSError:
+            continue
+    return ""
+
+
 def write_note(note: str, content: str, folder: str = "Afon", mode: str = "create") -> tuple[str, str]:
     """Put a note in the vault and return (absolute path, a phrase naming where it went).
 
@@ -192,6 +223,12 @@ def write_note(note: str, content: str, folder: str = "Afon", mode: str = "creat
     root = _vault_root()
     if root is None:
         raise FileNotFoundError("no vault configured (AFON_VAULT_PATH)")
+    # Checked AFTER the flag and independently of it. The flag says what this host believes; this
+    # says what the directory is. Where they disagree the directory wins, because it is the thing
+    # that will actually lose the note.
+    why = replica_reason(root)
+    if why:
+        raise VaultIsReplica(why)
     folder = _SAFE_NAME.sub("", (folder or "Afon").replace("/", " ")).strip() or "Afon"
     stem = _SAFE_NAME.sub("", note or "").strip() or datetime.now().strftime("%Y-%m-%d note")
     if not stem.lower().endswith(".md"):
@@ -230,6 +267,16 @@ async def write_vault(args: dict) -> str:
         _, where = write_note(note, content, folder=args.get("folder") or "Afon",
                               mode=(args.get("mode") or "append").strip().lower())
         return f"Done, sir — wrote {where}."
+    except VaultIsReplica as e:
+        # LOUDLY, which is the word the floor uses. A refusal phrased as a polite sentence reads
+        # like an ordinary answer and leaves no trace; this one is recorded where failures are
+        # counted, and it names what to do instead.
+        from afon.shared import errors as _err
+
+        _err.record_op("vault", "write_vault", ok=False, detail=str(e),
+                       context={"note": (note or "")[:120]})
+        return ("I won't write that here, sir — " + str(e) + ". The vault's authoritative copy is "
+                "on the VPS; ask me there, or have the fleet write it.")
     except ValueError:
         return "That path is outside the vault, sir — I won't write it."
     except Exception as e:  # noqa: BLE001

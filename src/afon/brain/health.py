@@ -18,6 +18,9 @@ from __future__ import annotations
 from loguru import logger
 
 from afon.brain.proactive import Signal
+from afon.shared.degraded import Announcer
+from afon.shared.degraded import Mode as DegradedMode
+from afon.shared.degraded import current as degraded_mode
 from afon.config import settings
 
 
@@ -143,6 +146,42 @@ def summarize(snapshot: dict) -> str:
         return f"Everything I can see is healthy, sir — {seen}."
     parts = [f"{name} ({snapshot[name]['detail']})" for name in bad]
     return "I'm partly degraded, sir: " + "; ".join(parts) + "."
+
+
+#: 32.F3 — announce-once state for the degraded mode this host is in. Module-level because a
+#: mode is a property of the process, and a fresh announcer per tick would announce every tick.
+_DEGRADED = Announcer()
+
+
+def mode_from(snapshot: dict) -> "DegradedMode":
+    """Which declared mode this host is in, from what the health check actually found.
+
+    The brain can see two of the three: the laptop (pc_link) and the network (the vault check is a
+    local read, but the ticker and task queue are not — if none of the remote checks can reach
+    anything, the network is the honest diagnosis rather than three coincidental failures).
+    """
+    edge_up = bool(snapshot.get("pc_link", {}).get("ok"))
+    remote = [snapshot.get(n, {}).get("ok") for n in ("ticker", "task_queue")]
+    network_up = any(r for r in remote) if remote else True
+    return degraded_mode(brain_up=True, edge_up=edge_up, network_up=network_up)
+
+
+async def degraded_signals() -> list[Signal]:
+    """32.F3 — one signal when this host ENTERS a degraded mode, and one when it leaves.
+
+    Not one per tick. A degraded mode repeated every tick is noise the owner learns to talk over,
+    and it is the recovery he actually needs to hear: without it he keeps working around a
+    limitation that has been gone for an hour.
+    """
+    try:
+        snap = await check()
+    except Exception:  # noqa: BLE001
+        return []
+    said = _DEGRADED.update(mode_from(snap))
+    if not said:
+        return []
+    return [Signal(key=f"degraded-{_DEGRADED.mode.name}", kind="health", urgency=0.75,
+                   message=said)]
 
 
 async def health_signals() -> list[Signal]:

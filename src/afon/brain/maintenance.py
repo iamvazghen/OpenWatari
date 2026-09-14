@@ -123,6 +123,14 @@ async def run_maintenance() -> str:
     # 37.F2 — retention is enforced HERE, in the job that already runs daily, rather than being a
     # number in a document. A policy nobody executes is a promise to the owner that is not kept.
     swept = sweep_retention()
+    # 47.F1 — take a reading of Afon's own consumables in the job that already runs daily. A run
+    # rate cannot form from a table nobody writes to, and these are numbers he can read himself.
+    try:
+        from afon.brain.stock import seed_self
+
+        seed_self()
+    except Exception:  # noqa: BLE001 — a stock reading is never worth failing hygiene over
+        pass
     msg = (f"memory hygiene: deduped {c['removed']} fact(s) ({c['kept']} active), "
            f"archived {cap['archived']} over-cap fact(s) + {r['archived']} journal day(s)")
     if swept:

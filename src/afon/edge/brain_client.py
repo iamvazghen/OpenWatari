@@ -67,6 +67,11 @@ class BrainClient:
         self._ws = None                 # live connection or None
         self._stop = False
         self._state = "idle"
+        # 32.F3 — announce-once, so a long outage is said at the start and at the end and
+        # not on every reconnect attempt in between.
+        from afon.shared.degraded import Announcer
+
+        self._degraded = Announcer()
         # Error entries logged while the link was down, replayed on the next connect (see
         # ship_error). Bounded: a long outage must not grow this without limit, and the oldest
         # entries are the least useful — the ones that explain a failure are near the end. The
@@ -80,6 +85,17 @@ class BrainClient:
     @property
     def state(self) -> str:
         return self._state
+
+    def degraded(self) -> str:
+        """32.F3/32.F4 — what to say about the link to the brain, once per change.
+
+        The laptop's own read of the other host, not an assumption: `_state` is set by the
+        supervised loop from what actually happened on the socket. `brain-down` is the mode this
+        side is responsible for announcing, because it is the only side still able to speak.
+        """
+        from afon.shared.degraded import current
+
+        return self._degraded.update(current(brain_up=self._state == "connected"))
 
     def _set_state(self, state: str) -> None:
         if state != self._state:

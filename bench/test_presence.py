@@ -54,11 +54,16 @@ async def main() -> None:
     now = time.time()
 
     print("[1] ingest snapshots + screen-time aggregation by app/category")
-    for _ in range(3):
-        p.record("chrome", "YouTube - something", 2.0, ts=now)     # active browsing
-    for _ in range(2):
-        p.record("Code", "server.py - Afon", 4.0, ts=now)        # active coding
-    p.record("chrome", "idle tab", 300.0, ts=now)                  # away -> not counted
+    # Spaced ONE POLL APART, which is what the poller does. They used to share a single timestamp,
+    # which only worked because screen time was `sample count x the configured poll interval` — the
+    # estimate 34.F2 replaced. Credit is now the real interval between samples, so a fixture where
+    # six readings happen at the same instant correctly yields no time at all.
+    base = now - 360
+    for i in range(3):
+        p.record("chrome", "YouTube - something", 2.0, ts=base + i * 60)   # active browsing
+    for i in range(3, 5):
+        p.record("Code", "server.py - Afon", 4.0, ts=base + i * 60)        # active coding
+    p.record("chrome", "idle tab", 300.0, ts=base + 5 * 60)                # away -> not counted
     data = p.screen_time(0)
     check("chrome credited 3×60s", data["apps"].get("chrome") == 180, str(data["apps"]))
     check("Code credited 2×60s", data["apps"].get("Code") == 120, str(data["apps"]))

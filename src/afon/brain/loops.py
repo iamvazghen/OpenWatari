@@ -68,6 +68,10 @@ DECLARED: tuple[Loop, ...] = (
     Loop("daily-restore-drill", "restore the newest backup into a throwaway dir and prove it works",
          "cron", DAY, "daily at 05:00", 60_000,
          "unschedule the job", "afon.brain.scheduler"),
+    Loop("daily-portable-drill", "export the memory in a format readable without this program, "
+         "into an empty dir, and read it back",
+         "cron", DAY, "daily at 05:20", 60_000,
+         "unschedule the job", "afon.brain.scheduler"),
     Loop("daily-pattern-scan", "scan the command log and write new patterns as L1 facts",
          "cron", DAY, "daily at 04:30", 30_000,
          "unschedule the job", "afon.brain.scheduler"),

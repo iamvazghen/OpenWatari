@@ -85,3 +85,4 @@ scripts/deploy_vps.env
 
 # graphify code-graph output (rebuilt on commit; not versioned)
 /graphify-out/
+ledger.beancount

@@ -1,7 +1,7 @@
 """J2.8 — every autonomous job must REPORT what it did, and one of them never has.
 
 The owner's standing rule is that an autonomous action is never silent: what Afon did, why, and his
-reasoning. The scheduler's six `_fire_*` jobs are where that rule is actually kept or broken, and it
+reasoning. The scheduler's `_fire_*` jobs are where that rule is actually kept or broken, and it
 has been broken twice now in the same shape — work happens, a line goes into the log, the job counts
 itself done, and the owner is told nothing.
 
@@ -66,6 +66,11 @@ DECLARED = {
     # one morning it says the opposite; a failed restore drill means the archives are not
     # trustworthy, and that he must hear. `must_report` tracks the silent-success path, so False.
     "_fire_restore_drill": (False, "silent on success by design; it speaks up when a restore fails"),
+    # Same reading as its neighbour, and it rides the same slot twenty minutes later. The restore
+    # drill proves this program can restore its own archive; this one proves a person could read
+    # the export without this program at all. Both are checks, not acts, so success is silent.
+    "_fire_portable_drill": (False, "silent on success by design; it speaks up when an export "
+                                    "can't be read back"),
 }
 
 

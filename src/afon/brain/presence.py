@@ -46,6 +46,12 @@ def _tz() -> ZoneInfo:
     return ZoneInfo(settings.user_tz)
 
 
+#: A gap longer than this many polls means the poller was not running — a sleeping laptop, a
+#: brain restart, a closed lid. Time nobody observed is not screen time, and crediting it
+#: would turn an outage into productivity.
+_MAX_CREDIT_FACTOR = 3
+
+
 # Coarse app -> category map for a friendlier screen-time report. Substring match on the lowercased
 # process name; unknown apps fall into "other". Deliberately small — extend as needed.
 _CATEGORIES: dict[str, tuple[str, ...]] = {
@@ -191,33 +197,68 @@ class Presence:
     def screen_time(self, day_offset: int = 0) -> dict:
         """Aggregate one local day's samples into per-app / per-category active seconds.
 
-        Each ACTIVE sample (idle < threshold) credits ``presence_poll_seconds`` to its app — an
-        approximation, but a faithful one at a steady poll cadence. Returns
-        ``{"total": s, "apps": {app: s}, "categories": {cat: s}, "samples": n}``."""
+        34.F2 — **measured, not estimated.** Each active sample used to credit
+        ``settings.presence_poll_seconds`` to its app, which was wrong in two ways that both
+        mattered. The poller does not run at a steady cadence: the laptop sleeps, the brain
+        restarts, and a three-hour gap between two samples was credited as one poll interval of
+        screen time, which is right by accident. And the constant is applied at READ time, so
+        changing the setting silently rewrote every past day — yesterday's four hours became five
+        because a number in a config file moved.
+
+        Now the credit for a sample is the real interval to the NEXT sample, and a gap longer than
+        ``_MAX_CREDIT_FACTOR`` polls is not credited at all: nobody was watching, so nothing is
+        claimed. The uncredited time is returned rather than dropped, because "I wasn't looking for
+        two hours" and "you weren't at the screen for two hours" are different facts.
+
+        Returns ``{"total", "apps", "categories", "samples", "first", "last", "unwatched"}``.
+        """
         lo, hi = self._day_bounds(day_offset)
         per_poll = max(1, settings.presence_poll_seconds)
+        max_credit = per_poll * _MAX_CREDIT_FACTOR
         idle_max = settings.presence_idle_threshold_seconds
         apps: dict[str, float] = {}
         cats: dict[str, float] = {}
         total = 0.0
-        n = 0
+        unwatched = 0.0
+        rows: list[tuple[float, str, float]] = []
         try:
             with self._conn() as c:
-                rows = c.execute("SELECT app, idle FROM activity WHERE ts >= ? AND ts < ?", (lo, hi))
-                for r in rows:
-                    n += 1
-                    if (r["idle"] or 0) >= idle_max:
-                        continue  # user was away — don't count it as screen time
-                    app = (r["app"] or "unknown") or "unknown"
-                    apps[app] = apps.get(app, 0.0) + per_poll
-                    cats[_category(app)] = cats.get(_category(app), 0.0) + per_poll
-                    total += per_poll
+                rows = [(float(r["ts"]), (r["app"] or "unknown") or "unknown", float(r["idle"] or 0))
+                        for r in c.execute(
+                            "SELECT ts, app, idle FROM activity WHERE ts >= ? AND ts < ? ORDER BY ts",
+                            (lo, hi))]
         except sqlite3.Error:
             pass
-        return {"total": total, "apps": apps, "categories": cats, "samples": n}
+        # The typical interval, MEASURED from this day's own samples rather than read from the
+        # setting. It is what a hole and the final sample are credited, and taking it from the data
+        # is the whole point: with the configured constant as the fallback, changing
+        # `presence_poll_seconds` still moved a past day's total — the same defect one level down.
+        gaps = [rows[i + 1][0] - rows[i][0] for i in range(len(rows) - 1)]
+        usable = sorted(g for g in gaps if 0 < g <= max_credit)
+        typical = usable[len(usable) // 2] if usable else float(per_poll)
+
+        for i, (ts, app, idle) in enumerate(rows):
+            # The last sample of the day has no successor; credit one typical interval, no more.
+            gap = (rows[i + 1][0] - ts) if i + 1 < len(rows) else typical
+            if gap > max_credit:
+                unwatched += gap
+                gap = typical           # credit what was certainly observed, not the whole hole
+            if idle >= idle_max:
+                continue                # he was away — not screen time, however long the gap
+            apps[app] = apps.get(app, 0.0) + gap
+            cats[_category(app)] = cats.get(_category(app), 0.0) + gap
+            total += gap
+        return {"total": total, "apps": apps, "categories": cats, "samples": len(rows),
+                "first": rows[0][0] if rows else 0.0, "last": rows[-1][0] if rows else 0.0,
+                "unwatched": round(unwatched, 1)}
 
     def report(self, day_offset: int = 0) -> str:
-        """A spoken screen-time line for today (offset 0) or a past day."""
+        """A spoken screen-time line for today (offset 0) or a past day, WITH its coverage.
+
+        34.F2 — the window the samples actually cover is said out loud. A figure with no window is
+        read as a whole day, and on a day the poller only ran from four o'clock that is a much
+        smaller number than it appears to be.
+        """
         data = self.screen_time(day_offset)
         if not data["samples"]:
             when = "today" if day_offset == 0 else f"{-day_offset} day(s) ago"
@@ -227,9 +268,16 @@ class Presence:
         cats = sorted(data["categories"].items(), key=lambda kv: kv[1], reverse=True)[:4]
         when = "Today" if day_offset == 0 else f"{-day_offset} day(s) ago"
         head = f"{when} you've been active about {_fmt_dur(data['total'])}, sir."
+        span = (f" That's from what I saw between "
+                f"{datetime.fromtimestamp(data['first']).strftime('%H:%M')} and "
+                f"{datetime.fromtimestamp(data['last']).strftime('%H:%M')}.")
+        gap_part = ""
+        if data["unwatched"] > 0:
+            gap_part = (f" I wasn't watching for {_fmt_dur(data['unwatched'])} of that, so it's a "
+                        "floor, not a total.")
         cat_part = " By category: " + ", ".join(f"{c} {_fmt_dur(s)}" for c, s in cats) + "."
         app_part = " Top apps: " + ", ".join(f"{a} {_fmt_dur(s)}" for a, s in top) + "."
-        return head + cat_part + app_part
+        return head + span + gap_part + cat_part + app_part
 
     # ---- context: "is now a bad moment to interrupt?" (Phase 1) ------------------------
     def _fresh(self, snap: Snapshot | None, now: float) -> bool:

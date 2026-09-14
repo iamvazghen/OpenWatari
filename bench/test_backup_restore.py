@@ -195,6 +195,54 @@ def main() -> int:
           'schedule_restore_drill(self, hhmm: str = "05:00")' in sched_src,
           "drilling before the nightly backup verifies yesterday's archive")
 
+    print("\n[portable restore] 50.F2 — the export is restored into an empty environment, daily")
+    # A backup proves this program can read its own archive. That is a different property from the
+    # one continuity needs, which is that a PERSON can read the export without this program. The
+    # two drills therefore sit side by side and fail for different reasons.
+    import tempfile as _tf
+
+    from afon.protocols import portable as _P
+
+    with _tf.TemporaryDirectory(ignore_cleanup_errors=True) as _d:
+        _state = Path(_d) / "state"
+        (_state / "memory" / "learned").mkdir(parents=True)
+        (_state / "memory" / "learned" / "a.md").write_text("A fact worth keeping\nsource: told",
+                                                            encoding="utf-8")
+        _record = Path(_d) / "portable_drill.json"
+        _res = _P.run_export_drill(record_to=_record)
+        check("the drill runs end to end", isinstance(_res, dict) and "ok" in _res, str(_res)[:120])
+        check("...and files its verdict where a surface can read it", _record.is_file())
+        check("...which is what `last_drill` returns",
+              (_P.last_drill(_record) or {}).get("ok") == _res.get("ok"))
+        check("a passing drill counts files and bytes",
+              not _res.get("ok") or (_res.get("files", 0) > 0 and _res.get("bytes", 0) > 0), _res)
+        check("...and names the format it verified", _res.get("format") == _P.FORMAT, _res)
+
+        # The point of a DRILL: it must not verify the directory a previous run left behind.
+        _stale = Path(_d) / "stale-export"
+        _stale.mkdir()
+        (_stale / "MANIFEST.json").write_text('{"format": "afon-portable-1", "files": []}',
+                                              encoding="utf-8")
+        check("an export with no README does not verify",
+              not _P.verify(_stale)["ok"], _P.verify(_stale))
+        check("...because a folder nobody can interpret is not a preserved anything",
+              "README" in _P.verify(_stale).get("error", ""), _P.verify(_stale))
+        _wrong = Path(_d) / "old-format"
+        _wrong.mkdir()
+        (_wrong / "MANIFEST.json").write_text('{"format": "afon-portable-0", "files": []}',
+                                              encoding="utf-8")
+        check("an export in an older format is refused rather than half-read",
+              not _P.verify(_wrong)["ok"] and "expected" in _P.verify(_wrong).get("error", ""),
+              _P.verify(_wrong))
+
+    _sched_src = (Path(__file__).resolve().parents[1]
+                  / "src/afon/brain/scheduler.py").read_text(encoding="utf-8")
+    check("the portable drill has a scheduled job of its own", "_fire_portable_drill" in _sched_src)
+    check("...which the brain starts", "schedule_portable_drill()" in server_src,
+          "a scheduling method nobody calls is the dead-cron bug this file already closed once")
+    check("...after the backup drill, so the two logs read in order",
+          'schedule_portable_drill(self, hhmm: str = "05:20")' in _sched_src)
+
     print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
     return 0 if FAIL == 0 else 1
 

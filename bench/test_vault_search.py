@@ -136,5 +136,80 @@ async def main() -> None:
 
 asyncio.run(main())
 
+
+# --- 50.F3: the vault-write rule is enforced in code, not only in documentation ------------------
+# "Writes go to the VPS, never the local replica" was a sentence in a document, and a sentence is
+# not a mechanism. The only thing standing between a dictated note and a directory that gets
+# nuked-and-replaced was AFON_VAULT_WRITABLE being set correctly on every host, forever. Set it
+# wrong once on the laptop and every note would be written, reported as saved, and deleted by the
+# next pull — with nothing anywhere recording that it had happened.
+print("\n[50.F3] a replica refuses the write, whatever the flag says")
+import tempfile as _tf  # noqa: E402
+
+with _tf.TemporaryDirectory(ignore_cleanup_errors=True) as _d:
+    _real = Path(_d) / "authoritative"
+    _real.mkdir()
+    _replica = Path(_d) / "replica"
+    _replica.mkdir()
+    (_replica / ".vps-sync.ps1").write_text("# the pull script", encoding="utf-8")
+
+    check(vault.replica_reason(_real) == "", "an authoritative copy carries no marker",
+          vault.replica_reason(_real))
+    _why = vault.replica_reason(_replica)
+    check(bool(_why), "a copy holding the sync script is recognised as a replica")
+    check(".vps-sync.ps1" in _why, "...and says which marker gave it away", _why)
+    check("deleted by the next pull" in _why, "...and what will happen to a note written there",
+          _why)
+
+    _saved_path, _saved_flag = vault.settings.vault_path, vault.settings.vault_writable
+    try:
+        # The flag says yes; the directory says replica. The directory wins, because the directory
+        # is the thing that will actually lose the note.
+        vault.settings.vault_path, vault.settings.vault_writable = str(_replica), True
+        _raised = ""
+        try:
+            vault.write_note("A decision", "worth keeping")
+        except vault.VaultIsReplica as e:
+            _raised = str(e)
+        check(bool(_raised), "write_note refuses even with AFON_VAULT_WRITABLE=true")
+        check(not list(_replica.rglob("*.md")), "...and nothing was written")
+
+        _said = asyncio.run(vault.write_vault({"note": "A decision", "content": "worth keeping"}))
+        check("won't write that here" in _said, "the tool refuses loudly, not politely", _said[:90])
+        check("VPS" in _said, "...and names where the authoritative copy is", _said[:160])
+        check("record_op" in (Path(__file__).resolve().parents[1]
+                              / "src/afon/brain/tools/vault.py").read_text(encoding="utf-8"),
+              "...and the refusal is recorded where failures are counted",
+              "a refusal phrased as a pleasant sentence leaves no trace at all")
+
+        # And the authoritative copy still works, or the rule would just be a ban.
+        vault.settings.vault_path = str(_real)
+        _path, _where = vault.write_note("A decision", "worth keeping")
+        check(Path(_path).is_file(), "an authoritative copy still accepts the write")
+        check("worth keeping" in Path(_path).read_text(encoding="utf-8"),
+              "...with the content intact")
+
+        vault.settings.vault_writable = False
+        _off = ""
+        try:
+            vault.write_note("A decision", "worth keeping")
+        except PermissionError as e:
+            _off = str(e)
+        check("AFON_VAULT_WRITABLE" in _off, "the flag is still honoured on its own", _off)
+    finally:
+        vault.settings.vault_path, vault.settings.vault_writable = _saved_path, _saved_flag
+        vault._CACHE.clear()
+
+print("\n[50.F3] one writer, so the rule cannot be walked around")
+_src_root = Path(__file__).resolve().parents[1] / "src" / "afon"
+_offenders = []
+for _py in _src_root.rglob("*.py"):
+    if _py.name == "vault.py":
+        continue
+    _body = _py.read_text(encoding="utf-8", errors="ignore")
+    if "settings.vault_path" in _body and ("write_text(" in _body or "open(" in _body):
+        _offenders.append(_py.name)
+check(not _offenders, "no module outside tools/vault.py writes into the vault", str(_offenders))
+
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")
 sys.exit(1 if _fail else 0)

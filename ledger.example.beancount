@@ -1,0 +1,33 @@
+; ledger.beancount — the owner's holdings, in Beancount plain text (40.F1)
+;
+; Copy this to `ledger.beancount` (gitignored) and edit it. Afon READS this file and never
+; writes it: there is no buy, no sell, no transfer, and no broker credential anywhere in the
+; codebase. That is asserted by bench/test_portfolio.py, not merely true today.
+;
+; Why this format: it is plain text, so it diffs, it versions in git, and you can audit it
+; without Afon or any other program. Beancount is used as a FILE FORMAT here — nothing in the
+; package imports it — so you can also use the real `bean-query` CLI against it, or not.
+;
+; Afon reads the indented posting lines: account, amount, commodity. Anything it cannot read is
+; reported back to you rather than skipped, because a portfolio that silently drops the row it
+; did not understand produces a number that looks complete.
+
+2026-01-01 open Assets:Broker:Cash        EUR
+2026-01-01 open Assets:Broker:VWCE        VWCE
+2026-01-01 open Assets:Wallet:BTC         BTC
+
+2026-03-14 * "Broker" "Buy the index fund"
+  Assets:Broker:VWCE        12 VWCE
+  Assets:Broker:Cash  -1,440.00 EUR
+
+2026-05-02 * "Broker" "Top up"
+  Assets:Broker:VWCE         8 VWCE
+  Assets:Broker:Cash    -980.00 EUR
+
+2026-06-20 * "Transfer in"
+  Assets:Broker:Cash   3,000.00 EUR
+  Equity:Opening-Balances
+
+; Cash commodities (EUR, USD, GBP, …) are held at face value. Everything else is quoted live,
+; and every quote is spoken with its source and the time it was true — a price read on a Sunday
+; is Friday's close, and you should be told that rather than having to remember it.

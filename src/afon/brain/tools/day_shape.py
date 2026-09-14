@@ -84,12 +84,68 @@ async def day_clashes(args: dict) -> str:
     try:
         from afon.brain.schedule import clashes, spoken
 
-        return spoken(clashes(await raw_events(date=(args.get("date") or "").strip())))
+        events = await raw_events(date=(args.get("date") or "").strip())
+        said = spoken(clashes(events))
+        return said + _forecast_line(events)
     except Exception as e:  # noqa: BLE001
         return tool_error("schedule check", e)
 
 
+def _forecast_line(events: list[dict]) -> str:
+    """46.F1 — will the day FIT, as opposed to whether it contains a clash. Added here rather than
+    as a tool of its own: it answers the same question the owner already asked, and a per-turn
+    schema slot is charged on every turn whether or not anyone asks about the day.
+
+    Silent below the confidence floor (46.F3), and silent on any error — a forecast is the last
+    thing that should be able to break the answer it is decorating."""
+    try:
+        from afon.brain import forecast
+        from afon.brain.tasks import TASKS
+
+        open_tasks = len(TASKS.todos())
+        p = forecast.predict_day_fit(busy_minutes=forecast.busy_minutes(events),
+                                     open_tasks=open_tasks)
+        forecast.record(p)          # recorded whether or not it is spoken, or accuracy flatters
+        said = p.spoken()
+        return ("\n" + said) if said else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+async def recommend_next(_args: dict) -> str:
+    """15.F1/15.F2 — what to work on next, from his own open work, with the rule that decided it.
+
+    Lives in this group rather than in the core surface: "what should I do next" is a real question
+    and it is not asked on most turns, and a schema slot is paid for on every turn either way."""
+    try:
+        from afon.brain import recommend
+        from afon.brain.objectives import OBJECTIVES
+        from afon.brain.tasks import TASKS
+
+        active = {o.id for o in OBJECTIVES.active()}
+        out = recommend.next_task(TASKS.todos(), active_objectives=active)
+        if isinstance(out, recommend.Recommendation):
+            recommend.log(out)          # 15.F2 — logged before it is spoken, always
+        return out.spoken()
+    except Exception as e:  # noqa: BLE001
+        return tool_error("recommendation", e)
+
+
 SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "recommend_next",
+            "description": (
+                "What the owner should work on next, chosen from his own open to-dos by a stated "
+                "rule — overdue first, then due soonest, then work serving an objective he is "
+                "driving, then priority. Use for 'what should I do next', 'where do I start', "
+                "'what's most important right now'. Relay the REASON it gives; when it says there "
+                "is no basis, say that rather than picking something yourself."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -135,6 +191,7 @@ SCHEMAS = [
 ]
 
 HANDLERS = {
+    "recommend_next": recommend_next,
     "propose_routines": propose_routines,
     "adopt_routines": adopt_routines,
     "day_clashes": day_clashes,

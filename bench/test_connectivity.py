@@ -62,5 +62,55 @@ check(a._world_note() is None, "no fresh events -> no note (near-zero token cost
 
 if tmp.exists():
     tmp.unlink()
+
+# --- 32.F4: health of the OTHER host is known to each host, not assumed ------------------------
+# Each side used to infer the other from whatever it happened to be doing: the brain from a socket
+# being registered, the laptop from whether its last send raised. A registered socket is not a live
+# host — a laptop that closes its lid leaves one open for over a minute — and reporting "connected"
+# on the strength of it is the same overclaim as a status page that is green because it never
+# asked. Both sides now ASK, and both expose the answer so a degraded mode can be decided from it.
+print("\n[32.F4] each host asks about the other rather than assuming")
+import asyncio as _aio  # noqa: E402
+import inspect as _inspect  # noqa: E402
+
+from afon.brain.pc_link import PC_LINK  # noqa: E402
+
+check(hasattr(PC_LINK, "reachable"), "the brain can ASK whether the laptop is alive")
+check(_inspect.iscoroutinefunction(PC_LINK.reachable),
+      "...over the wire, not from a cached flag")
+check(hasattr(PC_LINK, "silent_for"), "the brain knows HOW LONG the laptop has been quiet")
+check(hasattr(PC_LINK, "active"), "...and whether a socket is even registered")
+
+_hp = (Path(__file__).resolve().parents[1] / "src/afon/brain/health.py").read_text(encoding="utf-8")
+check("PC_LINK.reachable()" in _hp,
+      "the health check asks, instead of trusting `active`")
+check("not a live host" in _hp or "closed its lid" in _hp,
+      "...and the reason a registered socket is not proof is written down")
+
+from afon.edge.brain_client import BrainClient  # noqa: E402
+
+check(hasattr(BrainClient, "state"), "the laptop knows the state of its link to the brain")
+check(hasattr(BrainClient, "degraded"), "...and turns it into a declared mode")
+
+_c = BrainClient.__new__(BrainClient)
+_c._state = "connected"
+from afon.shared.degraded import Announcer as _Ann  # noqa: E402
+from afon.shared.degraded import BRAIN_DOWN as _BD  # noqa: E402
+
+_c._degraded = _Ann()
+check(_c.degraded() == "", "a connected laptop announces nothing")
+_c._state = "reconnecting"
+_said = _c.degraded()
+check("can't reach my brain host" in _said, f"a dropped link is announced by the side that can speak ({_said[:50]!r})")
+check(_c.degraded() == "", "...once, not on every reconnect attempt")
+_c._state = "connected"
+check("Back to normal" in _c.degraded(), "and the recovery is announced too")
+check(_c._degraded.mode.name != _BD, "...leaving the mode cleared")
+
+# Neither side may decide the other is fine by default.
+_bc = (Path(__file__).resolve().parents[1] / "src/afon/edge/brain_client.py").read_text(encoding="utf-8")
+check("brain_up=self._state == \"connected\"" in _bc,
+      "the laptop derives brain-up from the real socket state, not from a constant")
+
 print(f"=== {_ok}/{_ok + _fail} checks passed ===")
 sys.exit(1 if _fail else 0)

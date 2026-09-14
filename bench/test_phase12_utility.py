@@ -83,6 +83,62 @@ def main() -> None:
                 "wiki_lookup", "define_word", "convert", "travel_time"}
     check("every utility is registered", expected <= names, str(sorted(expected - names)))
 
+    # --- 34.F2: screen time is MEASURED and dated, not estimated from a constant ---------------
+    # Each active sample used to credit `settings.presence_poll_seconds`, and that was wrong twice.
+    # The poller does not run at a steady cadence — the laptop sleeps, the brain restarts — so a
+    # three-hour hole between two samples was credited as one poll interval. And the constant was
+    # applied at READ time, so changing the setting silently rewrote every past day: yesterday's
+    # four hours became five because a number in a config file moved.
+    print("\n[34.F2] screen time comes from real intervals, and says what it covers")
+    import tempfile
+    import time as _time
+    from pathlib import Path as _Path
+
+    from afon.brain.presence import Presence
+    from afon.config import settings as _settings
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        saved_poll, saved_db = _settings.presence_poll_seconds, _settings.presence_db_path
+        try:
+            _settings.presence_poll_seconds = 60
+            _settings.presence_db_path = str(_Path(d) / "presence.sqlite")
+            tracker = Presence()
+            base = _time.time() - 6 * 3600
+            # A 60s cadence, matching the setting, then a three-hour hole, then two more.
+            rows = [(base + i * 60, "code.exe", 0) for i in range(4)]
+            rows += [(base + 3 * 3600 + i * 60, "code.exe", 0) for i in range(2)]
+            with tracker._conn() as c:
+                for ts, app, idle in rows:
+                    c.execute("INSERT INTO activity (ts, app, idle) VALUES (?,?,?)",
+                              (ts, app, idle))
+
+            data = tracker.screen_time(0)
+            check("every sample is seen", data["samples"] == 6, str(data["samples"]))
+            check("the three-hour hole is not credited as screen time", data["total"] <= 400,
+                  str(data["total"]))
+            check("...while the six minutes actually observed are", data["total"] >= 300,
+                  str(data["total"]))
+            check("the uncredited time is reported, not dropped", data["unwatched"] > 10000,
+                  str(data["unwatched"]))
+            check("the window the samples cover comes back",
+                  data["first"] > 0 and data["last"] > data["first"])
+
+            before = tracker.screen_time(0)["total"]
+            _settings.presence_poll_seconds = 600
+            after = tracker.screen_time(0)["total"]
+            check("changing the poll setting does not rewrite a past day",
+                  abs(after - before) < 600, f"{before} -> {after}")
+
+            _settings.presence_poll_seconds = 60
+            said = tracker.report(0)
+            check("the report names the window it saw", "between" in said, said[:120])
+            check("...and admits a gap makes it a floor", "floor, not a total" in said, said[:220])
+            check("a day with nothing recorded says nothing",
+                  "no activity recorded" in tracker.report(-5))
+        finally:
+            _settings.presence_poll_seconds = saved_poll
+            _settings.presence_db_path = saved_db
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

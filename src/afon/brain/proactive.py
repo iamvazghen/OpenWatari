@@ -825,9 +825,13 @@ def default_signal_sources() -> list[SignalSource]:
     """
     sources: list[SignalSource] = []
     try:
-        from afon.brain.health import health_signals
+        from afon.brain.health import degraded_signals, health_signals
 
         sources.append(health_signals)
+        # 32.F3 — entering or leaving a declared degraded mode is announced within one turn. A
+        # separate source from the per-component signals above because it fires on the TRANSITION,
+        # not on the state: the components say what is broken, this says what still works.
+        sources.append(degraded_signals)
     except Exception:  # noqa: BLE001 — health module optional until Phase X
         pass
     try:

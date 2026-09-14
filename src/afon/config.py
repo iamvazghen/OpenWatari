@@ -372,6 +372,9 @@ class Settings(BaseSettings):
     # at the moment it is needed so a long-running process cannot hold a stale list. Blank =
     # <repo>/emergency.md. Optional + gitignored, like contacts.md.
     emergency_contacts_path: str | None = None
+    # A Beancount plain-text ledger the owner controls (40.F1). Read only, never written.
+    # Blank = <repo>/ledger.beancount. Gitignored: it is his financial position.
+    ledger_path: str | None = None
 
     # --- Phase 3: knowledge & channel tools ---------------------------------------------
     # Every Phase 3 tool degrades gracefully: when its credentials are absent it returns a

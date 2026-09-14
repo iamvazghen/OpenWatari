@@ -82,7 +82,57 @@ async def activity_summary(args: dict) -> str:
         return tool_error("activity summary", e)
 
 
+async def import_health(args: dict) -> str:
+    """34.F1 — read an Apple Health export the owner already has. No API, no key, no enablement."""
+    try:
+        from afon.brain import vitals
+
+        path = (args.get("path") or "").strip()
+        if not path:
+            return ("Where's the export, sir? In the Health app: your profile picture, then "
+                    "Export All Health Data — then tell me the path to export.xml.")
+        read = vitals.read_apple_health(path)
+        if read.ok and read.readings:
+            vitals.save(read)
+        return read.spoken()
+    except Exception as e:  # noqa: BLE001
+        return tool_error("health import", e)
+
+
+async def vitals_trend(args: dict) -> str:
+    """34.F3 — one measure over the last week, as an observation. Never a diagnosis."""
+    try:
+        from afon.brain import vitals
+
+        kind = (args.get("kind") or "steps").strip().lower()
+        if kind not in set(vitals.TYPES.values()):
+            return (f"I don't track '{kind}', sir. I have "
+                    f"{', '.join(sorted(set(vitals.TYPES.values())))}.")
+        return vitals.recent(kind, days=int(args.get("days") or 7))
+    except Exception as e:  # noqa: BLE001
+        return tool_error("vitals trend", e)
+
+
 SCHEMAS = [
+    {"type": "function", "function": {
+        "name": "import_health",
+        "description": "Read an Apple Health export (export.xml) the owner has saved. Use for "
+                       "'import my health data', 'read my health export'. Works with no API and no "
+                       "account — every iPhone produces this file from the Health app.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Path to export.xml."}},
+            "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "vitals_trend",
+        "description": "One health measure over recent days, from imported data — steps, sleep, "
+                       "resting heart rate, weight. Report what it SAYS and what has changed. Do "
+                       "not name a condition, explain a cause, or suggest a treatment; say that is "
+                       "for someone qualified. Use for 'how have I been sleeping', 'how are my "
+                       "steps this week'.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string", "description": "steps, sleep, resting heart rate, weight."},
+            "days": {"type": "integer", "description": "How many days back. Default 7."}},
+            "required": []}}},
     {
         "type": "function",
         "function": {
@@ -106,4 +156,5 @@ SCHEMAS = [
     },
 ]
 
-HANDLERS = {"sleep_summary": sleep_summary, "activity_summary": activity_summary}
+HANDLERS = {"sleep_summary": sleep_summary, "activity_summary": activity_summary,
+            "import_health": import_health, "vitals_trend": vitals_trend}

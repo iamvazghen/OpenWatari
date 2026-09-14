@@ -275,6 +275,45 @@ def main() -> None:
     asyncio.run(test_confirm_gate())
     asyncio.run(test_vault_write())
     asyncio.run(test_progress_watchdog())
+    # --- 34.F3: health talk stays inside a stated boundary -------------------------------------
+    # Observations and patterns, never diagnosis. Not squeamishness: "you slept five hours, three
+    # nights running" is a fact Afon measured, and "you're not sleeping because of X" is a claim he
+    # invented that a person may act on instead of asking somebody qualified.
+    print("\n[34.F3] health talk: observations and patterns, never a diagnosis")
+    from pathlib import Path as _Path
+
+    from afon.brain import vitals as V
+
+    check("the boundary is stated in one place", len(V.BOUNDARY.split()) >= 15)
+    for phrase in ("name conditions", "explain causes", "advise on treatment", "qualified"):
+        check(f"...and it says {phrase!r}", phrase in V.BOUNDARY)
+
+    check("a plain observation passes",
+          V.diagnostic_language("You slept five hours, three nights running, sir.") == [])
+    check("...and so does a comparison with his own history",
+          V.diagnostic_language("Your resting heart rate is 8 above your average.") == [])
+    for bad in ("That's a sign of anaemia, sir.", "You have low iron.",
+                "The cause is your thyroid.", "You should take magnesium.",
+                "That's a symptom of overtraining."):
+        check(f"a diagnosis is caught: {bad!r}", bool(V.diagnostic_language(bad)))
+    # Read the rule from the function's own docstring rather than grepping the file for an
+    # exact sentence: the first version of this check matched a literal string complete with
+    # its line wrap, so rewrapping a comment turned it red while the behaviour was untouched.
+    _doc = " ".join((V.diagnostic_language.__doc__ or "").split()).lower()
+    check("the guard says, where it lives, that it reads Afon's words and not the owner's",
+          "never what the owner says" in _doc)
+    check("an empty history says so rather than inventing a trend",
+          "no steps on file" in V.recent("steps", path=_Path("no-such-vitals.json")))
+
+    from afon.brain.tools import tool_schemas as _schemas
+
+    described = {s["function"]["name"]: s["function"]["description"] for s in _schemas()}
+    check("the trend tool is advertised", "vitals_trend" in described)
+    check("...and its description carries the boundary to the model",
+          "Do not name a condition" in described.get("vitals_trend", ""))
+    check("...including where to send him instead",
+          "someone qualified" in described.get("vitals_trend", ""))
+
     print(f"\n=== {PASS}/{PASS + FAIL} checks passed ===")
     raise SystemExit(0 if FAIL == 0 else 1)
 

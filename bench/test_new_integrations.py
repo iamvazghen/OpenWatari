@@ -128,6 +128,62 @@ def main() -> None:
     finally:
         rem.set_reminder = orig
 
+    # --- 34.F1: the fitness source works with no API, no key and no enablement -----------------
+    # The tools were written against Google Fit, which needs a Cloud-project enablement nobody has
+    # done — so for months the capability existed and answered "not configured yet" to every
+    # question. The plan retired that dependency: ingest an OPEN export format, and naming the
+    # watch later changes no code. This is a real read of a real-shaped file.
+    print("\n[fitness] 34.F1 — a real read from an Apple Health export")
+    import tempfile
+    from pathlib import Path as _Path
+
+    from afon.brain import vitals as V
+
+    sample = '<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="en_GB">\n <Record type="HKQuantityTypeIdentifierStepCount" unit="count" startDate="2026-09-11 08:00:00 +0200" value="1200"/>\n <Record type="HKQuantityTypeIdentifierStepCount" unit="count" startDate="2026-09-11 18:00:00 +0200" value="3400"/>\n <Record type="HKQuantityTypeIdentifierRestingHeartRate" unit="count/min" startDate="2026-09-11 07:00:00 +0200" value="58"/>\n <Record type="HKCategoryTypeIdentifierSleepAnalysis" startDate="2026-09-11 00:30:00 +0200" value="HKCategoryValueSleepAnalysisAsleepCore"/>\n <Record type="HKQuantityTypeIdentifierStepCount" unit="count" startDate="not a date" value="99"/>\n</HealthData>\n'
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        x = _Path(d) / "export.xml"
+        x.write_text(sample, encoding="utf-8")
+        read = V.read_apple_health(x)
+        check("the export reads", read.ok, read.error)
+        check("steps are counted", read.kinds.get("steps") == 2, str(read.kinds))
+        check("...and summed per day", read.by_day("steps") == {"2026-09-11": 4600.0},
+              str(read.by_day("steps")))
+        check("heart rate averages rather than sums",
+              read.by_day("resting heart rate") == {"2026-09-11": 58.0},
+              str(read.by_day("resting heart rate")))
+        check("a record with an unparseable date is dropped, not guessed at",
+              read.kinds.get("steps") == 2, str(read.kinds))
+        check("a missing file is an answer, not a crash",
+              not V.read_apple_health(_Path(d) / "nope.xml").ok)
+        broken = _Path(d) / "broken.xml"
+        broken.write_text("<HealthData><Record", encoding="utf-8")
+        check("malformed XML says so", "isn't valid XML" in V.read_apple_health(broken).error,
+              V.read_apple_health(broken).error)
+
+        store = _Path(d) / "vitals.json"
+        V.save(read, store)
+        check("the daily figures are kept", V.kept("steps", store) == {"2026-09-11": 4600.0},
+              str(V.kept("steps", store)))
+        check("...and not the raw records", "1200" not in store.read_text(encoding="utf-8"),
+              "a copy of his whole health history answers no question worth asking")
+        check("a second import merges rather than replacing",
+              V.save(read, store).get("resting heart rate") == {"2026-09-11": 58.0})
+        check("a trend needs data, and says so when there is none",
+              "no steps on file" in V.recent("steps", path=_Path(d) / "empty.json"))
+
+    src = (Path(__file__).resolve().parents[1]
+           / "src/afon/brain/vitals.py").read_text(encoding="utf-8")
+    check("the parser streams rather than loading the file whole", "iterparse" in src,
+          "a real export is hundreds of megabytes")
+    check("...and releases each element as it goes", "elem.clear()" in src)
+    check("the reason is written down where the next reader will see it",
+          "takes the brain down on the owner's actual file" in src)
+
+    from afon.brain.tools import tool_handlers as _handlers
+
+    check("the import tool is registered", "import_health" in _handlers())
+    check("the trend tool is registered", "vitals_trend" in _handlers())
+
     print(f"\n=== {passed}/{passed + failed} checks passed ===")
     if failed:
         sys.exit(1)

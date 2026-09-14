@@ -240,6 +240,35 @@ async def _fire_restore_drill() -> None:
         0.85, "Afon — restore drill failed")
 
 
+@ticks("daily-portable-drill")
+async def _fire_portable_drill() -> None:
+    """50.F2 — write the portable export into an EMPTY directory and read it back.
+
+    Rides the same daily slot as the backup drill because it checks a different property and the
+    two fail for different reasons: the backup drill proves this program can restore its own
+    archive, and this proves a person could read the export without this program at all. An export
+    verified in place would pass on files left behind by a previous run, which is exactly what a
+    drill exists to catch, so the destination is a fresh temporary directory every time.
+
+    Silent on success, like its neighbour. A drill that congratulates itself daily teaches the
+    owner to ignore it."""
+    from afon.protocols.portable import run_export_drill
+
+    try:
+        res = await asyncio.to_thread(run_export_drill)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"portable export drill could not run: {e}")
+        return
+    if res.get("ok"):
+        logger.info(f"portable export drill OK: {res['files']} file(s), {res['bytes']} bytes")
+        return
+    logger.error(f"portable export drill FAILED: {res.get('error')}")
+    await _emit_proactive(
+        f"Sir, the portable export didn't come back readable this morning: {res.get('error')}. "
+        "That is the copy meant to outlive me, so it is worth a look.",
+        0.8, "Afon — portable export failed")
+
+
 async def _fire(message: str, push_phone: bool = True) -> None:
     """Top-level job target (must be importable for the SQLite jobstore). Delivers a reminder.
 
@@ -399,6 +428,18 @@ class Scheduler:
                       misfire_grace_time=3600, coalesce=True, replace_existing=True)
         logger.info(f"daily memory backup scheduled for {hh:02d}:{mm:02d}")
         return "daily-memory-backup"
+
+    def schedule_portable_drill(self, hhmm: str = "05:20") -> str | None:
+        """50.F2 — daily, twenty minutes after the backup drill so the two logs stay readable."""
+        from apscheduler.triggers.cron import CronTrigger
+
+        hh, mm = _parse_hhmm(hhmm)
+        sched = self._ensure()
+        sched.add_job(_fire_portable_drill, trigger=CronTrigger(hour=hh, minute=mm, timezone=USER_TZ),
+                      id="portable-export-drill", name="daily portable export drill",
+                      misfire_grace_time=3600, coalesce=True, replace_existing=True)
+        logger.info(f"portable export drill scheduled for {hh:02d}:{mm:02d}")
+        return "portable-export-drill"
 
     def schedule_restore_drill(self, hhmm: str = "05:00") -> str | None:
         """22.F4: daily restore drill, after the 03:30 backup and the 04:00/04:30 memory passes, so
