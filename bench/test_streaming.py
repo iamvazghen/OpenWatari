@@ -209,6 +209,28 @@ async def test_midstream_break_is_continued() -> None:
           "RESTARTED" not in said, repr(said))
     check("...and it is finished too", said.endswith("two meetings, sir."), repr(said))
 
+    # --- a break BEFORE the first token must still fail over ------------------------------------
+    # This is the case the first version of this gate missed, and `test_llm_failover_speed.py`
+    # caught it on the pre-push run: `got_any` was initialised inside the try, whose FIRST statement
+    # is the connect, so a provider that refuses the connection outright made the except clause read
+    # an unbound variable — UnboundLocalError instead of a failover. Nothing about "mid-utterance"
+    # was wrong; the guard simply ran on a path where it had no state yet.
+    llm4 = LLMClient()
+    llm4._chain = ["a", "b"]
+
+    async def dead_on_connect(**kwargs):
+        if kwargs["model"] == "a":
+            raise APITimeoutError(request=httpx.Request("POST", "http://localhost"))
+
+        async def gen():
+            yield _chunk("The fallback answered.")
+        return gen()
+
+    llm4._default.chat.completions.create = dead_on_connect
+    early = "".join([p async for p in llm4.stream([{"role": "user", "content": "hi"}])])
+    check("a model that fails before the first token still fails over",
+          early == "The fallback answered.", repr(early))
+
     # --- and when the continuation itself fails, we keep what we had ----------------------------
     llm3 = LLMClient()
     llm3._chain = ["a", "b"]

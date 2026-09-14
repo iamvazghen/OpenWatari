@@ -93,14 +93,14 @@ def _agent(llm):
 
 
 def cost_sections() -> None:
-    """02.R1 \u2014 tokens and money per intent class, and the honesty rules around the money."""
+    """02.R1 — tokens and money per intent class, and the honesty rules around the money."""
     import os
     import tempfile
 
     from afon.brain import cost as K
     from afon.brain import turn_trace as T
 
-    print("\n[8] 02.R1 \u2014 what a turn costs, split by the class of turn that caused it")
+    print("\n[8] 02.R1 — what a turn costs, split by the class of turn that caused it")
     check("the price table is dated, so a stale estimate is visibly stale",
           bool(K.PRICED_ON) and K.PRICED_ON.count("-") == 2, K.PRICED_ON)
     check("the longest matching prefix wins, so a family price cannot shadow a specific one",
@@ -129,11 +129,11 @@ def cost_sections() -> None:
     check("the priced half still produces a figure", agg["act"]["usd"] > 0)
     check("per-turn cost is reported, because the total alone cannot be acted on",
           agg["act"]["prefill_per_turn"] == 9000 and agg["chat"]["prefill_per_turn"] == 700)
-    check("the heaviest class is listed first \u2014 the HUD is read top-down",
+    check("the heaviest class is listed first — the HUD is read top-down",
           list(agg)[0] == "act")
     check("an empty history is an empty breakdown, not a crash", K.by_intent([]) == {})
 
-    print("\n[9] 02.R1 \u2014 the trace carries what the accounting needs")
+    print("\n[9] 02.R1 — the trace carries what the accounting needs")
     with tempfile.TemporaryDirectory() as td:
         os.environ["AFON_TRACE_DIR"] = td
         try:
@@ -164,7 +164,7 @@ def cost_sections() -> None:
         finally:
             os.environ.pop("AFON_TRACE_DIR", None)
 
-    print("\n[10] 02.R1 \u2014 /metrics counts the same split")
+    print("\n[10] 02.R1 — /metrics counts the same split")
     from afon.brain.metrics import METRICS
 
     counters = METRICS.snapshot()["counters"]

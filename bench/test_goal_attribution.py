@@ -145,7 +145,7 @@ async def main() -> None:
     finally:
         ttools.TASKS = real_store
 
-    print("\n[6] 01.R3 \u2014 the same question asked of a TURN rather than a task")
+    print("\n[6] 01.R3 — the same question asked of a TURN rather than a task")
     from afon.brain.objectives import turn_attribution, why_this_turn
 
     # `book` above already holds "Get Party Map beta launch-ready" and "Ship the Rently migration".
@@ -171,11 +171,11 @@ async def main() -> None:
     check("an attributed turn carries the objective's OWN WORDS, not its id",
           "Party Map beta launch-ready" in note and party.id not in note)
     check("...and says to answer 'why are you doing that' with it", "if he asks" in note.lower())
-    check("an ad-hoc turn carries nothing \u2014 most turns serve nothing standing",
+    check("an ad-hoc turn carries nothing — most turns serve nothing standing",
           why_this_turn("what time is it", book) == "")
 
     class _Dropped:
-        """active() still lists it; get() can no longer produce it \u2014 the daily driver can
+        """active() still lists it; get() can no longer produce it — the daily driver can
         complete or drop an objective between the two calls, and naming an objective he no longer
         holds is worse than saying nothing."""
 
@@ -192,7 +192,7 @@ async def main() -> None:
         encoding="utf-8")
     check("_prepare_turn consults it", "why_this_turn(user_text)" in src)
     _i = src.index("why_this_turn(user_text)")
-    check("...inside a try/except \u2014 an unreadable book is not a reason to lose the turn",
+    check("...inside a try/except — an unreadable book is not a reason to lose the turn",
           "except Exception" in src[_i:_i + 400])
     check("...and appends only when there is something to say", "if goal_note:" in src[_i:_i + 400])
 

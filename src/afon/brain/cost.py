@@ -13,7 +13,7 @@ Two rules hold this honest:
   makes the total a number nobody can trust. Unpriced turns are counted separately and reported.
 * **Prices are declared here, not fetched.** A voice assistant that calls a pricing API to render a
   HUD line has bought an outage. These are list prices in USD per million tokens, dated, and wrong
-  the moment a provider changes them \u2014 which is why the HUD says "est." and the row says when the
+  the moment a provider changes them — which is why the HUD says "est." and the row says when the
   table was last checked.
 
 ponytail: no currency library, no per-request billing records. Dollars are a float rounded at the
@@ -87,7 +87,7 @@ def by_intent(rows: list[dict]) -> dict[str, dict]:
 
 
 def _selfcheck() -> None:
-    """ponytail: the one runnable check \u2014 unknown is not free, and the split adds up."""
+    """ponytail: the one runnable check — unknown is not free, and the split adds up."""
     assert price_of("minimax:MiniMax-Text-01") == (0.30, 1.20)
     assert price_of("groq:llama-3.3-70b-versatile") == (0.59, 0.79), "longest prefix must win"
     assert price_of("groq:whatever-else") == (0.0, 0.0)
@@ -106,8 +106,8 @@ def _selfcheck() -> None:
     agg = by_intent(rows)
     assert agg["act"]["turns"] == 2 and agg["act"]["unpriced"] == 1
     assert agg["act"]["usd"] > 0 and agg["chat"]["usd"] > 0
-    assert list(agg) == ["act", "chat"], "heaviest class first \u2014 the HUD reads top-down"
-    print(f"selfcheck ok \u2014 {len(PRICES)} priced model families, table checked {PRICED_ON}")
+    assert list(agg) == ["act", "chat"], "heaviest class first — the HUD reads top-down"
+    print(f"selfcheck ok — {len(PRICES)} priced model families, table checked {PRICED_ON}")
     for cls, a in agg.items():
         print(f"  {cls:<9} {a['turns']} turns  {a['prefill_per_turn']} prefill/turn  "
               f"${a['usd']:.4f} ({a['unpriced']} unpriced)")

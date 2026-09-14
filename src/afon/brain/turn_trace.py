@@ -173,7 +173,7 @@ class TurnTrace:
     #: made up about his own certainty is the least trustworthy thing in the row.
     sources: list[str] = field(default_factory=list)
     confidence: str = "unstated"
-    #: 02.R1 \u2014 which model was charged, and for how much output. Money per intent class cannot be
+    #: 02.R1 — which model was charged, and for how much output. Money per intent class cannot be
     #: computed from the prefill alone, and attributing every turn to the PRIMARY model would be a
     #: lie on exactly the turns that cost most: a failover answers on a different, differently
     #: priced model, and those are the slow expensive ones worth seeing.
@@ -196,7 +196,7 @@ class TurnTrace:
             self.tools_fired.append(name)
 
     def note_model(self, model: str) -> None:
-        """02.R1 \u2014 the model that actually answered, recorded where the chain knows it."""
+        """02.R1 — the model that actually answered, recorded where the chain knows it."""
         if model:
             self.model = str(model)
 
@@ -330,7 +330,7 @@ def last() -> dict | None:
 
 
 def note_model(model: str) -> None:
-    """02.R1 \u2014 record the answering model on the turn in flight, if there is one."""
+    """02.R1 — record the answering model on the turn in flight, if there is one."""
     t = _CURRENT.get()
     if t is not None:
         t.note_model(model)
@@ -354,7 +354,7 @@ def _emit(row: dict) -> None:
     METRICS.observe("turn_total_ms", row["total_ms"])
     METRICS.observe("turn_prefill_tokens", float(row["prefill_tokens"]))
     METRICS.incr(f"intent.{row['intent']}")
-    # 02.R1 \u2014 the same breakdown /metrics already had for turn COUNTS, now for what they cost.
+    # 02.R1 — the same breakdown /metrics already had for turn COUNTS, now for what they cost.
     METRICS.incr(f"prefill_tokens.{row['intent']}", int(row.get("prefill_tokens") or 0))
     METRICS.incr(f"answer_tokens.{row['intent']}", int(row.get("answer_tokens") or 0))
 
@@ -409,7 +409,7 @@ def summary(n: int = 50) -> dict:
 
 
 def _cost_by_intent(rows: list[dict]) -> dict:
-    """02.R1 \u2014 tokens and estimated money per intent class, for the HUD.
+    """02.R1 — tokens and estimated money per intent class, for the HUD.
 
     Carries `priced_on` and `estimate` with the numbers rather than beside them: a dollar figure
     that travels without the date its price table was checked gets read as a fact.

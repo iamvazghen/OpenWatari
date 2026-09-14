@@ -504,7 +504,7 @@ class LLMClient:
             # outright raises, and the trace records that turn as failed instead.
             from afon.brain.turn_trace import add_stage, note_model
             add_stage("llm", latency_ms)
-            note_model(model)   # 02.R1 \u2014 a failover is charged to the model that answered
+            note_model(model)   # 02.R1 — a failover is charged to the model that answered
         self.last_route = {
             "mode": mode,
             "answered_by": model,
@@ -894,6 +894,13 @@ class LLMClient:
         failures = 0
         for model in self._candidate_chain():
             client, model_name = self._resolve(model)
+            # Declared BEFORE the try. The `except` below reads `got_any` to decide whether the
+            # owner has already heard something, and the FIRST statement in the try is the connect —
+            # which is precisely the failure that must fall through to the next model. Initialising
+            # them inside the try made that path raise UnboundLocalError instead of failing over.
+            # Caught by test_llm_failover_speed.py on the pre-push run, which is what it is for.
+            got_any = False
+            said = ""              # 02.R3 — what the owner has actually heard so far
             try:
                 stream = await client.chat.completions.create(
                     model=model_name,
@@ -904,8 +911,6 @@ class LLMClient:
                 )
                 if model != self._chain[0]:
                     logger.warning(f"LLM streaming via fallback '{model}'")
-                got_any = False
-                said = ""              # 02.R3 \u2014 what the owner has actually heard so far
                 stripper = _ThinkStripper()  # strip a MiniMax <think> block from the text stream
                 # The FIRST token must arrive within the deadline, exactly as in stream_with_tools.
                 # This path had NO deadline at all: a bare `async for chunk in stream`. It is the
@@ -945,7 +950,7 @@ class LLMClient:
                 return
             except (*_FAILOVER, _EmptyResponse) as e:
                 last_err = e
-                # 02.R3 \u2014 this path had NO mid-utterance guard, so a break after the owner had
+                # 02.R3 — this path had NO mid-utterance guard, so a break after the owner had
                 # already heard the opening fell through to the next model, which answered from the
                 # beginning: the first sentence spoken twice. `stream_with_tools` has refused to do
                 # that for months; the pure-chat path, which is the commonest turn there is, never

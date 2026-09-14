@@ -159,7 +159,7 @@ def main() -> None:
     context_src = (ROOT / "src" / "afon" / "brain" / "context.py").read_text(encoding="utf-8")
     voice_skill = (ROOT / "skills" / "voice-style.md").read_text(encoding="utf-8")
 
-    check(persona_body.count("\u2014 Persona") == 1,
+    check(persona_body.count("— Persona") == 1,
           "the persona names itself exactly once",
           "two headers in one file is already two definitions")
 
@@ -196,7 +196,7 @@ def main() -> None:
     from afon.brain.context import build_system_prompt
 
     prompt = build_system_prompt()
-    check(prompt.count("\u2014 Persona") == 1,
+    check(prompt.count("— Persona") == 1,
           "the assembled prompt carries exactly one persona header",
           f"{prompt.count(chr(8212) + ' Persona')} persona headers in one prompt")
     check(prompt.count("Check before refusing") == 1,

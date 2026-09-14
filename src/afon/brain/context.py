@@ -224,7 +224,7 @@ def validate_vault(retries: int = 3, grace: float = 0.4) -> tuple[bool, str]:
 
 
 def stable_prefix() -> str:
-    """02.R2 \u2014 the leading bytes of the system prompt that do NOT change between turns.
+    """02.R2 — the leading bytes of the system prompt that do NOT change between turns.
 
     Exists so the gate can assert the property instead of re-deriving the section order, and so a
     future section has one obvious question to answer: does it belong before this line or after it.
@@ -251,11 +251,11 @@ def build_system_prompt() -> str:
     """
     persona = _apply_identity(_read(_persona_path()))
     parts: list[str] = []
-    # 02.R2 \u2014 anything that can differ between two turns of the same session goes in here and is
+    # 02.R2 — anything that can differ between two turns of the same session goes in here and is
     # appended LAST, so the bytes ahead of it are identical every time and a provider's prompt
     # cache can actually hit them. The learned digest rebuilds every
     # `memory_digest_refresh_every_turns` turns and the delegation hint moves as domains repeat;
-    # both used to sit in the MIDDLE, which invalidated the cache for everything after them \u2014
+    # both used to sit in the MIDDLE, which invalidated the cache for everything after them —
     # including the persona's second half, the Composio catalogue and the whole operating-rules
     # block. Order within the prompt is not free to choose, but this half of it was never chosen.
     volatile: list[str] = []
