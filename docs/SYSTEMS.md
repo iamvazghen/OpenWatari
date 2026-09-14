@@ -945,7 +945,7 @@ cannot own the turn.
       ≤20 presented, **and no worse than `intent_router` on the same 60**.
 - [x] 03.R2 Argument validation before dispatch, with a repair prompt on the first failure only.
       *gate:* `test_reminder_args.py` (14), `test_tool_error_handling.py` [03.R2] (82)
-      *done 2026-09-14:* `brain/tools/argcheck.py`, and **measuring first changed the design**. The
+      *done 2026-09-14:* `brain/argcheck.py`, and **measuring first changed the design**. The
       obvious build rejects a call that omits a `required` property; measured against the registry,
       that would have broken **eleven working tools**. `remember(content=…)`, `send_push(body=…)`,
       `set_reminder(what=…)`, `resolve_contact(who=…)` all work today, because `base.missing_arg`
